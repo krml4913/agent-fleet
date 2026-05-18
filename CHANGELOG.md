@@ -5,6 +5,28 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 4 — driver communication protocol (2026-05-19)
+
+Drivers can now report up to the user without going through the leader
+(design doc §7 — "leader は介在しない").
+
+- `fleet.task_context.resolve(...)` — figure out which task a driver-side
+  CLI call is acting on, from (1) explicit `--task-id`, (2) `FLEET_TASK_ID`
+  env var, (3) cwd inspection (`<state>/tasks/task-<id>/`).
+- `fleet.notify` — best-effort macOS Notification Center + Slack webhook
+  dispatch, configured per-project via `.fleet-state/notify.yaml`.
+  Failures warn-only, never raise.
+- `fleet ask "<question>"` — record `needs_input` event, flip task status
+  to `needs_input`, append to `questions.md`, fire notification.
+  Non-blocking; the driver re-checks `inbox.md` on its own cadence.
+- `fleet event emit <type> [--field K=V ...]` — append arbitrary audit
+  events to `events.jsonl` tagged with the current task id.
+- `fleet done [task-id]` — flip task status to `completed`, emit `done`
+  event. Real cleanup (worktree / branch / tmux window) is delegated to
+  workflow plugins (Phase 5).
+- Tests: 69 unittest cases pass total (+ Phase 4: task_context 6,
+  notify 5, ask 3, event 3, done 3).
+
 ### Phase 3 — topology YAML + `fleet spawn` (2026-05-19)
 
 `fleet` can now actually spawn a driver. End-to-end:

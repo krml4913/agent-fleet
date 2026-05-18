@@ -10,6 +10,9 @@ import sys
 from typing import Sequence
 
 from . import __version__
+from .commands import ask as ask_cmd
+from .commands import done as done_cmd
+from .commands import event as event_cmd
 from .commands import init as init_cmd
 from .commands import spawn as spawn_cmd
 from .commands import status as status_cmd
@@ -31,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     spawn_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
     topology_cmd.add_parser(sub)
+    ask_cmd.add_parser(sub)
+    event_cmd.add_parser(sub)
+    done_cmd.add_parser(sub)
     return parser
 
 
