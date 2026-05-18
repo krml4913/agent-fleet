@@ -11,6 +11,7 @@ from typing import Sequence
 
 from . import __version__
 from .commands import init as init_cmd
+from .commands import status as status_cmd
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True, metavar="<command>")
     init_cmd.add_parser(sub)
+    status_cmd.add_parser(sub)
     return parser
 
 
