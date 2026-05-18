@@ -1,0 +1,7 @@
+# Solo driver — one agent goes from spec to PR alone.
+name: solo
+description: One driver works the task end-to-end.
+roles:
+  - role: driver
+    agent: claude:sonnet
+user_approval: optional

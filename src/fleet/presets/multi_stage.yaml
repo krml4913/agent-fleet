@@ -1,0 +1,13 @@
+# Multi-stage — design with the user first, then implement, review, confirm.
+name: multi_stage
+description: Sequential pipeline with explicit user interaction in the design stage.
+stages:
+  - role: designer
+    agent: claude:opus
+    user_interaction: required
+  - role: implementer
+    agent: claude:sonnet
+  - role: reviewer
+    agent: codex:o4-mini
+  - role: user_review
+    actor: human
