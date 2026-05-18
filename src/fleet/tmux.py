@@ -44,10 +44,14 @@ def new_window(
     *,
     start_command: str | None = None,
     cwd: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> None:
     args = ["tmux", "new-window", "-t", session, "-n", window_name]
     if cwd:
         args.extend(["-c", cwd])
+    if env:
+        for k, v in env.items():
+            args.extend(["-e", f"{k}={v}"])
     if start_command:
         args.append(start_command)
     _run(args)
@@ -55,6 +59,24 @@ def new_window(
 
 def kill_window(session: str, window_name: str) -> None:
     _run(["tmux", "kill-window", "-t", f"{session}:{window_name}"])
+
+
+def load_buffer(buffer_name: str, source_path: str) -> None:
+    """Load a file into a named tmux buffer (overwrites if it already exists)."""
+    _run(["tmux", "load-buffer", "-b", buffer_name, "--", source_path])
+
+
+def paste_buffer(session: str, window: str, buffer_name: str) -> None:
+    target = f"{session}:{window}"
+    _run(["tmux", "paste-buffer", "-t", target, "-b", buffer_name])
+
+
+def delete_buffer(buffer_name: str) -> None:
+    """Best-effort buffer cleanup. Missing buffer is not an error."""
+    subprocess.run(
+        ["tmux", "delete-buffer", "-b", buffer_name],
+        capture_output=True,
+    )
 
 
 def send_keys(session: str, window: str, text: str, *, enter: bool = True) -> None:

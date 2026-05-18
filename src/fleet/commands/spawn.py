@@ -66,6 +66,22 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Write state but don't touch tmux. Useful in CI / tests.",
     )
+    p.add_argument(
+        "--auto-prompt",
+        action="store_true",
+        help=(
+            "After launching the agent CLI, wait --prompt-delay seconds and "
+            "auto-paste driver-prompt.md into the pane. Default: prompt is "
+            "preloaded into a tmux buffer for manual paste (safer)."
+        ),
+    )
+    p.add_argument(
+        "--prompt-delay",
+        type=float,
+        default=3.0,
+        metavar="SEC",
+        help="Seconds to wait before auto-paste when --auto-prompt is set (default: 3)",
+    )
     p.set_defaults(func=run)
 
 
@@ -189,26 +205,48 @@ def run(args: argparse.Namespace) -> int:
         tmux_mod.new_session(session)
     window = f"task-{args.task_id}"
     window_cwd = ctx.get("cwd") or task_dir
+    prompt_path = task_dir / "driver-prompt.md"
+    buffer_name = f"fleet-task-{args.task_id}"
+
     try:
-        tmux_mod.new_window(session, window, cwd=str(window_cwd))
-        # Launch the agent CLI; the prompt path is passed as an arg-style hint.
+        # Open the window with FLEET_* env so the driver can call
+        # `fleet ask` / `fleet event emit` without needing --task-id.
+        tmux_mod.new_window(
+            session,
+            window,
+            cwd=str(window_cwd),
+            env={
+                "FLEET_TASK_ID": args.task_id,
+                "FLEET_STATE_DIR": str(state_dir),
+            },
+        )
+
+        # Preload the driver-prompt into a named tmux buffer so it can be
+        # pasted on demand (manually with `C-b ]` or auto via --auto-prompt).
+        # This avoids the race where send-keys arrives before the CLI's TTY
+        # is ready.
+        tmux_mod.load_buffer(buffer_name, str(prompt_path))
+
+        # Launch the agent CLI.
         cli = agents_mod.cli_command(agent_spec)
         cli_quoted = " ".join(shlex.quote(p) for p in cli)
         tmux_mod.send_keys(session, window, cli_quoted)
-        # Paste the driver prompt as the first message after the CLI is up.
-        # For MVP we keep this naive: a short sleep would help in practice;
-        # tuning belongs to a later phase.
-        tmux_mod.send_keys(
-            session,
-            window,
-            f"cat {shlex.quote(str(task_dir / 'driver-prompt.md'))} | head -100",
-        )
+
+        if args.auto_prompt:
+            import time
+
+            time.sleep(max(0.0, args.prompt_delay))
+            tmux_mod.paste_buffer(session, window, buffer_name)
+            tmux_mod.send_keys(session, window, "", enter=True)
     except tmux_mod.TmuxError as e:
         print(f"warn: tmux setup partially failed: {e}", file=sys.stderr)
         return 0
 
     print(f"tmux: session={session} window={window}")
-    print(f"attach: tmux attach -t {session}:{window}")
+    print(f"attach:        tmux attach -t {session}:{window}")
+    if not args.auto_prompt:
+        print(f"paste prompt:  inside the pane press C-b ]")
+        print(f"           or: tmux paste-buffer -t {session}:{window} -b {buffer_name}")
     return 0
 
 

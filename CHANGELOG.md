@@ -5,6 +5,27 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 6 — spawn robustness: tmux env + prompt buffer (2026-05-19)
+
+Sharpens `fleet spawn` for real-world tmux use. The forge-era prompt
+race ("cat | head" sometimes lands before the agent TTY is ready) is
+structurally removed.
+
+- `fleet.tmux.new_window(..., env=...)` — pass `-e KEY=VAL` so each
+  spawned window inherits `FLEET_TASK_ID` and `FLEET_STATE_DIR`. Drivers
+  can now call `fleet ask` / `event emit` / `done` without `--task-id`.
+- `fleet.tmux.load_buffer` / `paste_buffer` / `delete_buffer` — wrap the
+  tmux paste-buffer machinery.
+- `fleet spawn` preloads `driver-prompt.md` into a named tmux buffer
+  (`fleet-task-<id>`). Default behavior shows manual paste instructions
+  (safer). `--auto-prompt [--prompt-delay SEC]` opts into the old
+  auto-paste after a delay.
+- `driver_prompt`: BASE updated to mention the `FLEET_*` env vars so
+  the driver knows it doesn't need `--task-id`.
+- Tests: 87 unittest cases pass (Phase 6 adds 4 tmux integration tests,
+  skipped if `tmux` isn't on PATH). The driver-prompt bloat tripwire
+  still holds (< 40 lines).
+
 ### Phase 5 — workflow plugin system + `bare` / `git_worktree` (2026-05-19)
 
 Spawn and done now run through a plugin hook layer (design doc §8). The
