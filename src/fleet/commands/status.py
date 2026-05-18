@@ -5,6 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import heartbeat
 from .. import state as state_mod
 from ..events import read_events
 
@@ -42,34 +43,52 @@ def run(args: argparse.Namespace) -> int:
 
     project = state_mod.load_project(state_dir)
     tasks = state_mod.list_tasks(state_dir)
+    events = read_events(state_dir / "events.jsonl")
+    last_seen = heartbeat.last_per_task(events)
 
+    workflow = project.get("workflow") or "bare"
     print(f"project: {project.get('name', '?')}")
     print(f"  state dir: {state_dir}")
     print(f"  created:   {project.get('created_at', '?')}")
     print(f"  fleet ver: {project.get('version', '?')}")
+    print(f"  workflow:  {workflow}")
+
+    needs_input = [t for t in tasks if t.get("status") == "needs_input"]
+    if needs_input:
+        print()
+        print(f"⚠  needs your input ({len(needs_input)}):")
+        for t in needs_input:
+            print(f"  task-{t.get('id', '?')}  {t.get('title', '-')}")
+
     print()
     print(f"tasks ({len(tasks)}):")
     if not tasks:
         print("  (none)")
     else:
         for t in tasks:
+            tid = t.get("id", "?")
+            seen = last_seen.get(tid, "—")
             print(
-                "  task-{id}  [{status}]  {title}  ({agent})".format(
-                    id=t.get("id", "?"),
+                "  task-{id}  [{status}]  {title}  ({agent}, {workflow}, seen {seen})".format(
+                    id=tid,
                     status=t.get("status", "-"),
                     title=t.get("title", "-"),
                     agent=t.get("agent", "-"),
+                    workflow=t.get("workflow", "-"),
+                    seen=seen,
                 )
             )
 
     if args.events > 0:
-        events = read_events(state_dir / "events.jsonl")
         print()
         print(f"recent events (last {args.events} of {len(events)}):")
         if not events:
             print("  (none)")
         else:
             for ev in events[-args.events :]:
-                print(f"  {ev.get('ts', '?')}  {ev.get('type', '?')}  {ev}")
+                tid = ev.get("task_id", "—")
+                print(
+                    f"  {ev.get('ts', '?')}  {ev.get('type', '?'):<14}  task-{tid}"
+                )
 
     return 0

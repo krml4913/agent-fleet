@@ -26,6 +26,9 @@ Rules:
   - Never edit dashboard.md; it is auto-generated.
   - If you need user input, you MUST call `fleet ask`. Writing the question
     into the pane alone will not reach anyone.
+  - Between long tool calls, emit a heartbeat:
+        fleet event emit heartbeat
+    so `fleet status` and the dashboard's "Last seen" column stay fresh.
   - When done, call `fleet done` so the task is marked complete.
 """
 

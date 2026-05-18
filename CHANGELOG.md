@@ -5,6 +5,33 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 8 — dashboard rebuild + heartbeat (2026-05-19)
+
+Dashboard becomes information-dense; drivers gain a "still alive"
+signal — without forge's 6-feature lifecycle daemon.
+
+- `fleet.heartbeat`:
+  - `parse_ts(ts)`, `humanize_age(seconds)` ("12s ago", "3h ago"…)
+  - `last_per_task(events)` — derive "last seen" per task from
+    events.jsonl. Append-only audit log means latest entry wins
+    naturally; no extra state needed.
+- `fleet.dashboard.render`:
+  - "⚠ Needs your input" highlight section above the task table when
+    any task has status `needs_input`.
+  - Task table gains **Workflow** + **Last seen** columns.
+  - "Recent events (last 10)" section at the bottom.
+  - Workflow shown in the header block too.
+- `fleet status` — same enrichment (needs-input call-out + workflow +
+  "seen" age + nicer event formatting).
+- `driver_prompt`: rule added — "between long tool calls, emit a
+  heartbeat (`fleet event emit heartbeat`)". Still under the 40-line
+  bloat tripwire.
+- Explicit non-goal: no daemon, no auto-cleanup. forge's lifecycle
+  layer (heartbeat / liveness / tamagotchi / janitor / custodian /
+  leader_context) is replaced with **"surface the data, let the human
+  decide"**. (design doc §10.2)
+- Tests: 105 unittest cases pass (Phase 8 adds heartbeat 9 + dashboard 5).
+
 ### Phase 7 — `fleet leader` (2026-05-19)
 
 The user-facing entry point from design doc §3 lands.
