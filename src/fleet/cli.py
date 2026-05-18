@@ -18,7 +18,9 @@ from .commands import event as event_cmd
 from .commands import inbox as inbox_cmd
 from .commands import init as init_cmd
 from .commands import leader as leader_cmd
+from .commands import log as log_cmd
 from .commands import preflight as preflight_cmd
+from .commands import send_prompt as send_prompt_cmd
 from .commands import spawn as spawn_cmd
 from .commands import status as status_cmd
 from .commands import topology as topology_cmd
@@ -40,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     leader_cmd.add_parser(sub)
     spawn_cmd.add_parser(sub)
     attach_cmd.add_parser(sub)
+    send_prompt_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
+    log_cmd.add_parser(sub)
     topology_cmd.add_parser(sub)
     workflow_cmd.add_parser(sub)
     ask_cmd.add_parser(sub)

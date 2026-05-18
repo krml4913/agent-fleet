@@ -5,6 +5,19 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 12 — `fleet log` + `fleet send-prompt` (2026-05-19)
+
+Observability + recovery shortcuts for the spawn flow.
+
+- `fleet log [task-id] [-n N] [--type T]` — tail `events.jsonl` with
+  optional task / type filters. The `--type` flag is repeatable
+  (e.g. `--type spawn --type done`).
+- `fleet send-prompt <task-id>` — re-load
+  `<state>/tasks/task-<id>/driver-prompt.md` into the named tmux
+  buffer and paste it into the task window. Companion to
+  `fleet spawn`'s default (manual-paste) behaviour.
+- Tests: 130 unittest cases pass (+5 log + 3 send_prompt).
+
 ### Phase 11 — `fleet attach` + `fleet inbox` (2026-05-19)
 
 Two everyday-use shortcuts so the leader doesn't have to memorize tmux
