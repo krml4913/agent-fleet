@@ -5,6 +5,19 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 11 — `fleet attach` + `fleet inbox` (2026-05-19)
+
+Two everyday-use shortcuts so the leader doesn't have to memorize tmux
+syntax or hand-edit `inbox.md`.
+
+- `fleet attach [<target>]`: shortcut for
+  `tmux attach -t fleet-<project>:<window>`. Target is `leader`
+  (default) or a task id (`fleet attach 1` → window `task-1`).
+- `fleet inbox <task-id> "<message>"`: append a timestamped block to
+  `<state>/tasks/task-<id>/inbox.md` and emit an `inbox_message`
+  event so the dashboard reflects it.
+- Tests: 122 unittest cases pass (+4 inbox + 3 attach).
+
 ### Phase 10 — README, CI, `fleet preflight` (2026-05-19)
 
 Project hygiene pass — anyone arriving via `git clone` now has a clear

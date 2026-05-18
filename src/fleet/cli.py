@@ -11,9 +11,11 @@ from typing import Sequence
 
 from . import __version__
 from .commands import ask as ask_cmd
+from .commands import attach as attach_cmd
 from .commands import cleanup as cleanup_cmd
 from .commands import done as done_cmd
 from .commands import event as event_cmd
+from .commands import inbox as inbox_cmd
 from .commands import init as init_cmd
 from .commands import leader as leader_cmd
 from .commands import preflight as preflight_cmd
@@ -37,10 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
     init_cmd.add_parser(sub)
     leader_cmd.add_parser(sub)
     spawn_cmd.add_parser(sub)
+    attach_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
     topology_cmd.add_parser(sub)
     workflow_cmd.add_parser(sub)
     ask_cmd.add_parser(sub)
+    inbox_cmd.add_parser(sub)
     event_cmd.add_parser(sub)
     done_cmd.add_parser(sub)
     cleanup_cmd.add_parser(sub)
