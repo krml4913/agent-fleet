@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.venv/
+*.egg-info/
+
+# fleet state when dogfooding agent-fleet itself
+.fleet-state/
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
