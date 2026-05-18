@@ -5,6 +5,20 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 10 — README, CI, `fleet preflight` (2026-05-19)
+
+Project hygiene pass — anyone arriving via `git clone` now has a clear
+on-ramp.
+
+- `fleet preflight` — verify Python ≥ 3.11, tmux, git, claude, codex.
+  Required tools missing → exit 1; optional tools missing → warn.
+- `.github/workflows/test.yml` — GitHub Actions runs `unittest` against
+  Python 3.11 / 3.12 / 3.13 on `push` and `pull_request`.
+- README rewritten: quick-start walkthrough, command catalogue (project
+  / leader / tasks / driver-side / configuration), repo layout, and
+  state-dir layout.
+- Tests: 115 unittest cases pass (+4 preflight).
+
 ### Phase 9 — `fleet cleanup` + workflow teardown (2026-05-19)
 
 Physical teardown is split from logical completion (`fleet done`).

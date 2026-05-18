@@ -16,6 +16,7 @@ from .commands import done as done_cmd
 from .commands import event as event_cmd
 from .commands import init as init_cmd
 from .commands import leader as leader_cmd
+from .commands import preflight as preflight_cmd
 from .commands import spawn as spawn_cmd
 from .commands import status as status_cmd
 from .commands import topology as topology_cmd
@@ -43,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     event_cmd.add_parser(sub)
     done_cmd.add_parser(sub)
     cleanup_cmd.add_parser(sub)
+    preflight_cmd.add_parser(sub)
     return parser
 
 
