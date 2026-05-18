@@ -11,6 +11,7 @@ from typing import Sequence
 
 from . import __version__
 from .commands import ask as ask_cmd
+from .commands import cleanup as cleanup_cmd
 from .commands import done as done_cmd
 from .commands import event as event_cmd
 from .commands import init as init_cmd
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     ask_cmd.add_parser(sub)
     event_cmd.add_parser(sub)
     done_cmd.add_parser(sub)
+    cleanup_cmd.add_parser(sub)
     return parser
 
 

@@ -59,3 +59,39 @@ def on_pre_spawn(ctx: dict[str, Any]) -> None:
 
 def on_post_done(ctx: dict[str, Any]) -> None:
     return None
+
+
+def on_cleanup(ctx: dict[str, Any]) -> None:
+    """Remove the per-task worktree + branch. Errors warn but don't raise."""
+    state_dir: Path = ctx["state_dir"]
+    task_id: str = ctx["task_id"]
+    project_root = Path(ctx.get("project_root") or state_dir.parent)
+    worktree = state_dir / "worktrees" / f"task-{task_id}"
+    branch = f"task/{task_id}"
+
+    if worktree.exists():
+        r = subprocess.run(
+            [
+                "git", "-C", str(project_root),
+                "worktree", "remove", "--force", str(worktree),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            print(
+                f"warn: git worktree remove failed: {r.stderr.strip()}",
+                file=sys.stderr,
+            )
+
+    # Delete the branch; tolerate "not found" / "unborn".
+    r = subprocess.run(
+        ["git", "-C", str(project_root), "branch", "-D", branch],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        # Branch may never have been committed onto; this is non-fatal.
+        msg = r.stderr.strip()
+        if "not found" not in msg and "no such branch" not in msg:
+            print(f"warn: git branch -D failed: {msg}", file=sys.stderr)

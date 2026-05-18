@@ -5,6 +5,25 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 9 — `fleet cleanup` + workflow teardown (2026-05-19)
+
+Physical teardown is split from logical completion (`fleet done`).
+
+- `fleet cleanup [task-id] [--archive] [--force]`:
+  * Runs the workflow plugin's `on_cleanup` hook.
+  * Kills the task's tmux window (if any) and drops its prompt buffer.
+  * Optionally archives `tasks/task-<id>/` to `tasks/_archive/task-<id>/`.
+  * Refuses non-terminal statuses (`completed`/`failed`/`cancelled`)
+    unless `--force` is passed.
+- `git_worktree` plugin gains `on_cleanup`:
+  * `git worktree remove --force` the worktree.
+  * `git branch -D task/<id>` (best-effort; missing branches are
+    tolerated).
+- Cleanup emits a `cleanup` event and rebuilds dashboard.md (archived
+  tasks disappear from `list_tasks` because `_archive/` is outside the
+  `task-*` glob).
+- Tests: 111 unittest cases pass (+5 cleanup + 1 git_worktree cleanup).
+
 ### Phase 8 — dashboard rebuild + heartbeat (2026-05-19)
 
 Dashboard becomes information-dense; drivers gain a "still alive"

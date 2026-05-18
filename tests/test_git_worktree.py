@@ -75,6 +75,39 @@ class GitWorktreeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             git_worktree.on_pre_spawn(dict(ctx))
 
+    def test_cleanup_removes_worktree_and_branch(self) -> None:
+        ctx: dict = {
+            "state_dir": self.state_dir,
+            "task_id": "9",
+            "project_root": self.project,
+        }
+        git_worktree.on_pre_spawn(ctx)
+        worktree = self.state_dir / "worktrees" / "task-9"
+        self.assertTrue(worktree.is_dir())
+
+        # Branch should exist.
+        r = subprocess.run(
+            ["git", "-C", str(self.project), "show-ref", "--verify",
+             "refs/heads/task/9"],
+            capture_output=True,
+        )
+        self.assertEqual(r.returncode, 0)
+
+        cleanup_ctx: dict = {
+            "state_dir": self.state_dir,
+            "task_id": "9",
+            "project_root": self.project,
+        }
+        git_worktree.on_cleanup(cleanup_ctx)
+
+        self.assertFalse(worktree.exists())
+        r = subprocess.run(
+            ["git", "-C", str(self.project), "show-ref", "--verify",
+             "refs/heads/task/9"],
+            capture_output=True,
+        )
+        self.assertNotEqual(r.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
