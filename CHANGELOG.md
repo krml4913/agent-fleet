@@ -5,6 +5,23 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 7 — `fleet leader` (2026-05-19)
+
+The user-facing entry point from design doc §3 lands.
+
+- `fleet leader [--project P] [--agent SPEC] [--attach]`:
+  Creates a detached tmux session `fleet-<project>` with a single
+  `leader` window in the project root and starts the agent CLI inside.
+  Default agent: `claude:sonnet`.
+- Single-instance per project: if the session already exists, prints
+  the attach command and exits. `--attach` execs into `tmux attach`.
+- Leader window inherits `FLEET_PROJECT` and `FLEET_STATE_DIR` env
+  vars; cwd is set to the project root.
+- `tmux.new_session(..., cwd=..., env=...)` extended to accept both.
+- Emits a `leader_start` event with the chosen agent + session name.
+- Tests: 90 unittest cases pass (+3 leader tests, 2 skipped if `tmux`
+  missing).
+
 ### Phase 6 — spawn robustness: tmux env + prompt buffer (2026-05-19)
 
 Sharpens `fleet spawn` for real-world tmux use. The forge-era prompt

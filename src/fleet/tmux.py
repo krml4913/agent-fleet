@@ -29,9 +29,21 @@ def session_exists(session: str) -> bool:
     return r.returncode == 0
 
 
-def new_session(session: str, *, window_name: str = "leader") -> None:
+def new_session(
+    session: str,
+    *,
+    window_name: str = "leader",
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
     """Create a detached tmux session with one initial window."""
-    _run(["tmux", "new-session", "-d", "-s", session, "-n", window_name])
+    args = ["tmux", "new-session", "-d", "-s", session, "-n", window_name]
+    if cwd:
+        args.extend(["-c", cwd])
+    if env:
+        for k, v in env.items():
+            args.extend(["-e", f"{k}={v}"])
+    _run(args)
 
 
 def kill_session(session: str) -> None:

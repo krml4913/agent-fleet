@@ -14,6 +14,7 @@ from .commands import ask as ask_cmd
 from .commands import done as done_cmd
 from .commands import event as event_cmd
 from .commands import init as init_cmd
+from .commands import leader as leader_cmd
 from .commands import spawn as spawn_cmd
 from .commands import status as status_cmd
 from .commands import topology as topology_cmd
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True, metavar="<command>")
     init_cmd.add_parser(sub)
+    leader_cmd.add_parser(sub)
     spawn_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
     topology_cmd.add_parser(sub)
