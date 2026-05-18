@@ -11,6 +11,7 @@ import argparse
 import sys
 
 from .. import notify
+from .. import plugins as plugins_mod
 from .. import state as state_mod
 from .. import task_context
 from ..events import append_event
@@ -50,6 +51,17 @@ def run(args: argparse.Namespace) -> int:
 
     task["status"] = "completed"
     state_mod.save_task(state_dir, task_id, task)
+
+    workflow = plugins_mod.load_workflow(state_dir)
+    ctx: dict = {
+        "state_dir": state_dir,
+        "task_id": task_id,
+        "task": task,
+    }
+    try:
+        plugins_mod.run_hook(workflow, "on_post_done", ctx)
+    except Exception as e:  # noqa: BLE001 — plugin errors warn but don't fail done
+        print(f"warn: workflow post_done failed: {e}", file=sys.stderr)
 
     append_event(state_dir / "events.jsonl", "done", task_id=task_id)
 

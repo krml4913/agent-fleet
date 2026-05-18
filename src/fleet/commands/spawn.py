@@ -14,6 +14,7 @@ from typing import Any
 
 from .. import agents as agents_mod
 from .. import driver_prompt as dp
+from .. import plugins as plugins_mod
 from .. import state as state_mod
 from .. import topology as topology_mod
 from .. import tmux as tmux_mod
@@ -105,19 +106,40 @@ def run(args: argparse.Namespace) -> int:
 
     # Build state artifacts
     title = args.title or args.description.splitlines()[0][:80]
-    state_mod.save_task(
-        state_dir,
-        args.task_id,
-        {
-            "id": args.task_id,
-            "title": title,
-            "status": "spawning",
-            "agent": agent_spec,
-            "topology": args.topology,
-            "role": role_name,
-            "progress": "0/0",
-        },
-    )
+
+    # Workflow plugin: pre_spawn hook can attach extra task fields and/or
+    # override the spawn window's cwd (e.g. git_worktree points it at the
+    # freshly-created worktree).
+    workflow = plugins_mod.load_workflow(state_dir)
+    ctx: dict = {
+        "state_dir": state_dir,
+        "task_id": args.task_id,
+        "topology": args.topology,
+        "role": role_name,
+        "agent": agent_spec,
+        "description": args.description,
+        "title": title,
+        "project_root": state_dir.parent,
+        "dry_run": bool(args.dry_run),
+    }
+    try:
+        plugins_mod.run_hook(workflow, "on_pre_spawn", ctx)
+    except Exception as e:  # noqa: BLE001 — plugin errors are reportable
+        print(f"error: workflow pre_spawn failed: {e}", file=sys.stderr)
+        return 1
+
+    task_data = {
+        "id": args.task_id,
+        "title": title,
+        "status": "spawning",
+        "agent": agent_spec,
+        "topology": args.topology,
+        "role": role_name,
+        "progress": "0/0",
+        "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
+    }
+    task_data.update(ctx.get("task_extra", {}))
+    state_mod.save_task(state_dir, args.task_id, task_data)
 
     task_dir = state_mod.task_dir(state_dir, args.task_id)
     (task_dir / "inbox.md").write_text("")
@@ -166,8 +188,9 @@ def run(args: argparse.Namespace) -> int:
     if not tmux_mod.session_exists(session):
         tmux_mod.new_session(session)
     window = f"task-{args.task_id}"
+    window_cwd = ctx.get("cwd") or task_dir
     try:
-        tmux_mod.new_window(session, window, cwd=str(task_dir))
+        tmux_mod.new_window(session, window, cwd=str(window_cwd))
         # Launch the agent CLI; the prompt path is passed as an arg-style hint.
         cli = agents_mod.cli_command(agent_spec)
         cli_quoted = " ".join(shlex.quote(p) for p in cli)

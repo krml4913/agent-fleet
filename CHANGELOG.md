@@ -5,6 +5,35 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 5 — workflow plugin system + `bare` / `git_worktree` (2026-05-19)
+
+Spawn and done now run through a plugin hook layer (design doc §8). The
+core orchestrator stays development-flow-agnostic; git-specific bits
+live in an opt-in plugin.
+
+- `fleet.plugins` package:
+  - `load_workflow(state_dir)` resolves `project.yaml` ➜ plugin module.
+    Custom plugins under `<state>/plugins/<name>.py` shadow built-ins.
+  - `run_hook(module, hook_name, ctx)` — silent no-op if the hook
+    isn't defined; `ctx` is a mutable dict carrying state_dir, task_id,
+    topology, role, agent, etc.
+  - `list_builtin()` / `list_custom(state_dir)`.
+- Built-in plugins:
+  - `bare` — default no-op for non-git projects.
+  - `git_worktree` — creates `<state>/worktrees/task-<id>` on branch
+    `task/<id>` from the project root; overrides spawn cwd; records
+    worktree + branch in `task.yaml`.
+- `fleet workflow list | show <name> | set <name>` — inspect and pick
+  the active workflow plugin.
+- Hooks wired into existing commands:
+  - `fleet spawn`: calls `on_pre_spawn` before `save_task`; merges
+    `ctx['task_extra']` into the task; honors `ctx['cwd']` as the tmux
+    window's working directory.
+  - `fleet done`: calls `on_post_done` after status flip (failures
+    warn but never block).
+- Tests: 83 unittest cases pass (Phase 5 adds 14: plugins 7, workflow
+  CLI 5, git_worktree 2 — the last skipped if `git` is missing).
+
 ### Phase 4 — driver communication protocol (2026-05-19)
 
 Drivers can now report up to the user without going through the leader
