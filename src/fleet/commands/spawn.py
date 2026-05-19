@@ -257,6 +257,10 @@ def run(args: argparse.Namespace) -> int:
 
             time.sleep(max(0.0, args.prompt_delay))
             tmux_mod.paste_buffer(session, window, buffer_name)
+            # paste-buffer streams the buffer into the pane; without a short
+            # settle the Enter below races the paste and the CLI sees a
+            # half-finished prompt (observed empirically on claude-cli).
+            time.sleep(0.8)
             tmux_mod.send_keys(session, window, "", enter=True)
     except tmux_mod.TmuxError as e:
         print(f"warn: tmux setup partially failed: {e}", file=sys.stderr)
