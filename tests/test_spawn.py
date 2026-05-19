@@ -121,7 +121,7 @@ class SpawnTests(unittest.TestCase):
             self.project / ".fleet-state" / "tasks" / "task-4" / "task.yaml"
         ).read_text()
         self.assertIn("role: reviewer", text)
-        self.assertIn("agent: codex:o4-mini", text)
+        self.assertIn("agent: claude:opus", text)
 
     def test_unknown_role(self) -> None:
         result = run_fleet(

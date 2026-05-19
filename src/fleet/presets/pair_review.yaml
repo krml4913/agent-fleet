@@ -5,5 +5,5 @@ roles:
   - role: implementer
     agent: claude:sonnet
   - role: reviewer
-    agent: codex:o4-mini
+    agent: claude:opus
 user_approval: required
