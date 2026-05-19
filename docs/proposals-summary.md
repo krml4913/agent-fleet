@@ -17,6 +17,7 @@
 | 3 | `dialogue-trace-proposal.md` | 5 | 議論待ち | user→driver の answer/生入力を events.jsonl + dialogue.md に記録 |
 | 4 | `inbox-ack-proposal.md` | 6 | 議論待ち | helper 経由 auto-ack + watermark event の段階導入 |
 | 5 | `prompt-structure-proposal.md` | 7 | 議論待ち | 規約 + 行数 cap + base 1 ファイル維持 |
+| 6 | `archive-retention-proposal.md` | backlog | 議論待ち | `refs/fleet-archive/task-<id>` で branch tip を git ref 永続化 + task.yaml に `archive_tip` |
 
 ---
 
@@ -70,6 +71,21 @@ event を導入。 message id は timestamp ベース。 inbox.md は据え置�
 role / workflow 別の分岐は将来必要になってから判断、 まず単一 base で持つ。
 規約は `docs/prompts/README.md` に書く。
 
+### 6. archive retention (backlog 項目)
+
+`fleet-agent cleanup --archive` は state file (`task.yaml` / `inbox.md` /
+`outbox.md` / `driver-prompt.md`) を `tasks/_archive/` に退避するが、
+worktree と branch は `git worktree remove --force` + `git branch -D` で
+完全消失。 branch tip の commit history も gc 期限で物理消失する。
+
+**推奨:** 案 B (detached ref + task.yaml metadata)。 cleanup 時に
+`refs/fleet-archive/task-<id>` で branch tip を ref 化、 git の gc から
+protect。 task.yaml に `archive_tip` / `archive_ref` / `archived_at` を
+追記。 `fleet-agent forget <id>` で個別 purge。 worktree tarball (案 C) は
+容量と §11 priority 3 (driver commit 責務) との競合で却下。 過去 archive
+の救済は諦め。 [[dialogue-trace-proposal]] / [[inbox-ack-proposal]] とは
+スコープが分かれており phase 2 で `messages/` ファイル群と同居する想定。
+
 ---
 
 ## 議論の進め方 (user 復帰時の想定)
@@ -88,7 +104,7 @@ role / workflow 別の分岐は将来必要になってから判断、 まず単
 
 - **driver 指示のファイルベース統一** — dialogue-trace / inbox-ack で議論中、 合意次第削除予定
 - **`pr-based-workflow` plugin の実装** — §11 priority 8 と同じ論点
-- **task archive 後の成果物保存** — dialogue-trace と関連 (dialogue ごと archive 含める設計)
+- **task archive 後の成果物保存** — `archive-retention-proposal.md` でカバー、 backlog からは合意次第削除予定
 
 ---
 
