@@ -8,6 +8,6 @@ stages:
   - role: implementer
     agent: claude:sonnet
   - role: reviewer
-    agent: codex:o4-mini
+    agent: claude:opus
   - role: user_review
     actor: human
