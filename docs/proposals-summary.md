@@ -18,6 +18,7 @@
 | 4 | `inbox-ack-proposal.md` | 6 | 議論待ち | helper 経由 auto-ack + watermark event の段階導入 |
 | 5 | `prompt-structure-proposal.md` | 7 | 議論待ち | 規約 + 行数 cap + base 1 ファイル維持 |
 | 6 | `archive-retention-proposal.md` | backlog | 議論待ち | `refs/fleet-archive/task-<id>` で branch tip を git ref 永続化 + task.yaml に `archive_tip` |
+| 7 | `pr-workflow-proposal.md` | 8 | 議論待ち | 新規 `pr_based.py` plugin、 auto-merge は不採用、 driver=commit / workflow=push・PR |
 
 ---
 
@@ -86,6 +87,18 @@ protect。 task.yaml に `archive_tip` / `archive_ref` / `archived_at` を
 の救済は諦め。 [[dialogue-trace-proposal]] / [[inbox-ack-proposal]] とは
 スコープが分かれており phase 2 で `messages/` ファイル群と同居する想定。
 
+### 7. pr-based-workflow plugin (§11 priority 8)
+
+`git_worktree` workflow は worktree + branch までで止まり、 commit / push /
+PR は誰の責務でもない (driver の自律判断か leader 代行)。 dogfooding で
+挙動が安定しなかった原因。
+
+**推奨:** 案 B (新規 `pr_based.py` plugin、 worktree 系 hook は git_worktree に
+委譲)。 **auto-merge は不採用** — PR 作成で止め、 merge は leader/user 判断に
+残す (memory の運用ルールと整合)。 §11 priority 3 (commit 責務) はここで
+決着させる: **driver=commit / workflow=push・PR・catch-all**。 hook API は
+拡張せず、 `post_done` の ctx に `project_root` / `task_dir` を足す最小改修。
+
 ---
 
 ## 議論の進め方 (user 復帰時の想定)
@@ -93,18 +106,23 @@ protect。 task.yaml に `archive_tip` / `archive_ref` / `archived_at` を
 1. **role-structure (priority 4)** から議論する流れが自然 — env / cli / 命名の話で他 proposal の前提
 2. **inbox-ack** と **dialogue-trace** はセットで議論できる (両方が events.jsonl と driver 通信の話)
 3. **prompt-structure** は他 3 proposal の集大成 — 1 行ずつ base.md に書きたい要求群に対する規律
-4. 合意がついたら **§11 priority 1-3 (root)** にようやく入れる:
+4. **pr-workflow** は §11 priority 3 (commit 責務) の決着案を内包 — root 議論の前哨
+5. 合意がついたら **§11 priority 1-3 (root)** にようやく入れる:
    - completed の定義
    - topology orchestration
-   - driver / workflow 責務分界
+   - driver / workflow 責務分界 (pr-workflow proposal の案がたたき台)
 
 ---
 
-## 関連 backlog 項目
+## backlog の状態
 
-- **driver 指示のファイルベース統一** — dialogue-trace / inbox-ack で議論中、 合意次第削除予定
-- **`pr-based-workflow` plugin の実装** — §11 priority 8 と同じ論点
-- **task archive 後の成果物保存** — `archive-retention-proposal.md` でカバー、 backlog からは合意次第削除予定
+`docs/backlog.md` は **完全に空** になった。 旧項目はすべて proposal 化 or
+実装済み:
+
+- driver 指示のファイルベース統一 → dialogue-trace + inbox-ack proposal
+- task archive 後の成果物保存 → archive-retention proposal
+- pr-based-workflow plugin → pr-workflow proposal (§11 priority 8)
+- spawn auto-paste / fleet --help split / driver-prompt md split → 実装済み
 
 ---
 
