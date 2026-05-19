@@ -33,16 +33,15 @@ git init -b main && echo hi > README.md && git add -A && git -c user.email=t@x -
 # Launch the leader pane (claude by default)
 /path/to/agent-fleet/fleet leader --attach
 
-# In a separate shell — spawn a driver for a task
-/path/to/agent-fleet/fleet spawn 1 "Implement a hello-world script."
+# In a separate shell — spawn a driver for a task (leader uses fleet-agent)
+/path/to/agent-fleet/fleet-agent spawn 1 "Implement a hello-world script."
 
 # Inspect overall state
 /path/to/agent-fleet/fleet status
 cat .fleet-state/dashboard.md
 
-# When the driver is done with the task
-/path/to/agent-fleet/fleet done 1
-/path/to/agent-fleet/fleet cleanup 1 --archive
+# When the driver is done with the task (leader cleanup)
+/path/to/agent-fleet/fleet-agent cleanup 1 --archive
 ```
 
 Requires Python ≥ 3.11. **No `pip install`** — any dependency we need
@@ -71,39 +70,38 @@ is vendored under `vendor/`.
 
 ## Commands
 
-### Project / leader
+### `fleet` — human CLI
 
 | Command | Purpose |
 |---|---|
 | `fleet init --name <name> [path]` | Create `.fleet-state/` in `path` |
-| `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane |
-| `fleet status [path] [--events N]` | Print project info + tasks + recent events |
 | `fleet preflight` | Verify Python / tmux / git / agent CLIs |
-
-### Tasks (from the leader / your shell)
-
-| Command | Purpose |
-|---|---|
-| `fleet spawn <id> "<desc>" [--topology T] [--role R] [--agent A] [--auto-prompt]` | Spawn a driver for a new task |
-| `fleet cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
-
-### Driver-side (run inside a driver pane)
-
-`FLEET_TASK_ID` and `FLEET_STATE_DIR` are pre-set, so no `--task-id`
-is needed:
-
-| Command | Purpose |
-|---|---|
-| `fleet ask "<question>"` | Record `needs_input`, append `questions.md`, notify the user |
-| `fleet event emit <type> [--field K=V ...]` | Append an audit event |
-| `fleet done` | Mark the task `completed` |
-
-### Configuration
-
-| Command | Purpose |
-|---|---|
+| `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane |
+| `fleet attach [<target>]` | Attach to leader or a task pane |
+| `fleet status [path] [--events N]` | Print project info + tasks + recent events |
+| `fleet log [<id>] [-n N] [--type T]` | Tail `events.jsonl` |
 | `fleet topology list \| show <name>` | Inspect available topologies |
 | `fleet workflow list \| show <name> \| set <name>` | Inspect / pick the active workflow plugin |
+
+### `fleet-agent` — agent CLI (leader / driver internal use)
+
+Leader-side (run by the leader agent):
+
+| Command | Purpose |
+|---|---|
+| `fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A] [--auto-prompt]` | Spawn a driver for a new task |
+| `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
+| `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
+| `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
+
+Driver-side (run inside a driver pane — `FLEET_TASK_ID` / `FLEET_STATE_DIR` are
+pre-set, so no `--task-id` is needed):
+
+| Command | Purpose |
+|---|---|
+| `fleet-agent ask "<question>"` | Record `needs_input`, append `questions.md`, notify the user |
+| `fleet-agent event emit <type> [--field K=V ...]` | Append an audit event |
+| `fleet-agent done` | Mark the task `completed` |
 
 ---
 

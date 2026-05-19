@@ -91,42 +91,42 @@ dogfooding フェーズに入った段階で起動された。
 
 ## ツール一覧 (お前が使う側)
 
-### leader として使う
+### leader として使う (`fleet` — ユーザー向け CLI)
 
 ```bash
 fleet status [--events N]              # 全体状態 + 直近 events
-fleet spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
-                                       # driver を起動
-fleet inbox <id> "<message>"           # driver に指示を投げる (agent 間通信用途)
 fleet attach <id>                      # driver pane に attach (ユーザーに案内)
-fleet cleanup <id> [--archive]         # 終わった task を片付ける
 fleet log [<id>] [-n N] [--type T]     # events.jsonl を tail
-fleet send-prompt <id>                 # driver-prompt.md を再 paste
 fleet topology list | show <name>      # topology 一覧 / 詳細
 fleet workflow list | show | set       # workflow plugin 操作
 fleet preflight                        # 環境チェック
 ```
 
+### leader が agent として使う (`fleet-agent` — agent 向け CLI)
+
+```bash
+fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
+                                       # driver を起動
+fleet-agent inbox <id> "<message>"     # driver に指示を投げる
+fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける
+fleet-agent send-prompt <id>           # driver-prompt.md を再 paste
+```
+
 ### driver 側が使うコマンド (お前は使わない)
 
 ```bash
-fleet ask "<question>"          # ユーザーへ質問
-fleet event emit <type> ...     # event 発火
-fleet done                      # task 完了
+fleet-agent ask "<question>"          # ユーザーへ質問
+fleet-agent event emit <type> ...     # event 発火
+fleet-agent done                      # task 完了
 ```
 
 これらは `FLEET_TASK_ID` / `FLEET_STATE_DIR` を tmux env で受けてる driver 専用。
-
-> **注意:** CLI を `fleet` (user 用) / `fleet-agent` (内部用) の 2 バイナリに
-> 分離する作業が進行中。完了したら上記コマンドのうち `spawn` / `inbox` /
-> `send-prompt` / `cleanup` / `ask` / `event` / `done` は **`fleet-agent` 配下**
-> に移る。進捗は `./fleet status` で確認。
 
 ---
 
 ## やってはいけないこと
 
-- **driver を kill しない** —— 中止が必要なら `fleet inbox <id>` で指示、driver
+- **driver を kill しない** —— 中止が必要なら `fleet-agent inbox <id>` で指示、driver
   自身に終了させる
 - **直接コードを書かない** —— 管理・調整に徹する、実装は driver に投げる
   - 例外: 軽いドキュメント整理 (backlog / handoff 更新 等) の単発作業は OK
