@@ -339,27 +339,29 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 
 **A. 足元固め (dogfooding で露呈、 1 task が綺麗に流れる最小要件)**
 
-| 優先 | 論点 | 内容 |
-|---|---|---|
-| 1 | completed の定義 | `fleet-agent done` が role 単位の完了か task 全体の完了か未区別。 implementer が done を叩いた瞬間に task 全体が completed 扱いになって reviewer が走らない |
-| 2 | topology orchestration | pair_review / multi_stage が役割を自動で進行する仕組みが無い。 現状 leader が手で次の role を spawn してる。 責務は topology runner か leader か |
-| 3 | driver の commit / workflow 責務分界 | driver が commit するのか workflow plugin がするのか未定義。 現状 driver が自律判断 (= 大体しない) で、 leader が代行 commit している |
-| 4 | role の構造化 | driver が自分の role (implementer/reviewer/...) を文章ベース prompt で知る現状は dynamic prompt injection 廃止方針と矛盾しかけ。 env / task.yaml / 別仕組みで構造化したい |
-| 5 | dialogue trace | driver pane で user が直接打った内容、 および `fleet-agent ask` への user の回答が events.jsonl に残らない。 ask/answer は片側のみ記録、 audit / 引き継ぎ困難 |
-| 6 | inbox の read/ack 機構 | leader → driver の inbox.md を driver が読んだか確認する return path が無い |
+| 優先 | 論点 | 内容 | 提案ステータス |
+|---|---|---|---|
+| 1 | completed の定義 | `fleet-agent done` が role 単位の完了か task 全体の完了か未区別。 implementer が done を叩いた瞬間に task 全体が completed 扱いになって reviewer が走らない | 未着手 (root、 user 判断待ち) |
+| 2 | topology orchestration | pair_review / multi_stage が役割を自動で進行する仕組みが無い。 現状 leader が手で次の role を spawn してる。 責務は topology runner か leader か | 未着手 (root、 user 判断待ち) |
+| 3 | driver の commit / workflow 責務分界 | driver が commit するのか workflow plugin がするのか未定義。 現状 driver が自律判断 (= 大体しない) で、 leader が代行 commit している | 未着手 (root)。 ※ `pr-workflow-proposal.md` にたたき台あり |
+| 4 | role の構造化 | driver が自分の role (implementer/reviewer/...) を文章ベース prompt で知る現状は dynamic prompt injection 廃止方針と矛盾しかけ。 env / task.yaml / 別仕組みで構造化したい | **提案済み**: `docs/role-structure-proposal.md` |
+| 5 | dialogue trace | driver pane で user が直接打った内容、 および `fleet-agent ask` への user の回答が events.jsonl に残らない。 ask/answer は片側のみ記録、 audit / 引き継ぎ困難 | **提案済み**: `docs/dialogue-trace-proposal.md` |
+| 6 | inbox の read/ack 機構 | leader → driver の inbox.md を driver が読んだか確認する return path が無い | **提案済み**: `docs/inbox-ack-proposal.md` |
 
 **B. 既存の論点 (足元が固まってから着手)**
 
-| 優先 | 論点 | 内容 |
-|---|---|---|
-| 7 | prompt 構造 | static / minimal dynamic、 driver-prompt 肥大化の根本対策、 base prompt の構造化 |
-| 8 | workflow plugin 具体 | 何種類用意、 自作 spec、 hook 機構の API。 pr-based-workflow を含む |
-| 9 | preset topology | 同梱する preset の種類と YAML schema 確定 |
-| 10 | heartbeat / 固まり検知 | driver 固まり時の fallback の具体 |
-| 11 | 知見蓄積 | museum / vault / corpus / dna / memory の整理と統合先、 query 一本化 |
-| 12 | 通知経路 | macOS / slack / discord / web の優先順位と実装 |
+| 優先 | 論点 | 内容 | 提案ステータス |
+|---|---|---|---|
+| 7 | prompt 構造 | static / minimal dynamic、 driver-prompt 肥大化の根本対策、 base prompt の構造化 | **提案済み**: `docs/prompt-structure-proposal.md` |
+| 8 | workflow plugin 具体 | 何種類用意、 自作 spec、 hook 機構の API。 pr-based-workflow を含む | **提案済み**: `docs/pr-workflow-proposal.md` |
+| 9 | preset topology | 同梱する preset の種類と YAML schema 確定 | 未着手 |
+| 10 | heartbeat / 固まり検知 | driver 固まり時の fallback の具体 | 未着手 |
+| 11 | 知見蓄積 | museum / vault / corpus / dna / memory の整理と統合先、 query 一本化 | 未着手 |
+| 12 | 通知経路 | macOS / slack / discord / web の優先順位と実装 | 未着手 |
 
 各論点は議論を継続する。 グループ A は **2026-05-20 の dogfooding セッションで露呈** した穴で、 機能追加より先に潰す方針。
+
+priority 4〜8 は 2026-05-20 の dogfooding で **方針提案ドラフトまで作成済み** (`docs/proposals-summary.md` が入り口)。 実装は user/leader の議論で合意してから。 root の 1〜3 は提案も未着手で、 まず user 判断が要る。
 
 ---
 
