@@ -1,6 +1,6 @@
 """Derive 'last seen' info from events.jsonl.
 
-Drivers should call ``fleet event emit heartbeat`` (or any event —
+Drivers should call ``fleet-agent event emit heartbeat`` (or any event —
 heartbeat is just the convention) between long tool calls. This module
 exposes helpers that the dashboard and ``fleet status`` use to surface
 who's been quiet.

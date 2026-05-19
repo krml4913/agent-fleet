@@ -1,4 +1,4 @@
-"""``fleet spawn`` — open a tmux window for a new driver task.
+"""``fleet-agent spawn`` — open a tmux window for a new driver task.
 
 Phase 3b scope: spawn **one** driver, picked from the topology's first
 role/stage/candidate (unless ``--role`` overrides). True multi-role and
@@ -19,6 +19,15 @@ from .. import state as state_mod
 from .. import topology as topology_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file looking for the repo root (fleet-agent marker or .git)."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "fleet-agent").exists() or (parent / ".git").is_dir():
+            return parent
+    return here.parent.parent.parent.parent
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -215,7 +224,7 @@ def run(args: argparse.Namespace) -> int:
         # and avoid conflicts if multiple agent-fleet repos exist on the machine.
         import os
 
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent
+        repo_root = _find_repo_root()
         driver_env = {
             "FLEET_TASK_ID": args.task_id,
             "FLEET_STATE_DIR": str(state_dir),

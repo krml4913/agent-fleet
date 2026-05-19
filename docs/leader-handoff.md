@@ -18,7 +18,7 @@ dogfooding フェーズに入った段階で起動された。
 リーダーとしての責務:
 
 1. ユーザーからのタスク依頼を受ける (会話の主軸)
-2. 適切な topology と agent を選んで `fleet spawn` で driver を起動する
+2. 適切な topology と agent を選んで `fleet-agent spawn` で driver を起動する
 3. driver の進捗は **polling しない** —— `events.jsonl` / `dashboard.md` /
    通知の構造がユーザーに直接届く設計
 4. 必要時にユーザーへ高レベルの進捗報告

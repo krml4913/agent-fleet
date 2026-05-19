@@ -1,4 +1,4 @@
-"""``fleet event emit <type> [--field K=V ...]`` — record an audit event."""
+"""``fleet-agent event emit <type> [--field K=V ...]`` — record an audit event."""
 from __future__ import annotations
 
 import argparse

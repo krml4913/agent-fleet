@@ -1,4 +1,4 @@
-"""``fleet inbox <task-id> "<message>"`` — send a message to a driver's inbox.md.
+"""``fleet-agent inbox <task-id> "<message>"`` — send a message to a driver's inbox.md.
 
 A timestamped block is appended; the driver reads `inbox.md` on its
 own cadence (per the rules in `driver-prompt.md`).

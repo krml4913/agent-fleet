@@ -127,7 +127,7 @@ signal — without forge's 6-feature lifecycle daemon.
 - `fleet status` — same enrichment (needs-input call-out + workflow +
   "seen" age + nicer event formatting).
 - `driver_prompt`: rule added — "between long tool calls, emit a
-  heartbeat (`fleet event emit heartbeat`)". Still under the 40-line
+  heartbeat (`fleet-agent event emit heartbeat`)". Still under the 40-line
   bloat tripwire.
 - Explicit non-goal: no daemon, no auto-cleanup. forge's lifecycle
   layer (heartbeat / liveness / tamagotchi / janitor / custodian /

@@ -137,7 +137,7 @@ agent-fleet/
         task.yaml           # status / title / agent / workflow / ...
         inbox.md            # leader → driver
         outbox.md           # driver → leader
-        questions.md        # `fleet ask` records here
+        questions.md        # `fleet-agent ask` records here
         driver-prompt.md    # initial prompt sent to the agent
       _archive/             # cleanup --archive lands here
 ```
