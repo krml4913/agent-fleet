@@ -33,7 +33,7 @@ def cli_command(spec: str) -> list[str]:
     """
     vendor, model = parse_spec(spec)
     if vendor == "claude":
-        return ["claude", "--model", model]
+        return ["claude", "--dangerously-skip-permissions", "--model", model]
     if vendor == "codex":
-        return ["codex", "--model", model]
+        return ["codex", "--dangerously-bypass-approvals-and-sandbox", "-m", model]
     raise AssertionError("unreachable; parse_spec already filtered vendor")

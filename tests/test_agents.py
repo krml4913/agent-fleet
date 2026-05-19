@@ -38,13 +38,13 @@ class CliCommandTests(unittest.TestCase):
     def test_claude_cmd(self) -> None:
         self.assertEqual(
             agents.cli_command("claude:sonnet"),
-            ["claude", "--model", "sonnet"],
+            ["claude", "--dangerously-skip-permissions", "--model", "sonnet"],
         )
 
     def test_codex_cmd(self) -> None:
         self.assertEqual(
             agents.cli_command("codex:o4-mini"),
-            ["codex", "--model", "o4-mini"],
+            ["codex", "--dangerously-bypass-approvals-and-sandbox", "-m", "o4-mini"],
         )
 
 
