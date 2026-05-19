@@ -5,10 +5,6 @@
 
 ## priority
 
-- [ ] **spawn のデフォルト挙動見直し** — 現状 `--auto-prompt` を明示しないと
-      driver-prompt は tmux buffer にロードされるだけで手動 paste が要る。
-      実運用では煩雑なので、`--auto-prompt` をデフォルトにする/しないを判断する。
-      関連: `src/fleet/commands/spawn.py`, `fleet-agent send-prompt`
 - [ ] **`pr-based-workflow` plugin の実装** — driver done 時に自動 commit / push /
       `gh pr create` までやる workflow。design.md §8.3 で想定済み、§11 優先 8
       「workflow plugin 具体」の一部。現状 git_worktree は worktree + branch までで
