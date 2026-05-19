@@ -226,7 +226,7 @@ winner_decision: leader
 driver がユーザーに質問したい / 判断を仰ぎたい場合は **専用 CLI を呼ぶ**:
 
 ```bash
-fleet ask "<question>"
+fleet-agent ask "<question>"
 ```
 
 これが呼ばれると:
@@ -406,7 +406,14 @@ agent-fleet/
 
 ### 13.5 CLI entrypoint
 
-- 単一 script `./fleet` (shebang `#!/usr/bin/env python3`)
+- 2 entrypoint script (どちらも shebang `#!/usr/bin/env python3`):
+  - `./fleet`       — 人間 (user) が打つ: `init` / `preflight` / `leader` / `attach` /
+                      `status` / `log` / `topology` / `workflow`
+  - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
+                      `spawn` / `inbox` / `send-prompt` / `cleanup` /
+                      `ask` / `event` / `done`
+- 2 つは同じ `src/fleet/` module を import する shebang script。
+  「人間が打つもの」 と 「システムが自動で叩くもの」 を物理的に分離する設計。
 - pyproject.toml / setuptools entry_points は **MVP では使わない** (`pip install` 想定しない)
 - 将来 distribute する段階で pyproject 化する余地は残す
 

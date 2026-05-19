@@ -143,28 +143,33 @@ fc9eb8b feat: fleet attach + fleet inbox (Phase 11)
 
 ## ツール一覧 (お前が使う側)
 
-### leader として使う
+### leader として使う (`fleet` — ユーザー向け CLI)
 
 ```bash
 fleet status [--events N]              # 全体状態 + 直近 events
-fleet spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
-                                       # driver を起動
-fleet inbox <id> "<message>"           # driver に指示を投げる
 fleet attach <id>                      # driver pane に attach (ユーザーに案内)
-fleet cleanup <id> [--archive]         # 終わった task を片付ける
 fleet log [<id>] [-n N] [--type T]     # events.jsonl を tail
-fleet send-prompt <id>                 # driver-prompt.md を再 paste
 fleet topology list | show <name>      # topology 一覧 / 詳細
 fleet workflow list | show | set       # workflow plugin 操作
 fleet preflight                        # 環境チェック
 ```
 
+### leader が agent として使う (`fleet-agent` — agent 向け CLI)
+
+```bash
+fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
+                                       # driver を起動
+fleet-agent inbox <id> "<message>"     # driver に指示を投げる
+fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける
+fleet-agent send-prompt <id>           # driver-prompt.md を再 paste
+```
+
 ### driver 側が使うコマンド (お前は使わない)
 
 ```bash
-fleet ask "<question>"          # ユーザーへ質問
-fleet event emit <type> ...     # event 発火
-fleet done                      # task 完了
+fleet-agent ask "<question>"          # ユーザーへ質問
+fleet-agent event emit <type> ...     # event 発火
+fleet-agent done                      # task 完了
 ```
 
 これらは `FLEET_TASK_ID` / `FLEET_STATE_DIR` を tmux env で受けてる driver 専用。

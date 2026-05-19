@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""agent-fleet internal CLI entrypoint (for leader / driver agents).
+
+This thin shim adds ``src/`` to ``sys.path`` so the ``fleet`` package can be
+imported without ``pip install``. Heavy lifting lives in ``src/fleet/cli.py``.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE / "src"))
+sys.path.insert(0, str(_HERE / "vendor"))  # populated only if vendored deps are added
+
+from fleet.cli import main_agent  # noqa: E402  (sys.path tweak required before import)
+
+if __name__ == "__main__":
+    sys.exit(main_agent())

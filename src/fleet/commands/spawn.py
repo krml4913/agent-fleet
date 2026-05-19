@@ -209,16 +209,25 @@ def run(args: argparse.Namespace) -> int:
     buffer_name = f"fleet-task-{args.task_id}"
 
     try:
+        # Inject PATH so `fleet-agent` is available inside the driver pane
+        # without requiring the user to add the repo to their shell PATH.
+        # We use env injection (not system-wide install) to keep this repo-local
+        # and avoid conflicts if multiple agent-fleet repos exist on the machine.
+        import os
+
+        repo_root = Path(__file__).resolve().parent.parent.parent.parent
+        driver_env = {
+            "FLEET_TASK_ID": args.task_id,
+            "FLEET_STATE_DIR": str(state_dir),
+            "PATH": f"{repo_root}:{os.environ.get('PATH', '')}",
+        }
         # Open the window with FLEET_* env so the driver can call
-        # `fleet ask` / `fleet event emit` without needing --task-id.
+        # `fleet-agent ask` / `fleet-agent event emit` without --task-id.
         tmux_mod.new_window(
             session,
             window,
             cwd=str(window_cwd),
-            env={
-                "FLEET_TASK_ID": args.task_id,
-                "FLEET_STATE_DIR": str(state_dir),
-            },
+            env=driver_env,
         )
 
         # Preload the driver-prompt into a named tmux buffer so it can be
