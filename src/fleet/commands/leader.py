@@ -23,7 +23,7 @@ from .. import tmux as tmux_mod
 from ..events import append_event
 
 
-DEFAULT_LEADER_AGENT = "claude:sonnet"
+DEFAULT_LEADER_AGENT = "claude:opus"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
