@@ -13,11 +13,6 @@
       退避されるが、worktree は削除される。レビュー履歴や driver 出力を
       後で振り返るための保存手段が無い。branch tip 保持 or diff スナップショット
       の検討。
-- [ ] **driver-prompt の固定文を .py から別 .md に切り出す** — 現状
-      `src/fleet/driver_prompt.py` などに prompt 本文が Python 文字列として
-      直書きされていて読みづらい。`docs/prompts/` 等に markdown として配置し、
-      Python 側はテンプレ読み込み + 変数差し込みに徹する構成にしたい。
-      関連: §11 優先 7「prompt 構造」。
 - [ ] **driver への指示はファイルベースに統一** — `fleet-agent inbox` や `fleet-agent spawn` の
       description で文字列を直接送る現方式から、`tasks/task-<id>/messages/<n>.md`
       のようなファイルに書き出して driver に参照させる形に寄せる。やり取り全般を
