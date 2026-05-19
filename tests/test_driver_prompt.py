@@ -39,7 +39,7 @@ class DriverPromptTests(unittest.TestCase):
         # Be generous; we just want a tripwire if BASE balloons.
         self.assertLess(line_count, 40, f"driver-prompt got fat: {line_count} lines")
 
-    def test_mentions_fleet_ask_rule(self) -> None:
+    def test_mentions_fleet_agent_ask_rule(self) -> None:
         text = driver_prompt.render(
             task_id="1",
             description="x",
@@ -47,7 +47,7 @@ class DriverPromptTests(unittest.TestCase):
             role="driver",
             agent="claude:sonnet",
         )
-        self.assertIn("fleet ask", text)
+        self.assertIn("fleet-agent ask", text)
 
 
 if __name__ == "__main__":

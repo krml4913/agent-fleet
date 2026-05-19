@@ -1,4 +1,4 @@
-"""``fleet done [task-id]`` — mark a task as completed.
+"""``fleet-agent done [task-id]`` — mark a task as completed.
 
 This is the core-side completion mark only: it flips ``task.yaml``
 status, emits a ``done`` event, and fires a notification. Real cleanup

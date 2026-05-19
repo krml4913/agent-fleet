@@ -85,7 +85,7 @@ leader は driver の状態を polling したり、 needs_input を検知した�
 
 - 与えられたタスクの実装 (member subagent への委譲含む)
 - 進捗を events.jsonl に追記
-- ユーザー入力が必要になったら **`fleet ask`** 専用 CLI を呼んで届ける (詳細は §7)
+- ユーザー入力が必要になったら **`fleet-agent ask`** 専用 CLI を呼んで届ける (詳細は §7)
 - 完了時に自己クリーンアップ
 
 ### 4.3 ユーザーの責務
@@ -215,7 +215,7 @@ winner_decision: leader
 
 - fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` / `race` 等 (詳細は別途設計)
 - 各 project は `.fleet-state/topologies/` に自前 topology を定義可能
-- spawn 時に `fleet spawn --topology <name> ...` で選択
+- spawn 時に `fleet-agent spawn --topology <name> ...` で選択
 
 ---
 
@@ -226,7 +226,7 @@ winner_decision: leader
 driver がユーザーに質問したい / 判断を仰ぎたい場合は **専用 CLI を呼ぶ**:
 
 ```bash
-fleet ask "<question>"
+fleet-agent ask "<question>"
 ```
 
 これが呼ばれると:
@@ -341,11 +341,11 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 
 | 優先 | 論点 | 内容 |
 |---|---|---|
-| 1 | completed の定義 | `fleet done` が role 単位の完了か task 全体の完了か未区別。 implementer が done を叩いた瞬間に task 全体が completed 扱いになって reviewer が走らない |
+| 1 | completed の定義 | `fleet-agent done` が role 単位の完了か task 全体の完了か未区別。 implementer が done を叩いた瞬間に task 全体が completed 扱いになって reviewer が走らない |
 | 2 | topology orchestration | pair_review / multi_stage が役割を自動で進行する仕組みが無い。 現状 leader が手で次の role を spawn してる。 責務は topology runner か leader か |
 | 3 | driver の commit / workflow 責務分界 | driver が commit するのか workflow plugin がするのか未定義。 現状 driver が自律判断 (= 大体しない) で、 leader が代行 commit している |
 | 4 | role の構造化 | driver が自分の role (implementer/reviewer/...) を文章ベース prompt で知る現状は dynamic prompt injection 廃止方針と矛盾しかけ。 env / task.yaml / 別仕組みで構造化したい |
-| 5 | dialogue trace | driver pane で user が直接打った内容、 および `fleet ask` への user の回答が events.jsonl に残らない。 ask/answer は片側のみ記録、 audit / 引き継ぎ困難 |
+| 5 | dialogue trace | driver pane で user が直接打った内容、 および `fleet-agent ask` への user の回答が events.jsonl に残らない。 ask/answer は片側のみ記録、 audit / 引き継ぎ困難 |
 | 6 | inbox の read/ack 機構 | leader → driver の inbox.md を driver が読んだか確認する return path が無い |
 
 **B. 既存の論点 (足元が固まってから着手)**
@@ -422,7 +422,14 @@ agent-fleet/
 
 ### 13.5 CLI entrypoint
 
-- 単一 script `./fleet` (shebang `#!/usr/bin/env python3`)
+- 2 entrypoint script (どちらも shebang `#!/usr/bin/env python3`):
+  - `./fleet`       — 人間 (user) が打つ: `init` / `preflight` / `leader` / `attach` /
+                      `status` / `log` / `topology` / `workflow`
+  - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
+                      `spawn` / `inbox` / `send-prompt` / `cleanup` /
+                      `ask` / `event` / `done`
+- 2 つは同じ `src/fleet/` module を import する shebang script。
+  「人間が打つもの」 と 「システムが自動で叩くもの」 を物理的に分離する設計。
 - pyproject.toml / setuptools entry_points は **MVP では使わない** (`pip install` 想定しない)
 - 将来 distribute する段階で pyproject 化する余地は残す
 

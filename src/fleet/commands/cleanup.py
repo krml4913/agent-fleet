@@ -1,6 +1,6 @@
-"""``fleet cleanup [task-id]`` — physical teardown of a finished task.
+"""``fleet-agent cleanup [task-id]`` — physical teardown of a finished task.
 
-Conceptually distinct from ``fleet done``:
+Conceptually distinct from ``fleet-agent done``:
   * ``done``    flips the status to ``completed`` and emits an event.
   * ``cleanup`` is the destructive step: kill the tmux window, drop the
     driver-prompt buffer, run the workflow plugin's ``on_cleanup`` hook

@@ -1,4 +1,4 @@
-"""``fleet ask "<question>"`` — driver-side: ask the user a question.
+"""``fleet-agent ask "<question>"`` — driver-side: ask the user a question.
 
 Records a ``needs_input`` event, flips the task status to ``needs_input``,
 appends to ``questions.md``, and fires a notification. **Does not block.**

@@ -5,6 +5,50 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Phase 13 — CLI split: `fleet` + `fleet-agent` (2026-05-20)
+
+**Breaking change** — all commands are now split across two binaries.
+No backwards-compatibility aliases. One-time cutover.
+
+#### What changed
+
+| Before | After | Binary |
+|---|---|---|
+| `fleet init` | `fleet init` | `fleet` |
+| `fleet preflight` | `fleet preflight` | `fleet` |
+| `fleet leader` | `fleet leader` | `fleet` |
+| `fleet attach` | `fleet attach` | `fleet` |
+| `fleet status` | `fleet status` | `fleet` |
+| `fleet log` | `fleet log` | `fleet` |
+| `fleet topology` | `fleet topology` | `fleet` |
+| `fleet workflow` | `fleet workflow` | `fleet` |
+| `fleet spawn` | **`fleet-agent spawn`** | `fleet-agent` |
+| `fleet inbox` | **`fleet-agent inbox`** | `fleet-agent` |
+| `fleet send-prompt` | **`fleet-agent send-prompt`** | `fleet-agent` |
+| `fleet cleanup` | **`fleet-agent cleanup`** | `fleet-agent` |
+| `fleet ask` | **`fleet-agent ask`** | `fleet-agent` |
+| `fleet event` | **`fleet-agent event`** | `fleet-agent` |
+| `fleet done` | **`fleet-agent done`** | `fleet-agent` |
+
+#### New file
+
+`./fleet-agent` — shebang script at repo root, same structure as `./fleet`.
+Both import the same `src/fleet/` package; entrypoint decides which parser
+to build (`build_parser_user()` vs `build_parser_agent()`).
+
+#### PATH setup decision
+
+`fleet-agent spawn` injects `PATH=<repo>:$PATH` into the spawned tmux window's
+env. Rationale: repo-local injection keeps the binary self-contained without
+requiring the user to modify their shell profile, and avoids conflicts if
+multiple agent-fleet repos exist on the machine.
+
+#### Migration note for running driver / leader panes
+
+Any pane that was spawned before this change expects the old `fleet` command.
+Stop those panes manually (`fleet-agent cleanup <id>`) and re-spawn. There is
+no cutover path; WIP tasks should be restarted.
+
 ### Phase 12 — `fleet log` + `fleet send-prompt` (2026-05-19)
 
 Observability + recovery shortcuts for the spawn flow.
@@ -83,7 +127,7 @@ signal — without forge's 6-feature lifecycle daemon.
 - `fleet status` — same enrichment (needs-input call-out + workflow +
   "seen" age + nicer event formatting).
 - `driver_prompt`: rule added — "between long tool calls, emit a
-  heartbeat (`fleet event emit heartbeat`)". Still under the 40-line
+  heartbeat (`fleet-agent event emit heartbeat`)". Still under the 40-line
   bloat tripwire.
 - Explicit non-goal: no daemon, no auto-cleanup. forge's lifecycle
   layer (heartbeat / liveness / tamagotchi / janitor / custodian /

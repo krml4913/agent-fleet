@@ -5,7 +5,7 @@ on branch ``task/<id>`` from the project root. The spawn window's cwd
 is overridden to that worktree.
 
 On done: no-op for MVP. Worktree teardown will land in a follow-up
-phase (likely a separate ``fleet cleanup`` CLI rather than a hook —
+phase (likely a separate ``fleet-agent cleanup`` CLI rather than a hook —
 keeps the post_done path safe-by-default).
 """
 from __future__ import annotations
