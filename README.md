@@ -89,7 +89,7 @@ Leader-side (run by the leader agent):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A] [--auto-prompt]` | Spawn a driver for a new task |
+| `fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A] [--no-auto-paste]` | Spawn a driver for a new task (auto-pastes prompt by default) |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
 | `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |

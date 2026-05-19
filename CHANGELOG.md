@@ -5,6 +5,14 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### `fleet-agent spawn` auto-paste by default (2026-05-20)
+
+**Breaking change** — `--auto-prompt` flag removed; auto-paste is now the default.
+
+- `fleet-agent spawn <id> "..."` alone starts the driver immediately (no manual paste needed).
+- Use `--no-auto-paste` to restore the old behaviour (preloads buffer, manual paste via `C-b ]` or `fleet-agent send-prompt`).
+- Migration: remove any `fleet-agent send-prompt` calls that immediately follow `spawn` — they are now redundant.
+
 ### Phase 13 — CLI split: `fleet` + `fleet-agent` (2026-05-20)
 
 **Breaking change** — all commands are now split across two binaries.
