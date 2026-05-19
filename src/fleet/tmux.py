@@ -94,7 +94,8 @@ def delete_buffer(buffer_name: str) -> None:
 def send_keys(session: str, window: str, text: str, *, enter: bool = True) -> None:
     """Type ``text`` into the target window. If ``enter`` is true, press Enter after."""
     target = f"{session}:{window}"
-    _run(["tmux", "send-keys", "-t", target, text])
+    if text:
+        _run(["tmux", "send-keys", "-t", target, text])
     if enter:
         _run(["tmux", "send-keys", "-t", target, "Enter"])
 

@@ -5,6 +5,15 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### `fleet-agent spawn` auto-paste が Enter を送信するよう修正 (2026-05-20)
+
+- `tmux.send_keys` に空文字列を渡すと一部の tmux バージョンでエラーが発生し、
+  外側の `except TmuxError` に吸い込まれて Enter が未送信のまま return していた。
+- `send_keys` を修正: `text` が空の場合は最初の `_run` をスキップし、
+  `enter=True` の場合は必ず Enter を送信するよう保証した。
+- spawn の auto-paste パスは変更なし（`paste_buffer` → `send_keys("", enter=True)` の順序は維持）。
+- テスト 6 件追加: `send_keys` の mock-based 単体テスト 4 件 + spawn auto-paste の結合テスト 2 件。
+
 ### driver-prompt を markdown テンプレートに切り出し (2026-05-20)
 
 - `src/fleet/driver_prompt.py` に直書きされていたプロンプト本文を `docs/prompts/driver-base.md` に移動。
