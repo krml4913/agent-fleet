@@ -7,30 +7,13 @@ plugin hook, not here.
 """
 from __future__ import annotations
 
-BASE = """\
-You are a fleet driver — one agent inside a multi-agent team.
-Your job is the task described below. Work it to completion.
+from pathlib import Path
 
-Environment:
-  - FLEET_TASK_ID and FLEET_STATE_DIR are pre-set in this pane.
-  - `fleet-agent ask` / `fleet-agent event emit` / `fleet-agent done` resolve
-    the task automatically from those — no --task-id needed.
+_TEMPLATE_PATH = Path(__file__).parent.parent.parent / "docs" / "prompts" / "driver-base.md"
 
-Communication:
-  - inbox.md   — instructions from the leader; check it each turn.
-  - outbox.md  — append reports here at milestones.
-  - `fleet-agent ask "<question>"`           — record needs_input + notify user.
-  - `fleet-agent event emit <type> [...]`    — append an audit event.
 
-Rules:
-  - Never edit dashboard.md; it is auto-generated.
-  - If you need user input, you MUST call `fleet-agent ask`. Writing the
-    question into the pane alone will not reach anyone.
-  - Between long tool calls, emit a heartbeat:
-        fleet-agent event emit heartbeat
-    so `fleet status` and the dashboard's "Last seen" column stay fresh.
-  - When done, call `fleet-agent done` so the task is marked complete.
-"""
+def _load_base() -> str:
+    return _TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
 def render(
@@ -42,8 +25,9 @@ def render(
     agent: str,
 ) -> str:
     """Return the prompt string to send to the driver."""
+    base = _load_base()
     return (
-        BASE
+        base
         + "\n---\n"
         + f"task id:   task-{task_id}\n"
         + f"topology:  {topology_name}\n"

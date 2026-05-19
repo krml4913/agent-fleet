@@ -5,6 +5,12 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### driver-prompt を markdown テンプレートに切り出し (2026-05-20)
+
+- `src/fleet/driver_prompt.py` に直書きされていたプロンプト本文を `docs/prompts/driver-base.md` に移動。
+- `driver_prompt.py` はテンプレート読み込み + 変数差し込みのみに特化。振る舞いは不変。
+- `docs/prompts/driver-base.md` を直接編集することで markdown レビューとしてプロンプト変更が可視化される。
+
 ### `fleet-agent spawn` auto-paste by default (2026-05-20)
 
 **Breaking change** — `--auto-prompt` flag removed; auto-paste is now the default.
