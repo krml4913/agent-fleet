@@ -106,10 +106,10 @@ fleet preflight                        # 環境チェック
 
 ```bash
 fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
-                                       # driver を起動
+                                       # driver を起動 (prompt 自動 paste、即動き出す)
 fleet-agent inbox <id> "<message>"     # driver に指示を投げる
 fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける
-fleet-agent send-prompt <id>           # driver-prompt.md を再 paste
+fleet-agent send-prompt <id>           # driver-prompt.md を手動で再 paste
 ```
 
 ### driver 側が使うコマンド (お前は使わない)

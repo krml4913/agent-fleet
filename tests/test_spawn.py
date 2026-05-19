@@ -146,6 +146,29 @@ class SpawnTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("no .fleet-state", result.stderr)
 
+    def test_no_auto_paste_flag_is_accepted(self) -> None:
+        result = run_fleet(
+            "spawn",
+            "--project", str(self.project),
+            "--dry-run",
+            "--no-auto-paste",
+            "10", "Manual paste task",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tdir = self.project / ".fleet-state" / "tasks" / "task-10"
+        self.assertTrue(tdir.is_dir())
+
+    def test_auto_prompt_flag_removed(self) -> None:
+        result = run_fleet(
+            "spawn",
+            "--project", str(self.project),
+            "--dry-run",
+            "--auto-prompt",
+            "11", "Old flag test",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized", result.stderr.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

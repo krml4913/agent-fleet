@@ -76,14 +76,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Write state but don't touch tmux. Useful in CI / tests.",
     )
     p.add_argument(
-        "--auto-prompt",
-        action="store_true",
+        "--no-auto-paste",
+        action="store_false",
+        dest="auto_paste",
         help=(
-            "After launching the agent CLI, wait --prompt-delay seconds and "
-            "auto-paste driver-prompt.md into the pane. Default: prompt is "
-            "preloaded into a tmux buffer for manual paste (safer)."
+            "Disable the default auto-paste of driver-prompt.md into the pane. "
+            "The prompt is still preloaded into a tmux buffer for manual paste "
+            "(C-b ] or fleet-agent send-prompt)."
         ),
     )
+    p.set_defaults(auto_paste=True)
     p.add_argument(
         "--prompt-delay",
         type=float,
@@ -250,7 +252,7 @@ def run(args: argparse.Namespace) -> int:
         cli_quoted = " ".join(shlex.quote(p) for p in cli)
         tmux_mod.send_keys(session, window, cli_quoted)
 
-        if args.auto_prompt:
+        if args.auto_paste:
             import time
 
             time.sleep(max(0.0, args.prompt_delay))
@@ -262,9 +264,9 @@ def run(args: argparse.Namespace) -> int:
 
     print(f"tmux: session={session} window={window}")
     print(f"attach:        tmux attach -t {session}:{window}")
-    if not args.auto_prompt:
+    if not args.auto_paste:
         print(f"paste prompt:  inside the pane press C-b ]")
-        print(f"           or: tmux paste-buffer -t {session}:{window} -b {buffer_name}")
+        print(f"           or: fleet-agent send-prompt {args.task_id}")
     return 0
 
 
