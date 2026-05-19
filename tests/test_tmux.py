@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -65,6 +66,39 @@ class TmuxTests(unittest.TestCase):
         self.assertIn("doomed", tmux.list_windows(SESSION))
         tmux.kill_window(SESSION, "doomed")
         self.assertNotIn("doomed", tmux.list_windows(SESSION))
+
+
+class SendKeysMockTests(unittest.TestCase):
+    """Mock-based tests for send_keys — no live tmux session required."""
+
+    def _patch_run(self):
+        return unittest.mock.patch("fleet.tmux._run", return_value=None)
+
+    def test_empty_text_sends_only_enter(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.send_keys("sess", "win", "", enter=True)
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "sess:win", "Enter"]
+        )
+
+    def test_nonempty_text_sends_text_then_enter(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.send_keys("sess", "win", "hello", enter=True)
+        self.assertEqual(mock_run.call_count, 2)
+        mock_run.assert_any_call(["tmux", "send-keys", "-t", "sess:win", "hello"])
+        mock_run.assert_any_call(["tmux", "send-keys", "-t", "sess:win", "Enter"])
+
+    def test_enter_false_skips_enter(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.send_keys("sess", "win", "hello", enter=False)
+        mock_run.assert_called_once_with(
+            ["tmux", "send-keys", "-t", "sess:win", "hello"]
+        )
+
+    def test_empty_text_enter_false_sends_nothing(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.send_keys("sess", "win", "", enter=False)
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":

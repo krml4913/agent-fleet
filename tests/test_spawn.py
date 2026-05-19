@@ -1,10 +1,12 @@
 """Tests for ``fleet spawn`` (dry-run path — tmux not exercised)."""
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -168,6 +170,75 @@ class SpawnTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized", result.stderr.lower())
+
+
+class SpawnAutopasteEnterTests(unittest.TestCase):
+    """Verify that auto-paste sends Enter after pasting the driver-prompt."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        state.init_state(self.project / ".fleet-state", name="demo")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_auto_paste_sends_enter_after_paste(self) -> None:
+        from fleet.commands import spawn
+
+        args = argparse.Namespace(
+            project=str(self.project),
+            task_id="200",
+            description="auto-paste enter integration test",
+            topology="solo",
+            role=None,
+            agent=None,
+            title=None,
+            dry_run=False,
+            auto_paste=True,
+            prompt_delay=0.0,
+        )
+
+        with unittest.mock.patch("fleet.commands.spawn.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+            result = spawn.run(args)
+
+        self.assertEqual(result, 0)
+        mock_tmux.paste_buffer.assert_called_once()
+        # At least one send_keys call must carry enter=True (the post-paste Enter)
+        enter_calls = [
+            c for c in mock_tmux.send_keys.call_args_list
+            if c.kwargs.get("enter", True)
+        ]
+        self.assertTrue(enter_calls, "send_keys with enter=True not called after paste")
+
+    def test_no_auto_paste_skips_paste_and_enter(self) -> None:
+        from fleet.commands import spawn
+
+        args = argparse.Namespace(
+            project=str(self.project),
+            task_id="201",
+            description="no auto-paste test",
+            topology="solo",
+            role=None,
+            agent=None,
+            title=None,
+            dry_run=False,
+            auto_paste=False,
+            prompt_delay=0.0,
+        )
+
+        with unittest.mock.patch("fleet.commands.spawn.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+            result = spawn.run(args)
+
+        self.assertEqual(result, 0)
+        mock_tmux.paste_buffer.assert_not_called()
 
 
 if __name__ == "__main__":
