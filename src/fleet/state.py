@@ -10,11 +10,19 @@ adapt it to argparse.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# PyYAML (vendored or system) for task.yaml — supports nested stages structure.
+_VENDOR = Path(__file__).resolve().parent.parent.parent / "vendor"
+if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR))
+
+import yaml as _yaml
 
 from .events import utcnow_iso
 from .locking import atomic_write
-from . import simple_yaml
+from . import simple_yaml  # kept for flat project.yaml
 
 
 STATE_DIR_NAME = ".fleet-state"
@@ -101,42 +109,77 @@ def task_yaml_path(state_dir: Path, task_id: str) -> Path:
     return task_dir(state_dir, task_id) / "task.yaml"
 
 
-def list_tasks(state_dir: Path) -> list[dict[str, str]]:
+def list_tasks(state_dir: Path) -> list[dict]:
     tasks_dir = state_dir / "tasks"
     if not tasks_dir.is_dir():
         return []
-    out: list[dict[str, str]] = []
+    out: list[dict] = []
     for child in sorted(tasks_dir.iterdir()):
         if not child.is_dir() or not child.name.startswith("task-"):
             continue
-        yaml = child / "task.yaml"
-        if not yaml.is_file():
+        task_yaml_file = child / "task.yaml"
+        if not task_yaml_file.is_file():
             continue
-        data = simple_yaml.load(yaml.read_text(encoding="utf-8"))
-        data.setdefault("id", child.name[len("task-") :])
+        data = _yaml.safe_load(task_yaml_file.read_text(encoding="utf-8")) or {}
+        data.setdefault("id", child.name[len("task-"):])
         out.append(data)
     return out
 
 
-def load_task(state_dir: Path, task_id: str) -> dict[str, str]:
+def load_task(state_dir: Path, task_id: str) -> dict:
     path = task_yaml_path(state_dir, task_id)
     if not path.exists():
         raise FileNotFoundError(f"task.yaml missing for task-{task_id}")
-    data = simple_yaml.load(path.read_text(encoding="utf-8"))
+    data = _yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     data.setdefault("id", task_id)
     return data
 
 
-def save_task(state_dir: Path, task_id: str, data: dict[str, str]) -> None:
+def save_task(state_dir: Path, task_id: str, data: dict) -> None:
     """Persist a task; ensures the task directory exists and rebuilds dashboard."""
     data = dict(data)
     data.setdefault("id", task_id)
     tdir = task_dir(state_dir, task_id)
     tdir.mkdir(parents=True, exist_ok=True)
-    text = simple_yaml.dump(data)
+    text = _yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
     with atomic_write(task_yaml_path(state_dir, task_id)) as f:
         f.write(text)
     _maybe_rebuild_dashboard(state_dir)
+
+
+# ---------------------------------------------------------------------------
+# Stage helpers (new schema: task has stages list as SOT)
+# ---------------------------------------------------------------------------
+
+
+def derive_task_status(stages: list[dict]) -> str:
+    """Compute task-level status from stage list.
+
+    SOT is the stages list; ``task.status`` is a cached projection of it.
+    Stages with any progress (running or done) mean the task is "running";
+    "spawning" only when nothing has started yet (all pending).
+    """
+    if not stages:
+        return "completed"
+    statuses = [s.get("status", "pending") for s in stages]
+    if all(s == "done" for s in statuses):
+        return "completed"
+    if any(s in ("running", "done") for s in statuses):
+        return "running"
+    return "spawning"
+
+
+def get_current_stage_index(stages: list[dict]) -> int:
+    """Return index of the first non-done stage, or last index if all done."""
+    for i, stage in enumerate(stages):
+        if stage.get("status") != "done":
+            return i
+    return max(len(stages) - 1, 0)
 
 
 # ---------------------------------------------------------------------------

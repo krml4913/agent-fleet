@@ -7,8 +7,13 @@ custom ones live in ``<state>/topologies/<name>.yaml``.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
+
+_VENDOR = Path(__file__).resolve().parent.parent.parent / "vendor"
+if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR))
 
 import yaml
 
@@ -65,6 +70,33 @@ def load(name: str, state_dir: Path | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
+
+def expand_stages(topo: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert a topology definition into a stage list for task.yaml.
+
+    Each stage receives ``status: pending``. The ``user_approval`` shorthand
+    (``"required"``/``"optional"`` string) is normalised into object form:
+    ``{required: bool, status: pending}``.
+    """
+    raw: list[dict[str, Any]] = []
+    for key in ("stages", "roles"):
+        if key in topo and topo[key]:
+            raw = [dict(s) for s in topo[key]]
+            break
+
+    result: list[dict[str, Any]] = []
+    for stage in raw:
+        entry = dict(stage)
+        entry["status"] = "pending"
+        ua = entry.get("user_approval")
+        if isinstance(ua, str):
+            entry["user_approval"] = {
+                "required": ua == "required",
+                "status": "pending",
+            }
+        result.append(entry)
+    return result
 
 
 def validate(data: dict[str, Any]) -> None:

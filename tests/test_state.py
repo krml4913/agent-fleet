@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
 from fleet import simple_yaml  # noqa: E402
@@ -86,6 +87,80 @@ class StateTests(unittest.TestCase):
         (self.state_dir / "tasks" / "task-garbage").mkdir()
         tasks = state.list_tasks(self.state_dir)
         self.assertEqual([t["id"] for t in tasks], ["1", "2"])
+
+    def test_save_and_load_task_with_stages(self) -> None:
+        self._init()
+        stages = [
+            {"role": "driver", "agent": "claude:sonnet", "status": "running"},
+        ]
+        state.save_task(
+            self.state_dir,
+            "t1",
+            {
+                "title": "new schema task",
+                "status": "spawning",
+                "topology": "solo",
+                "workflow": "bare",
+                "current_stage": 0,
+                "stages": stages,
+            },
+        )
+        loaded = state.load_task(self.state_dir, "t1")
+        self.assertEqual(str(loaded["id"]), "t1")
+        self.assertEqual(loaded["status"], "spawning")
+        self.assertIsInstance(loaded["stages"], list)
+        self.assertEqual(len(loaded["stages"]), 1)
+        self.assertEqual(loaded["stages"][0]["role"], "driver")
+        self.assertEqual(loaded["current_stage"], 0)
+
+    # ---- derive_task_status ----
+
+    def test_derive_task_status_all_done(self) -> None:
+        stages = [
+            {"role": "a", "status": "done"},
+            {"role": "b", "status": "done"},
+        ]
+        self.assertEqual(state.derive_task_status(stages), "completed")
+
+    def test_derive_task_status_any_running(self) -> None:
+        stages = [
+            {"role": "a", "status": "done"},
+            {"role": "b", "status": "running"},
+        ]
+        self.assertEqual(state.derive_task_status(stages), "running")
+
+    def test_derive_task_status_pending_only(self) -> None:
+        stages = [
+            {"role": "a", "status": "pending"},
+        ]
+        self.assertEqual(state.derive_task_status(stages), "spawning")
+
+    def test_derive_task_status_empty(self) -> None:
+        self.assertEqual(state.derive_task_status([]), "completed")
+
+    # ---- get_current_stage_index ----
+
+    def test_get_current_stage_index_first_pending(self) -> None:
+        stages = [
+            {"role": "a", "status": "pending"},
+            {"role": "b", "status": "pending"},
+        ]
+        self.assertEqual(state.get_current_stage_index(stages), 0)
+
+    def test_get_current_stage_index_skips_done(self) -> None:
+        stages = [
+            {"role": "a", "status": "done"},
+            {"role": "b", "status": "pending"},
+        ]
+        self.assertEqual(state.get_current_stage_index(stages), 1)
+
+    def test_get_current_stage_index_all_done(self) -> None:
+        stages = [
+            {"role": "a", "status": "done"},
+            {"role": "b", "status": "done"},
+        ]
+        # All done → returns last index
+        self.assertEqual(state.get_current_stage_index(stages), 1)
 
     # ---- dashboard ----
 

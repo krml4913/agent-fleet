@@ -1,9 +1,9 @@
-# Pair review — implementer + reviewer, then the user signs off.
+# Pair review — implementer + reviewer, user signs off.
 name: pair_review
 description: Implementer hands off to a separate reviewer; the user has the final say.
-roles:
+stages:
   - role: implementer
     agent: claude:sonnet
   - role: reviewer
     agent: claude:opus
-user_approval: required
+    user_approval: required
