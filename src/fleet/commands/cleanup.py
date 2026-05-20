@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 from .. import dashboard as dashboard_mod
-from .. import notify
 from .. import plugins as plugins_mod
 from .. import state as state_mod
 from .. import task_context
@@ -135,12 +134,6 @@ def run(args: argparse.Namespace) -> int:
         archived=archived,
     )
     dashboard_mod.rebuild(state_dir)
-
-    notify.send(
-        state_dir,
-        title=f"fleet {project_name}: task-{task_id} cleaned",
-        message=f"task-{task_id} cleanup{' (archived)' if archived else ''}",
-    )
 
     print(f"task-{task_id} cleaned" + (" and archived" if archived else ""))
     return 0
