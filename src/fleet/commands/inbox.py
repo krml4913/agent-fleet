@@ -1,7 +1,7 @@
 """``fleet-agent inbox <task-id> "<message>"`` — send a message to a driver's inbox.md.
 
-A timestamped block is appended; the driver reads `inbox.md` on its
-own cadence (per the rules in `driver-prompt.md`).
+A timestamped block is appended and the driver pane is woken via tmux send-keys
+so it sees the notification even while waiting for input.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from .. import state as state_mod
+from .. import tmux as tmux_mod
 from ..events import append_event, utcnow_iso
 
 
@@ -18,8 +19,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "inbox",
         help="Append a message to a driver's inbox.md",
         description=(
-            "Adds a timestamped block to <state>/tasks/task-<id>/inbox.md "
-            "and emits an `inbox_message` event."
+            "Adds a timestamped block to <state>/tasks/task-<id>/inbox.md, "
+            "emits an `inbox_message` event, and wakes the driver pane via tmux."
         ),
     )
     p.add_argument("task_id", help="Task id")
@@ -48,7 +49,8 @@ def run(args: argparse.Namespace) -> int:
 
     inbox_path = task_dir / "inbox.md"
     body = " ".join(args.message)
-    block = f"### {utcnow_iso()}\n\n{body}\n\n"
+    ts = utcnow_iso()
+    block = f"### {ts}\n\n{body}\n\n"
     existing = inbox_path.read_text(encoding="utf-8") if inbox_path.exists() else ""
     inbox_path.write_text(existing + block, encoding="utf-8")
 
@@ -57,7 +59,41 @@ def run(args: argparse.Namespace) -> int:
         "inbox_message",
         task_id=args.task_id,
         message=body,
+        inbox_ts=ts,
     )
+
+    _wake_driver_pane(state_dir, args.task_id)
 
     print(f"sent to task-{args.task_id} inbox ({inbox_path})")
     return 0
+
+
+def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
+    """Send a notification text into the driver's tmux pane.
+
+    Silently skips if tmux is unavailable or the pane doesn't exist yet
+    (e.g. driver not spawned or already finished).
+    """
+    if not tmux_mod.available():
+        return
+    try:
+        project = state_mod.load_project(state_dir)
+    except FileNotFoundError:
+        return
+    project_name = project.get("name", "")
+    if not project_name:
+        return
+    session = f"fleet-{project_name}"
+    window = f"task-{task_id}"
+    try:
+        tmux_mod.send_keys(
+            session,
+            window,
+            "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
+        )
+    except tmux_mod.TmuxError:
+        # Pane not found or session gone — warn and continue.
+        print(
+            f"warn: could not wake driver pane {session}:{window} (not spawned or already done)",
+            file=sys.stderr,
+        )
