@@ -268,6 +268,7 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
+      agent: claude:sonnet
     user_approval: required
 
 # Topology C: 多段 (設計 → 実装 + AI 査読 + user 承認)
@@ -280,6 +281,7 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
+      agent: claude:sonnet
     user_approval: required
 ```
 
@@ -313,7 +315,7 @@ topology YAML の必須・任意フィールドを以下に明記する。形式
 |---|---|---|
 | `role` | 必須 | driver が担う役割名 (例: `driver`, `implementer`, `designer`) |
 | `agent` | 任意 | 使用する agent (例: `claude:sonnet`)。省略時は `--agent` 引数の値が使われる |
-| `peer_review` | 任意 | AI 査読を挟む場合に指定。`role` サブフィールドで査読者の役割を指定する |
+| `peer_review` | 任意 | AI 査読を挟む場合に指定。サブフィールド: `role` (査読者の役割、必須)、`agent` (査読者の agent、任意)。`agent` 省略時は同 stage の `agent` → `claude:sonnet` の順でフォールバックする |
 | `user_approval` | 任意 | 人間の承認ポイント。`"required"` / `"optional"` の文字列、またはオブジェクト形式 |
 
 `validate()` はトップレベルの `name` / `stages` 必須チェックと、各 stage の `role` 必須チェックを行う。
