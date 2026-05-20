@@ -27,6 +27,14 @@ from . import simple_yaml  # kept for flat project.yaml
 
 STATE_DIR_NAME = ".fleet-state"
 
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "prompts"
+
+_MEMORY_INDEX_TEMPLATE = """\
+# Memory Index
+
+- *(no entries yet — add one when a task reveals something worth keeping)*
+"""
+
 
 # ---------------------------------------------------------------------------
 # Initialization
@@ -43,6 +51,8 @@ def init_state(state_dir: Path, *, name: str) -> None:
     (state_dir / "tasks").mkdir()
     (state_dir / "events.jsonl").touch()
 
+    _init_memory(state_dir)
+
     save_project(
         state_dir,
         {
@@ -51,6 +61,21 @@ def init_state(state_dir: Path, *, name: str) -> None:
             "version": "0.0.1",
         },
     )
+
+
+def _init_memory(state_dir: Path) -> None:
+    """Populate ``.fleet-state/memory/`` with MEMORY.md and GUIDE.md."""
+    memory_dir = state_dir / "memory"
+    memory_dir.mkdir(exist_ok=True)
+
+    memory_index = memory_dir / "MEMORY.md"
+    if not memory_index.exists():
+        memory_index.write_text(_MEMORY_INDEX_TEMPLATE, encoding="utf-8")
+
+    guide_dest = memory_dir / "GUIDE.md"
+    if not guide_dest.exists():
+        guide_src = _PROMPTS_DIR / "fleet-memory-guide.md"
+        guide_dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

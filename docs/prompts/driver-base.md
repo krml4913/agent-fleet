@@ -27,6 +27,9 @@ Rules:
     the last stage). Use `--result changes-requested` to signal that the
     current stage needs rework (stage-5 peer_review loop).
 
+Project memory: `$FLEET_STATE_DIR/memory/` — read `MEMORY.md` at task start for stored project
+  knowledge; rules for reading and writing are in `GUIDE.md` in the same directory.
+
 Git workflow (作業の git は driver が担う):
   - 作業完了後は必ず以下の手順を実行してから `fleet-agent done` を呼ぶ:
       1. git add / git commit   — 変更を commit する
