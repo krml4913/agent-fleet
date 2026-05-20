@@ -37,7 +37,8 @@ class DriverPromptTests(unittest.TestCase):
         )
         line_count = text.count("\n")
         # Be generous; we just want a tripwire if BASE balloons.
-        self.assertLess(line_count, 40, f"driver-prompt got fat: {line_count} lines")
+        # Threshold raised from 40→70 after adding the git-workflow section to driver-base.md (stage 6).
+        self.assertLess(line_count, 70, f"driver-prompt got fat: {line_count} lines")
 
     def test_mentions_fleet_agent_ask_rule(self) -> None:
         text = driver_prompt.render(
