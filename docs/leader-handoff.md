@@ -147,9 +147,9 @@ fleet-agent done                      # task 完了
 
 | ファイル | 内容 |
 |---|---|
-| `docs/design.md` | 設計資料 (422 行)、まずこれ読め |
+| `docs/design.md` | 設計資料 (確定済み設計のみ)、まずこれ読め |
 | `docs/backlog.md` | 実装 TODO の置き場 |
-| `docs/cli-split-proposal.md` | CLI 分離の確定方針 (進行中の参照資料) |
+| GitHub Issues | 設計課題 / open question (旧 design.md §11、2026-05-20 移行) |
 | `CHANGELOG.md` | Phase 完了履歴 |
 | `README.md` | quick start + コマンドカタログ |
 | `src/fleet/cli.py` | エントリポイント、subcommand 構成 |
@@ -169,9 +169,9 @@ gh pr list                    # 進行中の PR
 ```
 
 参照ドキュメント:
+- `gh issue list` — 設計課題 / open question (旧 design.md §11)
 - `docs/backlog.md` — 実装 TODO
-- `docs/design.md` §11 — 設計判断が要る open question
-- `docs/design.md` §12 — 議論履歴
+- `docs/design.md` §11 — 議論履歴 (確定判断の経緯)
 - `CHANGELOG.md` — Phase 完了履歴
 - memory (`MEMORY.md` 経由) — 過去の合意事項、口調、運用ルール
 
