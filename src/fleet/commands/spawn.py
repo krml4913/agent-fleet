@@ -1,8 +1,8 @@
 """``fleet-agent spawn`` — open a tmux window for a new driver task.
 
 Phase 3b scope: spawn **one** driver, picked from the topology's first
-role/stage/candidate (unless ``--role`` overrides). True multi-role and
-race orchestration come later.
+role/stage (unless ``--role`` overrides). True multi-role orchestration
+comes later.
 """
 from __future__ import annotations
 
@@ -281,7 +281,7 @@ def _pick_role_and_agent(
 ) -> tuple[str, str]:
     """Resolve which role to start and what agent runs it.
 
-    Looks in ``roles`` → ``stages`` → ``candidates`` in that order.
+    Looks in ``roles`` → ``stages`` in that order.
     Raises ``ValueError`` if nothing matches.
     """
     entries: list[dict[str, Any]] = []
@@ -289,17 +289,9 @@ def _pick_role_and_agent(
         if key in topo and topo[key]:
             entries = list(topo[key])
             break
-    candidates_only = False
-    if not entries and "candidates" in topo:
-        # race shape — synthesize role names so the rest of the pipeline can flow.
-        entries = [
-            {"role": c.get("role", f"candidate{i}"), **c}
-            for i, c in enumerate(topo["candidates"])
-        ]
-        candidates_only = True
 
     if not entries:
-        raise ValueError("topology has no roles/stages/candidates to spawn")
+        raise ValueError("topology has no roles/stages to spawn")
 
     if role_override:
         match = next(
@@ -315,7 +307,7 @@ def _pick_role_and_agent(
     else:
         chosen = entries[0]
 
-    role_name = chosen.get("role") or ("candidate" if candidates_only else "driver")
+    role_name = chosen.get("role") or "driver"
     agent = agent_override or chosen.get("agent")
     if not agent:
         raise ValueError(

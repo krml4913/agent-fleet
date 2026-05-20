@@ -1,7 +1,0 @@
-# Race — multiple agents compete on the same task; the leader picks the winner.
-name: race
-description: Run candidates in parallel and keep the best result.
-candidates:
-  - agent: claude:sonnet
-  - agent: claude:opus
-winner_decision: leader

@@ -1,7 +1,7 @@
 """Load and inspect team topology YAML files (design doc §6).
 
 A *topology* describes which agent(s) handle a task and how they
-hand off — solo, pair-review, multi-stage, race, or a project-defined
+hand off — solo, pair-review, multi-stage, or a project-defined
 custom shape. Presets ship in ``src/fleet/presets/``; project-specific
 custom ones live in ``<state>/topologies/<name>.yaml``.
 """
@@ -72,7 +72,7 @@ def validate(data: dict[str, Any]) -> None:
 
     Requires:
       * ``name`` field
-      * at least one of ``roles`` / ``stages`` / ``candidates``
+      * at least one of ``roles`` / ``stages``
 
     More elaborate schema enforcement is deferred until topology consumers
     (spawn / orchestrator) need richer guarantees.
@@ -81,7 +81,7 @@ def validate(data: dict[str, Any]) -> None:
         raise ValueError("topology must be a YAML mapping at the top level")
     if "name" not in data or not data["name"]:
         raise ValueError("topology missing required field: name")
-    shapes = ("roles", "stages", "candidates")
+    shapes = ("roles", "stages")
     present = [s for s in shapes if s in data]
     if not present:
         raise ValueError(
