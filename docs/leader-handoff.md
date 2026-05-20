@@ -48,8 +48,12 @@ dogfooding フェーズに入った段階で起動された。
 ### 3 つの柱
 
 1. **階層対話 UI** — タスク依頼は leader、要件詰めは driver と直接 (両方 tmux)
-2. **multi-vendor agent** — claude + codex 対応 (2026-05-20 現在、preset は
-   claude に統一。codex は CLI / parse を残してあり `--agent` で明示指定は可能)
+2. **multi-vendor agent** — claude + codex を組み合わせて使う。**これは設計の柱で
+   不変**。
+   2026-05-20 現在 preset を claude のみにしているが、これは codex の安定稼働確認を
+   後回しにしているだけの **一時的な運用判断**。codex 専用に切ったわけでも、
+   claude 専用にしたわけでもない。codex の CLI / parse は残してあり `--agent` で
+   指定可能。安定確認が済めば preset にも codex を戻す
 3. **team topology** — project ごとに team 編成を YAML で選択
 
 ### 思想
