@@ -58,7 +58,7 @@ def new_window(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
 ) -> None:
-    args = ["tmux", "new-window", "-t", session, "-n", window_name]
+    args = ["tmux", "new-window", "-d", "-t", session, "-n", window_name]
     if cwd:
         args.extend(["-c", cwd])
     if env:
