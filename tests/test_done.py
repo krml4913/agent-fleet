@@ -83,13 +83,14 @@ class DoneTests(unittest.TestCase):
         self.assertIn("task.yaml missing", r.stderr)
 
     def test_done_multi_stage_advances_current_stage(self) -> None:
-        """Done on a multi-stage task marks stage done and advances current_stage."""
+        """Done on a multi-stage task marks stage done and orchestrator sets next to running."""
         state.save_task(
             self.project / ".fleet-state",
             "2",
             {
                 "id": "2",
                 "title": "multi",
+                "description": "pair review task",
                 "status": "spawning",
                 "topology": "pair_review",
                 "workflow": "bare",
@@ -100,14 +101,35 @@ class DoneTests(unittest.TestCase):
                 ],
             },
         )
+        # Create task directory so orchestrator can write driver-prompt.md
+        task_dir = self.project / ".fleet-state" / "tasks" / "task-2"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "driver-prompt.md").write_text("test prompt")
+        (task_dir / "inbox.md").write_text("")
+        (task_dir / "outbox.md").write_text("")
         r = self._run("done", "2")
         self.assertEqual(r.returncode, 0, r.stderr)
         task = state.load_task(self.project / ".fleet-state", "2")
-        # Stage 0 done, stage 1 still pending → overall running (not completed)
+        # Stage 0 done; orchestrator set stage 1 to running → overall running
         self.assertEqual(task["stages"][0]["status"], "done")
-        self.assertEqual(task["stages"][1]["status"], "pending")
+        self.assertEqual(task["stages"][1]["status"], "running")
         self.assertEqual(task["status"], "running")
         self.assertEqual(task["current_stage"], 1)
+
+    def test_done_with_result_approved(self) -> None:
+        """--result approved behaves identically to the default."""
+        r = self._run("done", "--result", "approved", "1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        task = state.load_task(self.project / ".fleet-state", "1")
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(task["stages"][0]["status"], "done")
+
+    def test_done_with_result_changes_requested(self) -> None:
+        """--result changes-requested leaves task running (stage 5 placeholder)."""
+        r = self._run("done", "--result", "changes-requested", "1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        task = state.load_task(self.project / ".fleet-state", "1")
+        self.assertNotEqual(task["status"], "completed")
 
 
 if __name__ == "__main__":

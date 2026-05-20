@@ -22,4 +22,7 @@ Rules:
   - Between long tool calls, emit a heartbeat:
         fleet-agent event emit heartbeat
     so `fleet status` and the dashboard's "Last seen" column stay fresh.
-  - When done, call `fleet-agent done` so the task is marked complete.
+  - When done, call `fleet-agent done --result approved` so the orchestrator
+    advances the task to the next stage (or marks it completed if this is
+    the last stage). Use `--result changes-requested` to signal that the
+    current stage needs rework (stage-5 peer_review loop).

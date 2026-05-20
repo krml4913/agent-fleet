@@ -235,6 +235,7 @@ def run(args: argparse.Namespace) -> int:
     task_data: dict = {
         "id": args.task_id,
         "title": title,
+        "description": args.description,
         "status": "spawning",
         "topology": args.topology,
         "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
