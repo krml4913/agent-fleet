@@ -268,7 +268,7 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
-      agent: claude:sonnet
+      agent: claude:opus
     user_approval: required
 
 # Topology C: 多段 (設計 → 実装 + AI 査読 + user 承認)
@@ -281,7 +281,7 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
-      agent: claude:sonnet
+      agent: claude:opus
     user_approval: required
 ```
 
