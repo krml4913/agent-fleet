@@ -80,10 +80,8 @@ def expand_stages(topo: dict[str, Any]) -> list[dict[str, Any]]:
     ``{required: bool, status: pending}``.
     """
     raw: list[dict[str, Any]] = []
-    for key in ("stages", "roles"):
-        if key in topo and topo[key]:
-            raw = [dict(s) for s in topo[key]]
-            break
+    if topo.get("stages"):
+        raw = [dict(s) for s in topo["stages"]]
 
     result: list[dict[str, Any]] = []
     for stage in raw:
@@ -113,11 +111,9 @@ def validate(data: dict[str, Any]) -> None:
         raise ValueError("topology must be a YAML mapping at the top level")
     if "name" not in data or not data["name"]:
         raise ValueError("topology missing required field: name")
-    shapes = ("roles", "stages")
-    present = [s for s in shapes if s in data]
-    if not present:
+    if "stages" not in data:
         raise ValueError(
-            f"topology must define one of {shapes}; got keys={sorted(data)}"
+            f"topology must define 'stages'; got keys={sorted(data)}"
         )
 
 

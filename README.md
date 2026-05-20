@@ -33,8 +33,8 @@ git init -b main && echo hi > README.md && git add -A && git -c user.email=t@x -
 # Launch the leader pane (claude by default)
 /path/to/agent-fleet/fleet leader --attach
 
-# In a separate shell — spawn a driver for a task (leader uses fleet-agent)
-/path/to/agent-fleet/fleet-agent spawn 1 "Implement a hello-world script."
+# In a separate shell — start a task (leader uses fleet-agent)
+/path/to/agent-fleet/fleet-agent start 1 "Implement a hello-world script."
 
 # Inspect overall state
 /path/to/agent-fleet/fleet status
@@ -89,7 +89,7 @@ Leader-side (run by the leader agent):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A] [--no-auto-paste]` | Spawn a driver for a new task (auto-pastes prompt by default) |
+| `fleet-agent start <id> "<desc>" [--topology T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes prompt by default) |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
 | `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
@@ -101,7 +101,7 @@ pre-set, so no `--task-id` is needed):
 |---|---|
 | `fleet-agent ask "<question>"` | Record `needs_input`, append `questions.md`, notify the user |
 | `fleet-agent event emit <type> [--field K=V ...]` | Append an audit event |
-| `fleet-agent done` | Mark the task `completed` |
+| `fleet-agent done [--result approved\|changes-requested]` | Signal role completion; orchestrator advances the task |
 
 ---
 
