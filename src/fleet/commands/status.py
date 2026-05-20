@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from .. import heartbeat
 from .. import state as state_mod
 from ..events import read_events
+
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_RED = "\033[31m"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -46,55 +53,125 @@ def run(args: argparse.Namespace) -> int:
     events = read_events(state_dir / "events.jsonl")
     last_seen = heartbeat.last_per_task(events)
     unread = _unread_tasks(events)
+    use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
     workflow = project.get("workflow") or "bare"
-    print(f"project: {project.get('name', '?')}")
-    print(f"  state dir: {state_dir}")
-    print(f"  created:   {project.get('created_at', '?')}")
-    print(f"  fleet ver: {project.get('version', '?')}")
-    print(f"  workflow:  {workflow}")
+    print(
+        "  ·  ".join(
+            [
+                project.get("name", "?"),
+                workflow,
+                f"v{project.get('version', '?')}",
+                f"since {_short_date(project.get('created_at', '?'))}",
+            ]
+        )
+    )
 
     needs_input = [t for t in tasks if t.get("status") == "needs_input"]
     if needs_input:
         print()
-        print(f"⚠  needs your input ({len(needs_input)}):")
+        print(
+            _style(
+                f"⚠ needs your input  {len(needs_input)}",
+                _RED + _BOLD,
+                use_color,
+            )
+        )
         for t in needs_input:
             print(f"  task-{t.get('id', '?')}  {t.get('title', '-')}")
 
     print()
-    print(f"tasks ({len(tasks)}):")
+    print(_style(f"TASKS  {len(tasks)}", _BOLD, use_color))
     if not tasks:
         print("  (none)")
     else:
+        task_rows = []
         for t in tasks:
             tid = t.get("id", "?")
-            seen = last_seen.get(tid, "—")
-            inbox_flag = " [unread inbox]" if tid in unread else ""
+            task_rows.append(
+                {
+                    "id": f"task-{tid}",
+                    "status": str(t.get("status", "-")),
+                    "seen": last_seen.get(tid, "—"),
+                    "title": t.get("title", "-"),
+                    "agent": t.get("agent", "-"),
+                    "workflow": t.get("workflow", "-"),
+                    "unread": tid in unread,
+                }
+            )
+        id_width = max(len(r["id"]) for r in task_rows)
+        status_width = max(len(r["status"]) for r in task_rows)
+        for row in task_rows:
+            bullet = _style("●", _status_color(row["status"]), use_color)
             print(
-                "  task-{id}  [{status}]  {title}  ({agent}, {workflow}, seen {seen}){flag}".format(
-                    id=tid,
-                    status=t.get("status", "-"),
-                    title=t.get("title", "-"),
-                    agent=t.get("agent", "-"),
-                    workflow=t.get("workflow", "-"),
-                    seen=seen,
-                    flag=inbox_flag,
+                "  {bullet} {id:<{id_width}}  {status:<{status_width}}  seen {seen}".format(
+                    bullet=bullet,
+                    id=row["id"],
+                    id_width=id_width,
+                    status=row["status"],
+                    status_width=status_width,
+                    seen=row["seen"],
                 )
             )
+            meta = f"agent {row['agent']}  workflow {row['workflow']}"
+            if row["unread"]:
+                meta += "  [unread inbox]"
+            print(f"      {row['title']}  ({meta})")
 
     if args.events > 0:
         print()
-        print(f"recent events (last {args.events} of {len(events)}):")
+        print(_style(f"EVENTS  last {args.events} / {len(events)}", _BOLD, use_color))
         if not events:
             print("  (none)")
         else:
-            for ev in events[-args.events :]:
+            shown_events = events[-args.events :]
+            type_width = max(len(str(ev.get("type", "?"))) for ev in shown_events)
+            for ev in shown_events:
                 tid = ev.get("task_id", "—")
                 print(
-                    f"  {ev.get('ts', '?')}  {ev.get('type', '?'):<14}  task-{tid}"
+                    "  {time}  {type:<{type_width}}  task-{tid}".format(
+                        time=_short_time(ev.get("ts", "?")),
+                        type=str(ev.get("type", "?")),
+                        type_width=type_width,
+                        tid=tid,
+                    )
                 )
 
+    print()
+    legend = []
+    for status in ("done", "running", "needs_input"):
+        legend.append(f"{_style('●', _status_color(status), use_color)} {status}")
+    print("  ".join(legend))
+
     return 0
+
+
+def _style(text: str, code: str, enabled: bool) -> str:
+    if not enabled or not code:
+        return text
+    return f"{code}{text}{_RESET}"
+
+
+def _status_color(status: str) -> str:
+    if status in {"done", "approved"}:
+        return _GREEN
+    if status in {"running", "spawning"}:
+        return _YELLOW
+    if status in {"needs_input", "failed", "changes-requested"}:
+        return _RED
+    return ""
+
+
+def _short_date(value: str) -> str:
+    if isinstance(value, str) and len(value) >= 10:
+        return value[:10]
+    return "?"
+
+
+def _short_time(value: str) -> str:
+    if isinstance(value, str) and len(value) >= 16 and "T" in value:
+        return value[11:16]
+    return "??:??"
 
 
 def _unread_tasks(events: list[dict]) -> set[str]:

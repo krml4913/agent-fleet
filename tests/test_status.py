@@ -1,6 +1,7 @@
 """Tests for ``fleet status`` CLI smoke."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import unittest
@@ -41,8 +42,10 @@ class StatusCommandTests(unittest.TestCase):
         state.init_state(self.project / ".fleet-state", name="demo")
         result = run_fleet("status", str(self.project))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("project: demo", result.stdout)
-        self.assertIn("tasks (0)", result.stdout)
+        self.assertIn("demo  ·  bare  ·  v0.0.1  ·  since ", result.stdout)
+        self.assertIn("TASKS  0", result.stdout)
+        self.assertIn("EVENTS  last 5 / 0", result.stdout)
+        self.assertIn("  (none)", result.stdout)
 
     def test_status_lists_tasks(self) -> None:
         state.init_state(self.project / ".fleet-state", name="demo")
@@ -53,9 +56,43 @@ class StatusCommandTests(unittest.TestCase):
         )
         result = run_fleet("status", str(self.project))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("tasks (1)", result.stdout)
-        self.assertIn("task-1", result.stdout)
-        self.assertIn("do thing", result.stdout)
+        self.assertIn("TASKS  1", result.stdout)
+        self.assertIn("● task-1  pending  seen —", result.stdout)
+        self.assertIn("      do thing  (agent claude:sonnet  workflow -)", result.stdout)
+
+    def test_status_shows_needs_input_section(self) -> None:
+        state.init_state(self.project / ".fleet-state", name="demo")
+        state.save_task(
+            self.project / ".fleet-state",
+            "1",
+            {"title": "answer question", "status": "needs_input", "agent": "codex"},
+        )
+        result = run_fleet("status", str(self.project))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("⚠ needs your input  1", result.stdout)
+        self.assertIn("  task-1  answer question", result.stdout)
+
+    def test_status_formats_recent_events(self) -> None:
+        state.init_state(self.project / ".fleet-state", name="demo")
+        ev_path = self.project / ".fleet-state" / "events.jsonl"
+        with open(ev_path, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {"ts": "2026-05-20T15:09:00Z", "type": "cleanup", "task_id": "one"}
+                )
+                + "\n"
+            )
+            f.write(
+                json.dumps(
+                    {"ts": "2026-05-20T15:43:00Z", "type": "start", "task_id": "two"}
+                )
+                + "\n"
+            )
+        result = run_fleet("status", str(self.project))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("EVENTS  last 5 / 2", result.stdout)
+        self.assertIn("  15:09  cleanup  task-one", result.stdout)
+        self.assertIn("  15:43  start    task-two", result.stdout)
 
 
 class UnreadTasksTests(unittest.TestCase):
@@ -98,12 +135,30 @@ class UnreadTasksTests(unittest.TestCase):
             project.mkdir()
             sd = project / ".fleet-state"
             state.init_state(sd, name="demo")
-            state.save_task(sd, "1", {"id": "1", "title": "t", "status": "in_progress", "agent": "x", "workflow": "bare"})
+            state.save_task(
+                sd,
+                "1",
+                {
+                    "id": "1",
+                    "title": "t",
+                    "status": "in_progress",
+                    "agent": "x",
+                    "workflow": "bare",
+                },
+            )
             # Write an inbox_message event manually
             ev_path = sd / "events.jsonl"
-            import json as _json
-            with open(ev_path, "a") as f:
-                f.write(_json.dumps({"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}) + "\n")
+            with open(ev_path, "a", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "ts": "2026-05-20T10:00:00Z",
+                            "type": "inbox_message",
+                            "task_id": "1",
+                        }
+                    )
+                    + "\n"
+                )
             result = subprocess.run(
                 [sys.executable, str(FLEET), "status", str(project)],
                 capture_output=True, text=True,
