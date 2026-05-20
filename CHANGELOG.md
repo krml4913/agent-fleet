@@ -5,6 +5,54 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### inbox delivery + ack 機構 (2026-05-20)
+
+leader → driver の通知を double-ended に強化。
+
+#### A. delivery — inbox 追記後に driver pane を起こす
+
+- `fleet-agent inbox` が inbox.md への追記・event 発火に加え、driver の tmux pane に
+  通知テキスト (`[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ`) を
+  `send-keys` で送信するようになった。
+- pane が存在しない場合 (driver 未 spawn / 既終了) は warn のみ出して inbox 追記は成功させる。
+- `inbox_message` event に `inbox_ts` フィールド追加 (inbox.md ヘッダと同一タイムスタンプ)。
+
+#### B. ack — `fleet-agent inbox-read` 新コマンド (driver-side)
+
+- `fleet-agent inbox-read` を新設。
+  - 当該タスクの `inbox.md` を stdout に出力。
+  - 副作用で `inbox_seen` event を events.jsonl に append。
+  - `watermark` = inbox.md の最後の `### <ISO8601>` ヘッダの値。
+- driver は inbox を `cat` で直読みせず `fleet-agent inbox-read` 経由で読む。
+
+#### C. driver-base.md rule 変更
+
+- "check inbox each turn" → "`fleet-agent inbox-read` で読め (cat/Read 直読み禁止)"。
+- delivery で起こされた driver が `fleet-agent inbox-read` を叩く流れを rule に明記。
+
+#### D. 未読表示 — `fleet status`
+
+- `fleet status` の task 一覧に `[unread inbox]` フラグを追加。
+- 判定: 最新 `inbox_message.ts` > 最新 `inbox_seen.watermark` なら未読。
+
+#### E. `task_context.resolve` 改善
+
+- `FLEET_STATE_DIR` env var を state-dir 解決のフォールバックとして利用するように変更。
+  cwd-based discovery が失敗したときのみ使用 (spawned pane の CWD がプロジェクト外の場合の救済)。
+
+#### Migration note
+
+- driver 側ルール更新: inbox は `fleet-agent inbox-read` 経由で読むこと (cat 直読み禁止)。
+- `inbox_message` event に `inbox_ts` フィールドが追加された (後方互換維持、WIP スコープ)。
+
+#### Tests
+
+- `test_inbox_cmd.py`: delivery mock テスト 3 件追加。
+- `test_inbox_read_cmd.py`: 新規 — watermark 計算 4 件 + inbox-read コマンド 6 件 = 計 10 件。
+- `test_status.py`: 未読判定ロジック 6 件 + 統合テスト 1 件追加。
+- `test_cli_parsers.py`: agent コマンド数 7 → 8 (inbox-read 追加)。
+- Tests: 166 cases pass。
+
 ### `fleet-agent spawn` auto-paste が Enter を送信するよう修正 (2026-05-20)
 
 - `tmux.send_keys` に空文字列を渡すと一部の tmux バージョンでエラーが発生し、

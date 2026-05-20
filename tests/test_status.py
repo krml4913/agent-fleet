@@ -12,6 +12,7 @@ FLEET = ROOT / "fleet"
 sys.path.insert(0, str(ROOT / "src"))
 
 from fleet import state  # noqa: E402
+from fleet.commands.status import _unread_tasks  # noqa: E402
 
 
 def run_fleet(*args: str) -> subprocess.CompletedProcess[str]:
@@ -55,6 +56,61 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("tasks (1)", result.stdout)
         self.assertIn("task-1", result.stdout)
         self.assertIn("do thing", result.stdout)
+
+
+class UnreadTasksTests(unittest.TestCase):
+    def test_unread_when_no_ack(self) -> None:
+        events = [
+            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"},
+        ]
+        self.assertEqual(_unread_tasks(events), {"1"})
+
+    def test_read_when_watermark_matches(self) -> None:
+        events = [
+            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"},
+            {"ts": "2026-05-20T10:01:00Z", "type": "inbox_seen", "task_id": "1", "watermark": "2026-05-20T10:00:00Z"},
+        ]
+        self.assertEqual(_unread_tasks(events), set())
+
+    def test_unread_when_new_message_after_ack(self) -> None:
+        events = [
+            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"},
+            {"ts": "2026-05-20T10:01:00Z", "type": "inbox_seen", "task_id": "1", "watermark": "2026-05-20T10:00:00Z"},
+            {"ts": "2026-05-20T11:00:00Z", "type": "inbox_message", "task_id": "1"},
+        ]
+        self.assertEqual(_unread_tasks(events), {"1"})
+
+    def test_no_messages_no_unread(self) -> None:
+        self.assertEqual(_unread_tasks([]), set())
+
+    def test_multiple_tasks_independent(self) -> None:
+        events = [
+            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"},
+            {"ts": "2026-05-20T10:01:00Z", "type": "inbox_seen", "task_id": "1", "watermark": "2026-05-20T10:00:00Z"},
+            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "2"},
+        ]
+        self.assertEqual(_unread_tasks(events), {"2"})
+
+    def test_status_output_shows_unread_flag(self) -> None:
+        tmp = TemporaryDirectory()
+        try:
+            project = Path(tmp.name) / "proj"
+            project.mkdir()
+            sd = project / ".fleet-state"
+            state.init_state(sd, name="demo")
+            state.save_task(sd, "1", {"id": "1", "title": "t", "status": "in_progress", "agent": "x", "workflow": "bare"})
+            # Write an inbox_message event manually
+            ev_path = sd / "events.jsonl"
+            import json as _json
+            with open(ev_path, "a") as f:
+                f.write(_json.dumps({"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}) + "\n")
+            result = subprocess.run(
+                [sys.executable, str(FLEET), "status", str(project)],
+                capture_output=True, text=True,
+            )
+            self.assertIn("[unread inbox]", result.stdout)
+        finally:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":

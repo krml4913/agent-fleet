@@ -45,6 +45,7 @@ def run(args: argparse.Namespace) -> int:
     tasks = state_mod.list_tasks(state_dir)
     events = read_events(state_dir / "events.jsonl")
     last_seen = heartbeat.last_per_task(events)
+    unread = _unread_tasks(events)
 
     workflow = project.get("workflow") or "bare"
     print(f"project: {project.get('name', '?')}")
@@ -68,14 +69,16 @@ def run(args: argparse.Namespace) -> int:
         for t in tasks:
             tid = t.get("id", "?")
             seen = last_seen.get(tid, "—")
+            inbox_flag = " [unread inbox]" if tid in unread else ""
             print(
-                "  task-{id}  [{status}]  {title}  ({agent}, {workflow}, seen {seen})".format(
+                "  task-{id}  [{status}]  {title}  ({agent}, {workflow}, seen {seen}){flag}".format(
                     id=tid,
                     status=t.get("status", "-"),
                     title=t.get("title", "-"),
                     agent=t.get("agent", "-"),
                     workflow=t.get("workflow", "-"),
                     seen=seen,
+                    flag=inbox_flag,
                 )
             )
 
@@ -92,3 +95,30 @@ def run(args: argparse.Namespace) -> int:
                 )
 
     return 0
+
+
+def _unread_tasks(events: list[dict]) -> set[str]:
+    """Return task ids that have inbox messages newer than the last inbox_seen ack.
+
+    Unread = latest inbox_message.ts > latest inbox_seen.watermark for that task.
+    Tasks with no inbox_seen at all but with inbox_message events are unread.
+    """
+    last_msg: dict[str, str] = {}
+    last_ack: dict[str, str] = {}
+    for ev in events:
+        tid = ev.get("task_id", "")
+        if not tid:
+            continue
+        t = ev.get("type", "")
+        ts = ev.get("ts", "")
+        if t == "inbox_message" and ts:
+            last_msg[tid] = ts
+        elif t == "inbox_seen":
+            watermark = ev.get("watermark") or ""
+            last_ack[tid] = watermark
+    unread: set[str] = set()
+    for tid, msg_ts in last_msg.items():
+        watermark = last_ack.get(tid, "")
+        if msg_ts > watermark:
+            unread.add(tid)
+    return unread

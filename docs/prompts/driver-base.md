@@ -7,7 +7,10 @@ Environment:
     the task automatically from those — no --task-id needed.
 
 Communication:
-  - inbox.md   — instructions from the leader; check it each turn.
+  - inbox.md   — instructions from the leader; read with `fleet-agent inbox-read`
+                 (not cat/Read directly — ack won't fire otherwise).
+                 When woken by a "[fleet] inbox に新着メッセージ" notification,
+                 run `fleet-agent inbox-read` immediately.
   - outbox.md  — append reports here at milestones.
   - `fleet-agent ask "<question>"`           — record needs_input + notify user.
   - `fleet-agent event emit <type> [...]`    — append an audit event.
