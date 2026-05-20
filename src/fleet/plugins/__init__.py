@@ -1,6 +1,6 @@
 """Workflow plugin loader.
 
-A *workflow plugin* is a Python module that hooks into spawn and done.
+A *workflow plugin* is a Python module that hooks into start and done.
 A project picks exactly one via ``workflow:`` in ``project.yaml`` (default
 ``bare``). Built-in plugins ship under this package; project-defined ones
 live in ``<state_dir>/plugins/<name>.py`` and take priority.
@@ -8,11 +8,11 @@ live in ``<state_dir>/plugins/<name>.py`` and take priority.
 Plugin contract (everything optional):
 
     WORKFLOW_NAME: str
-    on_pre_spawn(ctx: dict) -> None
+    on_pre_start(ctx: dict) -> None
     on_post_done(ctx: dict) -> None
 
 ``ctx`` is a mutable dict — plugins may add a ``task_extra`` sub-dict
-(merged into ``task.yaml``) and/or override ``cwd`` (used as the spawn
+(merged into ``task.yaml``) and/or override ``cwd`` (used as the start
 window's working directory).
 """
 from __future__ import annotations

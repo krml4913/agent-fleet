@@ -1,6 +1,6 @@
 """``fleet-agent send-prompt <task-id>`` — paste the driver-prompt into a task pane.
 
-Useful when `fleet-agent spawn` was run without `--auto-prompt` (the safer
+Useful when `fleet-agent start` was run without `--auto-paste` (the safer
 default) and the user wants to inject the prompt after attaching to the
 window and confirming the agent CLI is ready.
 """

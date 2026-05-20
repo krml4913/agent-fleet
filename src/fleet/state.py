@@ -141,7 +141,7 @@ def save_task(state_dir: Path, task_id: str, data: dict) -> None:
     data.setdefault("id", task_id)
     tdir = task_dir(state_dir, task_id)
     tdir.mkdir(parents=True, exist_ok=True)
-    text = _yaml.dump(
+    text = _yaml.safe_dump(
         data,
         default_flow_style=False,
         sort_keys=False,

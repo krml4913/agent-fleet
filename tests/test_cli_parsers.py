@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet.cli import build_parser_agent, build_parser_user  # noqa: E402
 
 USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "log", "topology", "workflow"}
-AGENT_COMMANDS = {"spawn", "inbox", "inbox-read", "send-prompt", "cleanup", "ask", "event", "done"}
+AGENT_COMMANDS = {"start", "inbox", "inbox-read", "send-prompt", "cleanup", "ask", "event", "done"}
 
 
 def _subcommand_names(parser) -> set[str]:

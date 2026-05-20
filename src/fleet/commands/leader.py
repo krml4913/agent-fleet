@@ -7,7 +7,7 @@ command and exits (the leader is single-instance per project).
 
 This is the entry point described in design doc §3 — the leader is the
 user's conversational counterpart; per §4.1 it only does dialogue and
-``fleet-agent spawn``, never state polling.
+``fleet-agent start``, never state polling.
 """
 from __future__ import annotations
 

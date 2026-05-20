@@ -42,26 +42,26 @@ class PluginsTests(unittest.TestCase):
 
     def test_run_hook_no_op_when_missing(self) -> None:
         module = plugins.load_workflow(self.state_dir)
-        # bare has on_pre_spawn / on_post_done; nonexistent hook returns None.
+        # bare has on_pre_start / on_post_done; nonexistent hook returns None.
         self.assertIsNone(plugins.run_hook(module, "on_does_not_exist", {}))
 
     def test_run_hook_calls_function(self) -> None:
         module = plugins.load_workflow(self.state_dir)
         # bare hooks accept ctx and return None.
-        self.assertIsNone(plugins.run_hook(module, "on_pre_spawn", {"x": 1}))
+        self.assertIsNone(plugins.run_hook(module, "on_pre_start", {"x": 1}))
 
     def test_custom_plugin_overrides_builtin(self) -> None:
         custom_dir = self.state_dir / plugins.PROJECT_PLUGIN_SUBDIR
         custom_dir.mkdir()
         (custom_dir / "bare.py").write_text(
             'WORKFLOW_NAME = "bare-custom"\n'
-            "def on_pre_spawn(ctx):\n"
+            "def on_pre_start(ctx):\n"
             "    ctx['seen'] = True\n"
         )
         module = plugins._resolve("bare", self.state_dir)
         self.assertEqual(module.WORKFLOW_NAME, "bare-custom")
         ctx: dict = {}
-        plugins.run_hook(module, "on_pre_spawn", ctx)
+        plugins.run_hook(module, "on_pre_start", ctx)
         self.assertTrue(ctx["seen"])
 
     def test_list_custom(self) -> None:
