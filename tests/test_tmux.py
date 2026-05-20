@@ -68,6 +68,28 @@ class TmuxTests(unittest.TestCase):
         self.assertNotIn("doomed", tmux.list_windows(SESSION))
 
 
+class NewWindowMockTests(unittest.TestCase):
+    """Mock-based tests for new_window — no live tmux session required."""
+
+    def _patch_run(self):
+        return unittest.mock.patch("fleet.tmux._run", return_value=None)
+
+    def test_new_window_includes_detach_flag(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.new_window("sess", "mywin")
+        args = mock_run.call_args[0][0]
+        self.assertIn("-d", args)
+        self.assertEqual(args[0], "tmux")
+        self.assertEqual(args[1], "new-window")
+
+    def test_new_window_detach_flag_position(self) -> None:
+        with self._patch_run() as mock_run:
+            tmux.new_window("sess", "mywin", cwd="/tmp", env={"FOO": "bar"})
+        args = mock_run.call_args[0][0]
+        # -d must appear before -t so it is always a positional flag
+        self.assertLess(args.index("-d"), args.index("-t"))
+
+
 class SendKeysMockTests(unittest.TestCase):
     """Mock-based tests for send_keys — no live tmux session required."""
 
