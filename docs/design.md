@@ -170,6 +170,10 @@ fleet attach image-gallery   # 特定 project の leader へ
     project.yaml          # project name / 全体 config / active topology 等
     events.jsonl          # append-only audit log
     dashboard.md          # read-only view (state から自動生成、 直接編集禁止)
+    memory/
+      MEMORY.md           # 知見インデックス (各 driver が都度追記)
+      GUIDE.md            # fleet memory 規律 (read/write のルール)
+      *.md                # 個別 memory ファイル (driver が書く)
     tasks/
       task-<id>/
         task.yaml         # task 状態 (status / title / progress / assignee 等)
@@ -204,6 +208,38 @@ with state_writer(path) as w:
 - **書き込みごとに自動 rebuild** (state writer context manager の exit hook で発火)
 - dashboard.md は **read-only**、 人間 / driver / leader 誰も直接編集しない
 - 並行多数 driver で rebuild 連発が問題になれば debounce (100ms 以内の連続更新は最後の 1 回だけ) を後段で導入
+
+---
+
+## 5.6 fleet memory (確定: 2026-05-21)
+
+### 動機
+
+fleet は multi-vendor (claude / codex / その他) が柱。 claude driver は claude 自身の auto-memory で PJ 知見を溜められるが、 codex driver はそれを読めない。 vendor をまたいで PJ 知見を共有するには **vendor 非依存の memory ストア**が必要。 これは「あったら便利」ではなく multi-vendor を成立させる実害ベースの課題 (設計原則 §1.4)。
+
+### 確定した設計
+
+- **fleet memory = claude auto-memory の multi-vendor 版**。 project 単位、 `.fleet-state/memory/` に配置 (worktree の外なので全 driver が同じ実体を共有できる)
+- markdown ファイル群 + frontmatter (`name` / `description` / `type`) + `MEMORY.md` インデックス + `[[name]]` 相互リンク
+- **type は 3 つ**: `feedback` / `project` / `reference`。 claude auto-memory の `user` type は除外 (fleet memory は project 単位であり、 user の人物像は project 横断なので紐づかない)
+- **自律保存**: 各 driver が task をこなす中で「保存すべき」と判断して書く。 明示コマンド方式は採らない
+- **書き込み手段**: 専用 CLI は作らない。 driver は `$FLEET_STATE_DIR/memory/` に直接ファイルを Write する
+- **claude driver との二重化**: claude driver は claude 自身の auto-memory も併用しうるが、 規律で「PJ 知見は fleet memory に書け」と寄せる。 claude auto-memory の無効化はしない (過剰)
+- **driver への届け方**: `driver-base.md` には入口 1〜2 行のみ。 インデックス・規律・memory 本体は `.fleet-state/memory/` に置き、 driver が自分で読む。 base prompt を太らせない (§10.2 と整合)
+
+### 「保存しないもの」規律 (forge 化を防ぐ防衛線)
+
+以下はコードや git 履歴から導ける / 揮発的すぎる / 他の場所に置くべきもの:
+
+- コードのパターン・規約・アーキテクチャ・ファイルパス — コードから読める
+- git 履歴・最近の変更・誰が何を変えたか — `git log` / `git blame` が権威
+- デバッグ解法や修正レシピ — 修正はコードに、 文脈は commit メッセージに
+- design.md などのドキュメントに既にある内容
+- 揮発的なタスク詳細 (進行中の作業、 一時的な状態)
+
+### 規律の詳細
+
+詳細な読み書きルール (type 定義 / 保存タイミング / 2 ステップ手順 / 陳腐化対策) は `.fleet-state/memory/GUIDE.md` に置く。 `fleet init` が自動生成する。
 
 ---
 
