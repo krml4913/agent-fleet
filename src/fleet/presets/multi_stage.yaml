@@ -9,4 +9,5 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
+      agent: claude:sonnet
     user_approval: required
