@@ -114,11 +114,12 @@ class StartTests(unittest.TestCase):
         # First stage of pair_review is implementer with claude:sonnet
         self.assertIn("role: implementer", text)
         self.assertIn("agent: claude:sonnet", text)
-        # All stages are expanded into task.yaml
+        # pair_review now has 1 stage (implementer with inline peer_review)
         task_data = state.load_task(sd, "3")
-        self.assertEqual(len(task_data["stages"]), 2)
+        self.assertEqual(len(task_data["stages"]), 1)
         self.assertEqual(task_data["stages"][0]["role"], "implementer")
-        self.assertEqual(task_data["stages"][1]["role"], "reviewer")
+        self.assertIn("peer_review", task_data["stages"][0])
+        self.assertEqual(task_data["stages"][0]["peer_review"]["role"], "code-reviewer")
         self.assertEqual(task_data["current_stage"], 0)
         self.assertEqual(task_data["stages"][0]["status"], "running")
 

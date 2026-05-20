@@ -1,9 +1,9 @@
-# Pair review — implementer + reviewer, user signs off.
+# Pair review — implementer with AI peer review and user sign-off.
 name: pair_review
-description: Implementer hands off to a separate reviewer; the user has the final say.
+description: Implementer with AI peer review; the user has the final say.
 stages:
   - role: implementer
     agent: claude:sonnet
-  - role: reviewer
-    agent: claude:opus
+    peer_review:
+      role: code-reviewer
     user_approval: required

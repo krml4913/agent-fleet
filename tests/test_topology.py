@@ -73,19 +73,19 @@ class TopologyTests(unittest.TestCase):
     def test_expand_stages_pair_review(self) -> None:
         data = topology.load_preset("pair_review")
         stages = topology.expand_stages(data)
-        self.assertEqual(len(stages), 2)
+        self.assertEqual(len(stages), 1)
         self.assertEqual(stages[0]["role"], "implementer")
-        self.assertEqual(stages[1]["role"], "reviewer")
-        for s in stages:
-            self.assertEqual(s["status"], "pending")
+        self.assertEqual(stages[0]["status"], "pending")
+        self.assertIn("peer_review", stages[0])
+        self.assertEqual(stages[0]["peer_review"]["role"], "code-reviewer")
 
     def test_expand_stages_user_approval_normalised(self) -> None:
         data = topology.load_preset("pair_review")
         stages = topology.expand_stages(data)
-        # reviewer has user_approval: required → should be normalised to object
-        reviewer = stages[1]
-        self.assertIn("user_approval", reviewer)
-        ua = reviewer["user_approval"]
+        # implementer has user_approval: required → should be normalised to object
+        implementer = stages[0]
+        self.assertIn("user_approval", implementer)
+        ua = implementer["user_approval"]
         self.assertIsInstance(ua, dict)
         self.assertTrue(ua["required"])
         self.assertEqual(ua["status"], "pending")
