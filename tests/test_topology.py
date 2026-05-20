@@ -60,6 +60,54 @@ class TopologyTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             self.assertEqual(topology.list_custom(Path(tmp)), [])
 
+    # ---- expand_stages ----
+
+    def test_expand_stages_solo(self) -> None:
+        data = topology.load_preset("solo")
+        stages = topology.expand_stages(data)
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0]["role"], "driver")
+        self.assertEqual(stages[0]["agent"], "claude:sonnet")
+        self.assertEqual(stages[0]["status"], "pending")
+
+    def test_expand_stages_pair_review(self) -> None:
+        data = topology.load_preset("pair_review")
+        stages = topology.expand_stages(data)
+        self.assertEqual(len(stages), 2)
+        self.assertEqual(stages[0]["role"], "implementer")
+        self.assertEqual(stages[1]["role"], "reviewer")
+        for s in stages:
+            self.assertEqual(s["status"], "pending")
+
+    def test_expand_stages_user_approval_normalised(self) -> None:
+        data = topology.load_preset("pair_review")
+        stages = topology.expand_stages(data)
+        # reviewer has user_approval: required → should be normalised to object
+        reviewer = stages[1]
+        self.assertIn("user_approval", reviewer)
+        ua = reviewer["user_approval"]
+        self.assertIsInstance(ua, dict)
+        self.assertTrue(ua["required"])
+        self.assertEqual(ua["status"], "pending")
+
+    def test_expand_stages_multi_stage(self) -> None:
+        data = topology.load_preset("multi_stage")
+        stages = topology.expand_stages(data)
+        self.assertEqual(len(stages), 2)
+        self.assertEqual(stages[0]["role"], "designer")
+        self.assertEqual(stages[1]["role"], "implementer")
+
+    def test_expand_stages_empty_topology(self) -> None:
+        stages = topology.expand_stages({"name": "x", "stages": []})
+        self.assertEqual(stages, [])
+
+    def test_expand_stages_falls_back_to_roles(self) -> None:
+        data = {"name": "x", "roles": [{"role": "coder", "agent": "claude:sonnet"}]}
+        stages = topology.expand_stages(data)
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0]["role"], "coder")
+        self.assertEqual(stages[0]["status"], "pending")
+
     # ---- validation ----
 
     def test_validate_rejects_missing_name(self) -> None:

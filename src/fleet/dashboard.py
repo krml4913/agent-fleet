@@ -16,6 +16,19 @@ from .locking import atomic_write
 RECENT_EVENTS_DISPLAYED = 10
 
 
+def _task_agent(task: dict) -> str:
+    """Return the agent string for a task, reading from stages if needed."""
+    if "agent" in task:
+        return str(task["agent"])
+    stages = task.get("stages") or []
+    if not stages:
+        return "-"
+    current = task.get("current_stage", 0)
+    if isinstance(current, int) and 0 <= current < len(stages):
+        return str(stages[current].get("agent", "-"))
+    return str(stages[0].get("agent", "-"))
+
+
 def render(state_dir: Path) -> str:
     project = state_mod.load_project(state_dir)
     tasks = state_mod.list_tasks(state_dir)
@@ -46,7 +59,7 @@ def render(state_dir: Path) -> str:
             tid = t.get("id", "?")
             lines.append(
                 f"- **task-{tid}** — {t.get('title', '-')} "
-                f"(agent: `{t.get('agent', '-')}`)"
+                f"(agent: `{_task_agent(t)}`)"
             )
         lines.append("")
 
@@ -65,7 +78,7 @@ def render(state_dir: Path) -> str:
                     id=tid,
                     title=t.get("title", "-"),
                     status=t.get("status", "-"),
-                    agent=t.get("agent", "-"),
+                    agent=_task_agent(t),
                     workflow=t.get("workflow", "-"),
                     seen=last_seen.get(tid, "—"),
                 )

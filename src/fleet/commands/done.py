@@ -1,9 +1,8 @@
 """``fleet-agent done [task-id]`` — mark a task as completed.
 
-This is the core-side completion mark only: it flips ``task.yaml``
-status, emits a ``done`` event, and fires a notification. Real cleanup
-(worktree removal, branch deletion, tmux window kill) belongs in a
-workflow plugin (Phase 5).
+Marks the current stage done, derives the new task status from all stages,
+and fires a notification. Real cleanup (worktree removal, branch deletion,
+tmux window kill) belongs in a workflow plugin (Phase 5).
 """
 from __future__ import annotations
 
@@ -22,7 +21,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "done",
         help="Mark a task as completed",
         description=(
-            "Flip task status to 'completed' and emit a `done` event. "
+            "Mark the current stage done, derive task status from stages, "
+            "and emit a `done` event. "
             "Cleanup (worktree / branch / tmux window) is delegated to a "
             "workflow plugin."
         ),
@@ -49,7 +49,19 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    task["status"] = "completed"
+    stages = task.get("stages") or []
+    if stages:
+        current_idx = task.get("current_stage", 0)
+        if not isinstance(current_idx, int):
+            current_idx = 0
+        if 0 <= current_idx < len(stages):
+            stages[current_idx]["status"] = "done"
+        task["stages"] = stages
+        task["current_stage"] = state_mod.get_current_stage_index(stages)
+        task["status"] = state_mod.derive_task_status(stages)
+    else:
+        task["status"] = "completed"
+
     state_mod.save_task(state_dir, task_id, task)
 
     workflow = plugins_mod.load_workflow(state_dir)

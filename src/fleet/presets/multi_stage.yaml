@@ -1,13 +1,12 @@
-# Multi-stage — design with the user first, then implement, review, confirm.
+# Multi-stage — design then implement, with peer review and user approval gates.
 name: multi_stage
-description: Sequential pipeline with explicit user interaction in the design stage.
+description: Sequential pipeline with user approval at each stage.
 stages:
   - role: designer
     agent: claude:opus
-    user_interaction: required
+    user_approval: required
   - role: implementer
     agent: claude:sonnet
-  - role: reviewer
-    agent: claude:opus
-  - role: user_review
-    actor: human
+    peer_review:
+      role: code-reviewer
+    user_approval: required

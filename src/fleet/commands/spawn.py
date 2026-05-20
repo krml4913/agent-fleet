@@ -10,7 +10,6 @@ import argparse
 import shlex
 import sys
 from pathlib import Path
-from typing import Any
 
 from .. import agents as agents_mod
 from .. import driver_prompt as dp
@@ -58,7 +57,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--role",
         default=None,
-        help="Role to spawn within the topology (default: first role/stage)",
+        help="Role to spawn within the topology (default: first stage)",
     )
     p.add_argument(
         "--agent",
@@ -110,7 +109,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: task-{args.task_id} already exists at {task_dir}", file=sys.stderr)
         return 1
 
-    # Topology → role → agent
+    # Load and validate topology
     try:
         topo = topology_mod.load(args.topology, state_dir=state_dir)
         topology_mod.validate(topo)
@@ -118,20 +117,51 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    try:
-        role_name, agent_spec = _pick_role_and_agent(topo, args.role, args.agent)
-    except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
+    # Expand topology stages into task.yaml format (all status: pending initially)
+    expanded_stages = topology_mod.expand_stages(topo)
+    if not expanded_stages:
+        print("error: topology has no stages to spawn", file=sys.stderr)
         return 1
 
-    # Validate agent spec early
+    # Find which stage to start (--role selects by role name, default: first)
+    current_stage_idx = 0
+    if args.role:
+        for i, s in enumerate(expanded_stages):
+            if s.get("role") == args.role:
+                current_stage_idx = i
+                break
+        else:
+            available = sorted({s.get("role", "?") for s in expanded_stages})
+            print(
+                f"error: role {args.role!r} not in topology; choices: {available}",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Apply --agent override to the current stage
+    if args.agent:
+        expanded_stages[current_stage_idx]["agent"] = args.agent
+
+    current_stage = expanded_stages[current_stage_idx]
+    agent_spec = current_stage.get("agent", "")
+    role_name = current_stage.get("role", "driver")
+
+    if not agent_spec:
+        print(
+            f"error: no agent for role {role_name!r}; pass --agent or set one in the topology",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         agents_mod.parse_spec(agent_spec)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    # Build state artifacts
+    # Mark current stage as running
+    expanded_stages[current_stage_idx]["status"] = "running"
+
     title = args.title or args.description.splitlines()[0][:80]
 
     # Workflow plugin: pre_spawn hook can attach extra task fields and/or
@@ -155,15 +185,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: workflow pre_spawn failed: {e}", file=sys.stderr)
         return 1
 
-    task_data = {
+    task_data: dict = {
         "id": args.task_id,
         "title": title,
         "status": "spawning",
-        "agent": agent_spec,
         "topology": args.topology,
-        "role": role_name,
-        "progress": "0/0",
         "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
+        "current_stage": current_stage_idx,
+        "stages": expanded_stages,
     }
     task_data.update(ctx.get("task_extra", {}))
     state_mod.save_task(state_dir, args.task_id, task_data)
@@ -220,10 +249,6 @@ def run(args: argparse.Namespace) -> int:
     buffer_name = f"fleet-task-{args.task_id}"
 
     try:
-        # Inject PATH so `fleet-agent` is available inside the driver pane
-        # without requiring the user to add the repo to their shell PATH.
-        # We use env injection (not system-wide install) to keep this repo-local
-        # and avoid conflicts if multiple agent-fleet repos exist on the machine.
         import os
 
         repo_root = _find_repo_root()
@@ -232,8 +257,6 @@ def run(args: argparse.Namespace) -> int:
             "FLEET_STATE_DIR": str(state_dir),
             "PATH": f"{repo_root}:{os.environ.get('PATH', '')}",
         }
-        # Open the window with FLEET_* env so the driver can call
-        # `fleet-agent ask` / `fleet-agent event emit` without --task-id.
         tmux_mod.new_window(
             session,
             window,
@@ -241,13 +264,8 @@ def run(args: argparse.Namespace) -> int:
             env=driver_env,
         )
 
-        # Preload the driver-prompt into a named tmux buffer so it can be
-        # pasted on demand (manually with `C-b ]` or auto via --auto-prompt).
-        # This avoids the race where send-keys arrives before the CLI's TTY
-        # is ready.
         tmux_mod.load_buffer(buffer_name, str(prompt_path))
 
-        # Launch the agent CLI.
         cli = agents_mod.cli_command(agent_spec)
         cli_quoted = " ".join(shlex.quote(p) for p in cli)
         tmux_mod.send_keys(session, window, cli_quoted)
@@ -257,9 +275,6 @@ def run(args: argparse.Namespace) -> int:
 
             time.sleep(max(0.0, args.prompt_delay))
             tmux_mod.paste_buffer(session, window, buffer_name)
-            # paste-buffer streams the buffer into the pane; without a short
-            # settle the Enter below races the paste and the CLI sees a
-            # half-finished prompt (observed empirically on claude-cli).
             time.sleep(0.8)
             tmux_mod.send_keys(session, window, "", enter=True)
     except tmux_mod.TmuxError as e:
@@ -272,45 +287,3 @@ def run(args: argparse.Namespace) -> int:
         print(f"paste prompt:  inside the pane press C-b ]")
         print(f"           or: fleet-agent send-prompt {args.task_id}")
     return 0
-
-
-def _pick_role_and_agent(
-    topo: dict[str, Any],
-    role_override: str | None,
-    agent_override: str | None,
-) -> tuple[str, str]:
-    """Resolve which role to start and what agent runs it.
-
-    Looks in ``roles`` → ``stages`` in that order.
-    Raises ``ValueError`` if nothing matches.
-    """
-    entries: list[dict[str, Any]] = []
-    for key in ("roles", "stages"):
-        if key in topo and topo[key]:
-            entries = list(topo[key])
-            break
-
-    if not entries:
-        raise ValueError("topology has no roles/stages to spawn")
-
-    if role_override:
-        match = next(
-            (e for e in entries if e.get("role") == role_override),
-            None,
-        )
-        if not match:
-            available = sorted({e.get("role", "?") for e in entries})
-            raise ValueError(
-                f"role {role_override!r} not in topology; choices: {available}"
-            )
-        chosen = match
-    else:
-        chosen = entries[0]
-
-    role_name = chosen.get("role") or "driver"
-    agent = agent_override or chosen.get("agent")
-    if not agent:
-        raise ValueError(
-            f"no agent for role {role_name!r}; pass --agent or set one in the topology"
-        )
-    return role_name, agent

@@ -53,12 +53,19 @@ class SpawnTests(unittest.TestCase):
         self.assertTrue((tdir / "inbox.md").is_file())
         self.assertTrue((tdir / "outbox.md").is_file())
         self.assertTrue((tdir / "driver-prompt.md").is_file())
-        # task.yaml has the resolved agent + topology
+        # task.yaml has the resolved agent + topology (new schema with stages)
         text = (tdir / "task.yaml").read_text()
-        self.assertIn("id: 7", text)
+        task_data = state.load_task(sd, "7")
+        self.assertEqual(str(task_data["id"]), "7")
         self.assertIn("agent: claude:sonnet", text)
         self.assertIn("status: spawning", text)
         self.assertIn("topology: solo", text)
+        # New schema fields
+        self.assertIn("stages:", text)
+        self.assertIn("current_stage:", text)
+        self.assertIsInstance(task_data.get("stages"), list)
+        self.assertEqual(len(task_data["stages"]), 1)
+        self.assertEqual(task_data["stages"][0]["status"], "running")
         # event recorded
         events_path = sd / "events.jsonl"
         lines = [json.loads(l) for l in events_path.read_text().splitlines() if l]
@@ -102,12 +109,18 @@ class SpawnTests(unittest.TestCase):
             "3", "Pair flow",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        text = (
-            self.project / ".fleet-state" / "tasks" / "task-3" / "task.yaml"
-        ).read_text()
-        # First role of pair_review is implementer with claude:sonnet
+        sd = self.project / ".fleet-state"
+        text = (sd / "tasks" / "task-3" / "task.yaml").read_text()
+        # First stage of pair_review is implementer with claude:sonnet
         self.assertIn("role: implementer", text)
         self.assertIn("agent: claude:sonnet", text)
+        # All stages are expanded into task.yaml
+        task_data = state.load_task(sd, "3")
+        self.assertEqual(len(task_data["stages"]), 2)
+        self.assertEqual(task_data["stages"][0]["role"], "implementer")
+        self.assertEqual(task_data["stages"][1]["role"], "reviewer")
+        self.assertEqual(task_data["current_stage"], 0)
+        self.assertEqual(task_data["stages"][0]["status"], "running")
 
     def test_role_override(self) -> None:
         result = run_fleet(
@@ -119,11 +132,14 @@ class SpawnTests(unittest.TestCase):
             "4", "Review this",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        text = (
-            self.project / ".fleet-state" / "tasks" / "task-4" / "task.yaml"
-        ).read_text()
+        sd = self.project / ".fleet-state"
+        text = (sd / "tasks" / "task-4" / "task.yaml").read_text()
         self.assertIn("role: reviewer", text)
         self.assertIn("agent: claude:opus", text)
+        # current_stage should point at reviewer (index 1) and be running
+        task_data = state.load_task(sd, "4")
+        self.assertEqual(task_data["current_stage"], 1)
+        self.assertEqual(task_data["stages"][1]["status"], "running")
 
     def test_unknown_role(self) -> None:
         result = run_fleet(
