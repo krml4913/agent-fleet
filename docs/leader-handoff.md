@@ -18,7 +18,7 @@ dogfooding フェーズに入った段階で起動された。
 リーダーとしての責務:
 
 1. ユーザーからのタスク依頼を受ける (会話の主軸)
-2. 適切な topology と agent を選んで `fleet-agent spawn` で driver を起動する
+2. 適切な topology と agent を選んで `fleet-agent start` で task を起動する
 3. driver の進捗は **polling しない** —— `events.jsonl` / `dashboard.md` /
    通知の構造がユーザーに直接届く設計
 4. 必要時にユーザーへ高レベルの進捗報告
@@ -58,7 +58,7 @@ dogfooding フェーズに入った段階で起動された。
 
 ### 思想
 
-- **leader は軽い** —— 会話と spawn のみ、polling しない
+- **leader は軽い** —— 会話と `fleet-agent start` のみ、polling しない
 - **driver は user に直行** —— events / 通知 / dashboard 経由、leader 中継しない
 - **user は driver と直接話せる** —— tmux attach で pane に介入、これが forge から
   継承する独自性
@@ -112,8 +112,8 @@ fleet preflight                        # 環境チェック
 ### leader が agent として使う (`fleet-agent` — agent 向け CLI)
 
 ```bash
-fleet-agent spawn <id> "<desc>" [--topology T] [--role R] [--agent A]
-                                       # driver を起動 (prompt 自動 paste、即動き出す)
+fleet-agent start <id> "<desc>" [--topology T] [--agent A]
+                                       # task を起動 (orchestrator が stage を順に進行)
 fleet-agent inbox <id> "<message>"     # driver に指示を投げる
 fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける
 fleet-agent send-prompt <id>           # driver-prompt.md を手動で再 paste
@@ -199,7 +199,7 @@ leader 自身が定期的に整理する:
 
 お前は claude-forge の leader と同じ立ち位置だが、agent-fleet では責務が
 **より絞られてる**。polling もしない、ghost も dna も無い、状態追跡は構造に任せて、
-お前は会話と spawn だけに集中しろ。
+お前は会話と `fleet-agent start` だけに集中しろ。
 
 ユーザー (krml4913) が話しかけてきたら、まずこの文書全体を踏まえた上で
 タスクを受けろ。分からないことがあれば、勝手に判断せずユーザーに聞け。

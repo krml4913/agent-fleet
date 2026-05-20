@@ -44,13 +44,13 @@ class TopologyTests(unittest.TestCase):
             (state / "topologies" / "solo.yaml").write_text(
                 "name: solo\n"
                 "description: custom override\n"
-                "roles:\n"
+                "stages:\n"
                 "  - role: driver\n"
                 "    agent: codex:o4-mini\n"
             )
             data = topology.load("solo", state_dir=state)
             self.assertEqual(data["description"], "custom override")
-            self.assertEqual(data["roles"][0]["agent"], "codex:o4-mini")
+            self.assertEqual(data["stages"][0]["agent"], "codex:o4-mini")
 
     def test_load_falls_back_to_preset(self) -> None:
         data = topology.load("solo", state_dir=None)
@@ -101,25 +101,26 @@ class TopologyTests(unittest.TestCase):
         stages = topology.expand_stages({"name": "x", "stages": []})
         self.assertEqual(stages, [])
 
-    def test_expand_stages_falls_back_to_roles(self) -> None:
+    def test_expand_stages_empty_if_no_stages_key(self) -> None:
         data = {"name": "x", "roles": [{"role": "coder", "agent": "claude:sonnet"}]}
         stages = topology.expand_stages(data)
-        self.assertEqual(len(stages), 1)
-        self.assertEqual(stages[0]["role"], "coder")
-        self.assertEqual(stages[0]["status"], "pending")
+        self.assertEqual(stages, [])
 
     # ---- validation ----
 
     def test_validate_rejects_missing_name(self) -> None:
         with self.assertRaises(ValueError):
-            topology.validate({"roles": [{"role": "x", "agent": "y"}]})
+            topology.validate({"stages": [{"role": "x", "agent": "y"}]})
 
-    def test_validate_rejects_missing_shape(self) -> None:
+    def test_validate_rejects_missing_stages(self) -> None:
         with self.assertRaises(ValueError):
             topology.validate({"name": "x"})
 
-    def test_validate_accepts_each_shape(self) -> None:
-        topology.validate({"name": "a", "roles": [{"role": "r"}]})
+    def test_validate_rejects_roles_key_without_stages(self) -> None:
+        with self.assertRaises(ValueError):
+            topology.validate({"name": "a", "roles": [{"role": "r"}]})
+
+    def test_validate_accepts_stages(self) -> None:
         topology.validate({"name": "b", "stages": [{"role": "s"}]})
 
 

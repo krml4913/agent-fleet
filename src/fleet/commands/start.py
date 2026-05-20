@@ -1,9 +1,7 @@
 """``fleet-agent start`` — start a task (create state + launch first stage driver).
 
-Replaces ``fleet-agent spawn``. Key differences:
-- The command starts the whole *task*, not just a single driver.
-- The first stage is always launched; ``--role`` is gone.
-- Shared ``launch_stage_driver()`` is callable by the orchestrator (stage 4).
+The first stage is always launched; ``--role`` is not supported.
+Shared ``launch_stage_driver()`` is called by the orchestrator for subsequent stages.
 """
 from __future__ import annotations
 

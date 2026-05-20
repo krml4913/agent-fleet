@@ -50,9 +50,9 @@
 ## 3. アーキテクチャ全体像
 
 ```
-[user] <--tmux--> [leader: 会話 + spawn のみ]
+[user] <--tmux--> [leader: 会話 + start のみ]
                        |
-                       v spawn
+                       v fleet-agent start
                   [driver pane] (tmux window)
                        |
                        +--> events.jsonl (append-only)
@@ -65,7 +65,7 @@
 
 ### 3.1 重要な思想
 
-- **leader は軽い**: 会話と spawn のみ、 状態 polling や needs_input 検知はしない
+- **leader は軽い**: 会話と `fleet-agent start` のみ、 状態 polling や needs_input 検知はしない
 - **driver は直接 user に届く**: events.jsonl + 通知 + dashboard 経由、 leader を中継しない
 - **user は driver と直接話せる**: tmux attach すれば pane に介入できる (これが forge から継承する独自性)
 - **fleet 自体は開発フロー非依存**: worktree / PR / changelog 等は **plugin** で外付け
@@ -77,7 +77,7 @@
 ### 4.1 leader の責務
 
 - ユーザーとのタスク依頼会話
-- driver の spawn (どの agent vendor / model / topology で起動するか決める)
+- `fleet-agent start` でタスク開始 (どの agent vendor / model / topology で起動するか決める)
 - 必要に応じてユーザーへの高レベル進捗報告
 
 leader は driver の状態を polling したり、 needs_input を検知したりは **しない**。 これらは構造 (events / dashboard / 通知) が user に直接届ける。
@@ -173,44 +173,56 @@ with state_writer(path) as w:
 - **YAML** で定義 (シンプルに始める)
 - **preset** (同梱の標準 topology 数種) + **custom** (project ごとに自作可能)
 - **count なし** (必要に応じて leader が動的に並列起動を判断する)
-- **user_interaction** を表現できる (人間の介入ポイントを明示)
+- **user_approval** を表現できる (人間の承認ポイントを stage 属性で明示)
 
 ### 6.2 topology の例
 
 ```yaml
 # Topology A: solo driver (一人で PR まで完結)
-topology: solo
-driver:
-  agent: claude:sonnet
+name: solo
+stages:
+  - role: driver
+    agent: claude:sonnet
 
-# Topology B: pair review (実装者 + reviewer)
-topology: pair_review
-implementer:
-  agent: claude:sonnet
-reviewer:
-  agent: codex:o4-mini
-user_approval: required
+# Topology B: pair review (実装者 + AI 査読 + user 承認)
+name: pair_review
+stages:
+  - role: implementer
+    agent: claude:sonnet
+    peer_review:
+      role: code-reviewer
+    user_approval: required
 
-# Topology C: 多段 (設計 → 実装 → レビュー → user 承認)
-topology: multi_stage
+# Topology C: 多段 (設計 → 実装 + AI 査読 + user 承認)
+name: multi_stage
 stages:
   - role: designer
     agent: claude:opus
-    user_interaction: required   # ユーザーと設計を詰める
+    user_approval: required
   - role: implementer
     agent: claude:sonnet
-  - role: reviewer
-    agent: codex:o4-mini
-  - role: user_review
-    actor: human
-
+    peer_review:
+      role: code-reviewer
+    user_approval: required
 ```
 
-### 6.3 preset / custom
+各 stage 内の実行順序:
+```
+implement → peer_review (AI 査読ループ, max 3 回) → user_approval → stage 完了
+```
 
-- fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` (詳細は別途設計)
-- 各 project は `.fleet-state/topologies/` に自前 topology を定義可能
-- spawn 時に `fleet-agent spawn --topology <name> ...` で選択
+### 6.3 state machine (orchestrator)
+
+- `fleet-agent done --result approved|changes-requested` が呼ばれると `orchestrator.advance()` が次を判断する
+- approved: 現 stage を done にして次 stage を launch (次がなければ task completed)
+- changes-requested: peer_review の phase に応じてループを回す
+- peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
+
+### 6.4 preset / custom
+
+- fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` の 3 つ
+- 各 project は `.fleet-state/topologies/` に自前 topology を定義可能 (preset を shadow)
+- タスク開始時に `fleet-agent start --topology <name> ...` で選択
 
 ---
 
@@ -238,7 +250,7 @@ driver が pane に質問を書いただけでは **どこにも届かない**�
 
 ### 7.3 leader は介在しない
 
-driver → events / dashboard / 通知 → user の経路は **leader を経由しない**。 leader は会話と spawn だけで忙しくないように構造で分離する。
+driver → events / dashboard / 通知 → user の経路は **leader を経由しない**。 leader は会話と `fleet-agent start` だけで忙しくないように構造で分離する。
 
 ---
 
@@ -274,7 +286,7 @@ git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / 
 | state DB 更新 | core | 全 plugin が共通利用 |
 | events.jsonl 記録 | core | 監査 log は core |
 | dashboard 生成 | core | view layer |
-| `pre_spawn` / `post_done` hook 機構 | core | plugin がここに乗る |
+| `on_pre_start` / `on_post_done` hook 機構 | core | plugin がここに乗る |
 | worktree 作成 / 削除 | **plugin** | ライフサイクル境界の git |
 | commit / push / PR 作成 | **driver (AI)** | 作業の git; core は関与しない |
 | changelog 更新 | **driver (AI)** | 開発フローの一部; 作業の git と同様 |
@@ -405,7 +417,7 @@ agent-fleet/
   - `./fleet`       — 人間 (user) が打つ: `init` / `preflight` / `leader` / `attach` /
                       `status` / `log` / `topology` / `workflow`
   - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
-                      `spawn` / `inbox` / `send-prompt` / `cleanup` /
+                      `start` / `inbox` / `inbox-read` / `send-prompt` / `cleanup` /
                       `ask` / `event` / `done`
 - 2 つは同じ `src/fleet/` module を import する shebang script。
   「人間が打つもの」 と 「システムが自動で叩くもの」 を物理的に分離する設計。
