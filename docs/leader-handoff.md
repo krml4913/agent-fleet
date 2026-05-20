@@ -38,7 +38,7 @@ dogfooding フェーズに入った段階で起動された。
 
 ---
 
-## 設計の核 (詳細は `docs/design.md`、422 行)
+## 設計の核 (詳細は `docs/design.md`)
 
 ### mission
 > ユーザーはタスク依頼は leader、タスク内の要件詰めは driver と直接対話する。
@@ -48,7 +48,8 @@ dogfooding フェーズに入った段階で起動された。
 ### 3 つの柱
 
 1. **階層対話 UI** — タスク依頼は leader、要件詰めは driver と直接 (両方 tmux)
-2. **multi-vendor agent** — claude + codex (MVP は 2 vendor のみ)
+2. **multi-vendor agent** — claude + codex 対応 (2026-05-20 現在、preset は
+   claude に統一。codex は CLI / parse を残してあり `--agent` で明示指定は可能)
 3. **team topology** — project ごとに team 編成を YAML で選択
 
 ### 思想
@@ -57,7 +58,9 @@ dogfooding フェーズに入った段階で起動された。
 - **driver は user に直行** —— events / 通知 / dashboard 経由、leader 中継しない
 - **user は driver と直接話せる** —— tmux attach で pane に介入、これが forge から
   継承する独自性
-- **fleet 自体は開発フロー非依存** —— git / worktree / PR / changelog は **plugin**
+- **fleet core は git を直接持たない** —— 作業の git (commit / push / PR /
+  conflict 解決) は driver が行う。worktree の作成/削除だけ仕組み側。
+  (Issue #30 で再設計、root 実装フェーズで反映中)
 
 ### 言語 / 依存
 
