@@ -16,6 +16,63 @@ Issue #29 結論 E の実装 (root 大改修 段階 1)。
 
 `candidates` を使っていた topology YAML は `roles` / `stages` に書き直すこと。
 
+### task.yaml スキーマ刷新 (2026-05-20)
+
+root 大改修 段階 2 (PR #46)。Issue #28/#29 結論 D の実装。
+
+- `task.yaml` を「1 task = 1 topology、複数 stage を持つ」新スキーマに刷新
+- task 作成時に topology 定義を task.yaml に展開コピー (snapshot)
+- 各 stage は `status` (pending/running/done)、任意で `peer_review` / `user_approval` を持つ
+- task 全体の `status` は stages から導出するキャッシュ
+
+### `fleet spawn` → `fleet start` 改名・役割変更 (2026-05-20)
+
+root 大改修 段階 3 (PR #47)。Issue #29 結論 C の実装。
+
+**Migration note**: `fleet-agent spawn` は廃止。driver 起動は `fleet-agent start`。
+
+- `fleet start <id> "<desc>" --topology T` = task 開始 (task.yaml 作成 + worktree + 最初の stage の driver 起動)
+- `--role` オプション廃止 (orchestrator が stage を順に回す)
+- 「指定 stage の driver を起動」を `launch_stage_driver()` に切り出し (start と orchestrator で共用)
+- `save_task` を `yaml.safe_dump` に変更 — title 等に `:` `#` を含んでも task.yaml が壊れない
+
+### orchestrator.py 新設 + done.py を role 単位に (2026-05-20)
+
+root 大改修 段階 4 (PR #48)。Issue #29 結論 A/B の実装。
+
+- `src/fleet/orchestrator.py` 新設 — done 駆動の state machine。daemon / polling は持たない
+- `fleet-agent done --result <approved|changes-requested>` — role 単位の完了
+- done が `orchestrator.advance()` を呼び、次 stage を起動 (無ければ task を completed に)
+
+### peer_review ループ + user_approval ゲート (2026-05-20)
+
+root 大改修 段階 5 (PR #50)。Issue #28 の実装。
+
+- stage 属性 `peer_review` — stage 内で implement → 査読 → changes なら実装担当に戻る (上限 3 巡)
+- stage 属性 `user_approval` — done 前に `fleet-agent ask` で user の明示承認を取る
+- stage 内処理順序: implement → peer_review (max 3) → user_approval → stage 完了
+
+### git を driver に寄せる (2026-05-20)
+
+root 大改修 段階 6 (PR #51)。Issue #30 の実装。
+
+- 作業の git (commit / push / PR / conflict 解決) は driver が行う。手順は `driver-base.md` に明記
+- fleet core は worktree の作成/削除以外の git を叩かない
+- `docs/design.md` §8 を「作業の git は driver、worktree 境界だけ仕組み」に更新
+
+### root 改修 総点検 (2026-05-20)
+
+root 大改修 段階 7 (PR #52)。
+
+- 旧 `src/fleet/commands/spawn.py` (start.py 新設時の消し漏れ、289 行) を削除
+- README.md / design.md / leader-handoff.md を新設計に整合
+- preset 3 つ (solo / pair_review / multi_stage) が新スキーマであることを確認
+
+### `fleet-agent cleanup` の通知を削除 (2026-05-20)
+
+PR #49。`cleanup` 時の macOS / Slack 通知をやめた。task の片付け通知はノイズになり、
+`ask` (user の判断が要る) の通知を埋もれさせるため。`done` / `ask` の通知は維持。
+
 ### inbox delivery + ack 機構 (2026-05-20)
 
 leader → driver の通知を double-ended に強化。
