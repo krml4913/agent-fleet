@@ -1,8 +1,10 @@
-"""``fleet-agent done [task-id]`` — mark a task as completed.
+"""``fleet-agent done [task-id]`` — mark the current stage done.
 
-Marks the current stage done, derives the new task status from all stages,
-and fires a notification. Real cleanup (worktree removal, branch deletion,
-tmux window kill) belongs in a workflow plugin (Phase 5).
+The stage transition logic lives in :mod:`fleet.orchestrator`; this command
+is intentionally thin: resolve context → call orchestrator → emit event.
+
+Real cleanup (worktree removal, branch deletion, tmux window kill) belongs
+in a workflow plugin (stage 5).
 """
 from __future__ import annotations
 
@@ -10,6 +12,7 @@ import argparse
 import sys
 
 from .. import notify
+from .. import orchestrator as orch
 from .. import plugins as plugins_mod
 from .. import state as state_mod
 from .. import task_context
@@ -19,10 +22,12 @@ from ..events import append_event
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "done",
-        help="Mark a task as completed",
+        help="Mark the current stage done",
         description=(
-            "Mark the current stage done, derive task status from stages, "
-            "and emit a `done` event. "
+            "Mark the current stage done and advance the task state machine. "
+            "With --result=approved (default) the next stage is launched or "
+            "the task is completed. With --result=changes-requested the stage "
+            "result is recorded for the stage-5 peer_review loop. "
             "Cleanup (worktree / branch / tmux window) is delegated to a "
             "workflow plugin."
         ),
@@ -32,6 +37,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         nargs="?",
         default=None,
         help="Task id (default: derived from cwd or FLEET_TASK_ID)",
+    )
+    p.add_argument(
+        "--result",
+        default="approved",
+        choices=["approved", "changes-requested"],
+        help="Stage result (default: approved)",
     )
     p.set_defaults(func=run)
 
@@ -49,20 +60,10 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    stages = task.get("stages") or []
-    if stages:
-        current_idx = task.get("current_stage", 0)
-        if not isinstance(current_idx, int):
-            current_idx = 0
-        if 0 <= current_idx < len(stages):
-            stages[current_idx]["status"] = "done"
-        task["stages"] = stages
-        task["current_stage"] = state_mod.get_current_stage_index(stages)
-        task["status"] = state_mod.derive_task_status(stages)
-    else:
-        task["status"] = "completed"
+    result = getattr(args, "result", "approved") or "approved"
+    orch.advance(state_dir, task_id, task, result=result)
 
-    state_mod.save_task(state_dir, task_id, task)
+    task = state_mod.load_task(state_dir, task_id)
 
     workflow = plugins_mod.load_workflow(state_dir)
     ctx: dict = {
