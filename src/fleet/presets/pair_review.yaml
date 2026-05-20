@@ -6,5 +6,5 @@ stages:
     agent: claude:sonnet
     peer_review:
       role: code-reviewer
-      agent: claude:sonnet
+      agent: claude:opus
     user_approval: required
