@@ -123,6 +123,24 @@ class TopologyTests(unittest.TestCase):
     def test_validate_accepts_stages(self) -> None:
         topology.validate({"name": "b", "stages": [{"role": "s"}]})
 
+    def test_validate_rejects_empty_stages(self) -> None:
+        with self.assertRaises(ValueError):
+            topology.validate({"name": "x", "stages": []})
+
+    def test_validate_rejects_stage_without_role(self) -> None:
+        with self.assertRaises(ValueError):
+            topology.validate({"name": "x", "stages": [{"agent": "claude:sonnet"}]})
+
+    def test_validate_accepts_valid_custom_topology(self) -> None:
+        topology.validate({
+            "name": "custom",
+            "description": "test topology",
+            "stages": [
+                {"role": "driver", "agent": "claude:sonnet"},
+                {"role": "reviewer"},
+            ],
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
