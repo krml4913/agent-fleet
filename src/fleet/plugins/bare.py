@@ -12,7 +12,7 @@ WORKFLOW_NAME = "bare"
 DESCRIPTION = "No-op workflow. No worktree, no branch, no PR — fleet stays out of git."
 
 
-def on_pre_spawn(ctx: dict[str, Any]) -> None:
+def on_pre_start(ctx: dict[str, Any]) -> None:
     return None
 
 

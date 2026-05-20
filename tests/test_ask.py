@@ -41,7 +41,7 @@ class AskTests(unittest.TestCase):
         )
         # Spawn one task to ask about.
         result = run_fleet(
-            "spawn",
+            "start",
             "--project", str(self.project),
             "--dry-run",
             "1", "Implement foo",

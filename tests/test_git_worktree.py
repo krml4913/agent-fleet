@@ -52,28 +52,28 @@ class GitWorktreeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_pre_spawn_creates_worktree(self) -> None:
+    def test_pre_start_creates_worktree(self) -> None:
         ctx: dict = {
             "state_dir": self.state_dir,
             "task_id": "7",
             "project_root": self.project,
         }
-        git_worktree.on_pre_spawn(ctx)
+        git_worktree.on_pre_start(ctx)
         worktree = self.state_dir / "worktrees" / "task-7"
         self.assertTrue(worktree.is_dir())
         self.assertEqual(ctx["task_extra"]["worktree"], str(worktree))
         self.assertEqual(ctx["task_extra"]["branch"], "task/7")
         self.assertEqual(ctx["cwd"], worktree)
 
-    def test_pre_spawn_rejects_duplicate(self) -> None:
+    def test_pre_start_rejects_duplicate(self) -> None:
         ctx: dict = {
             "state_dir": self.state_dir,
             "task_id": "8",
             "project_root": self.project,
         }
-        git_worktree.on_pre_spawn(ctx)
+        git_worktree.on_pre_start(ctx)
         with self.assertRaises(RuntimeError):
-            git_worktree.on_pre_spawn(dict(ctx))
+            git_worktree.on_pre_start(dict(ctx))
 
     def test_cleanup_removes_worktree_and_branch(self) -> None:
         ctx: dict = {
@@ -81,7 +81,7 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "9",
             "project_root": self.project,
         }
-        git_worktree.on_pre_spawn(ctx)
+        git_worktree.on_pre_start(ctx)
         worktree = self.state_dir / "worktrees" / "task-9"
         self.assertTrue(worktree.is_dir())
 

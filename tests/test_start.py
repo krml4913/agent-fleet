@@ -1,4 +1,4 @@
-"""Tests for ``fleet spawn`` (dry-run path — tmux not exercised)."""
+"""Tests for ``fleet-agent start`` (dry-run path — tmux not exercised)."""
 from __future__ import annotations
 
 import argparse
@@ -26,7 +26,7 @@ def run_fleet(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-class SpawnTests(unittest.TestCase):
+class StartTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
@@ -38,7 +38,7 @@ class SpawnTests(unittest.TestCase):
 
     def test_dry_run_creates_task_artifacts(self) -> None:
         result = run_fleet(
-            "spawn",
+            "start",
             "--project",
             str(self.project),
             "--dry-run",
@@ -66,21 +66,21 @@ class SpawnTests(unittest.TestCase):
         self.assertIsInstance(task_data.get("stages"), list)
         self.assertEqual(len(task_data["stages"]), 1)
         self.assertEqual(task_data["stages"][0]["status"], "running")
-        # event recorded
+        # event recorded with type "start"
         events_path = sd / "events.jsonl"
         lines = [json.loads(l) for l in events_path.read_text().splitlines() if l]
-        spawns = [e for e in lines if e.get("type") == "spawn"]
-        self.assertEqual(len(spawns), 1)
-        self.assertEqual(spawns[0]["task_id"], "7")
-        self.assertTrue(spawns[0].get("dry_run"))
+        starts = [e for e in lines if e.get("type") == "start"]
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]["task_id"], "7")
+        self.assertTrue(starts[0].get("dry_run"))
 
     def test_rejects_duplicate_task_id(self) -> None:
         run_fleet(
-            "spawn", "--project", str(self.project), "--dry-run",
+            "start", "--project", str(self.project), "--dry-run",
             "1", "first",
         )
         result = run_fleet(
-            "spawn", "--project", str(self.project), "--dry-run",
+            "start", "--project", str(self.project), "--dry-run",
             "1", "second",
         )
         self.assertEqual(result.returncode, 1)
@@ -88,7 +88,7 @@ class SpawnTests(unittest.TestCase):
 
     def test_agent_override(self) -> None:
         result = run_fleet(
-            "spawn",
+            "start",
             "--project", str(self.project),
             "--dry-run",
             "--agent", "codex:o4-mini",
@@ -100,9 +100,9 @@ class SpawnTests(unittest.TestCase):
         ).read_text()
         self.assertIn("agent: codex:o4-mini", text)
 
-    def test_topology_pair_review(self) -> None:
+    def test_topology_pair_review_starts_first_stage(self) -> None:
         result = run_fleet(
-            "spawn",
+            "start",
             "--project", str(self.project),
             "--dry-run",
             "--topology", "pair_review",
@@ -122,41 +122,22 @@ class SpawnTests(unittest.TestCase):
         self.assertEqual(task_data["current_stage"], 0)
         self.assertEqual(task_data["stages"][0]["status"], "running")
 
-    def test_role_override(self) -> None:
+    def test_role_flag_is_not_accepted(self) -> None:
         result = run_fleet(
-            "spawn",
+            "start",
             "--project", str(self.project),
             "--dry-run",
             "--topology", "pair_review",
             "--role", "reviewer",
-            "4", "Review this",
+            "4", "Should fail",
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        sd = self.project / ".fleet-state"
-        text = (sd / "tasks" / "task-4" / "task.yaml").read_text()
-        self.assertIn("role: reviewer", text)
-        self.assertIn("agent: claude:opus", text)
-        # current_stage should point at reviewer (index 1) and be running
-        task_data = state.load_task(sd, "4")
-        self.assertEqual(task_data["current_stage"], 1)
-        self.assertEqual(task_data["stages"][1]["status"], "running")
-
-    def test_unknown_role(self) -> None:
-        result = run_fleet(
-            "spawn",
-            "--project", str(self.project),
-            "--dry-run",
-            "--topology", "pair_review",
-            "--role", "nobody",
-            "5", "Bad",
-        )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("not in topology", result.stderr)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized", result.stderr.lower())
 
     def test_no_state_dir(self) -> None:
         with TemporaryDirectory() as tmp:
             result = run_fleet(
-                "spawn",
+                "start",
                 "--project", tmp,
                 "--dry-run",
                 "9", "no state",
@@ -166,7 +147,7 @@ class SpawnTests(unittest.TestCase):
 
     def test_no_auto_paste_flag_is_accepted(self) -> None:
         result = run_fleet(
-            "spawn",
+            "start",
             "--project", str(self.project),
             "--dry-run",
             "--no-auto-paste",
@@ -176,19 +157,55 @@ class SpawnTests(unittest.TestCase):
         tdir = self.project / ".fleet-state" / "tasks" / "task-10"
         self.assertTrue(tdir.is_dir())
 
-    def test_auto_prompt_flag_removed(self) -> None:
+    def test_spawn_command_is_gone(self) -> None:
         result = run_fleet(
             "spawn",
             "--project", str(self.project),
             "--dry-run",
-            "--auto-prompt",
-            "11", "Old flag test",
+            "99", "old command",
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("unrecognized", result.stderr.lower())
+
+    def test_title_with_colon_yaml_safe(self) -> None:
+        result = run_fleet(
+            "start",
+            "--project", str(self.project),
+            "--dry-run",
+            "--title", "fix: handle edge case in parser",
+            "11", "Fix the parser",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sd = self.project / ".fleet-state"
+        task_data = state.load_task(sd, "11")
+        self.assertEqual(task_data["title"], "fix: handle edge case in parser")
+
+    def test_title_with_hash_yaml_safe(self) -> None:
+        result = run_fleet(
+            "start",
+            "--project", str(self.project),
+            "--dry-run",
+            "--title", "issue #42: fix the bug",
+            "12", "Fix it",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sd = self.project / ".fleet-state"
+        task_data = state.load_task(sd, "12")
+        self.assertEqual(task_data["title"], "issue #42: fix the bug")
+
+    def test_description_with_colon_in_title_yaml_safe(self) -> None:
+        result = run_fleet(
+            "start",
+            "--project", str(self.project),
+            "--dry-run",
+            "13", "refactor: split into modules",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sd = self.project / ".fleet-state"
+        task_data = state.load_task(sd, "13")
+        self.assertEqual(task_data["title"], "refactor: split into modules")
 
 
-class SpawnAutopasteEnterTests(unittest.TestCase):
+class StartAutopasteEnterTests(unittest.TestCase):
     """Verify that auto-paste sends Enter after pasting the driver-prompt."""
 
     def setUp(self) -> None:
@@ -201,14 +218,13 @@ class SpawnAutopasteEnterTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_auto_paste_sends_enter_after_paste(self) -> None:
-        from fleet.commands import spawn
+        from fleet.commands import start
 
         args = argparse.Namespace(
             project=str(self.project),
             task_id="200",
             description="auto-paste enter integration test",
             topology="solo",
-            role=None,
             agent=None,
             title=None,
             dry_run=False,
@@ -216,11 +232,11 @@ class SpawnAutopasteEnterTests(unittest.TestCase):
             prompt_delay=0.0,
         )
 
-        with unittest.mock.patch("fleet.commands.spawn.tmux_mod") as mock_tmux:
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
             mock_tmux.available.return_value = True
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception
-            result = spawn.run(args)
+            result = start.run(args)
 
         self.assertEqual(result, 0)
         mock_tmux.paste_buffer.assert_called_once()
@@ -232,14 +248,13 @@ class SpawnAutopasteEnterTests(unittest.TestCase):
         self.assertTrue(enter_calls, "send_keys with enter=True not called after paste")
 
     def test_no_auto_paste_skips_paste_and_enter(self) -> None:
-        from fleet.commands import spawn
+        from fleet.commands import start
 
         args = argparse.Namespace(
             project=str(self.project),
             task_id="201",
             description="no auto-paste test",
             topology="solo",
-            role=None,
             agent=None,
             title=None,
             dry_run=False,
@@ -247,11 +262,11 @@ class SpawnAutopasteEnterTests(unittest.TestCase):
             prompt_delay=0.0,
         )
 
-        with unittest.mock.patch("fleet.commands.spawn.tmux_mod") as mock_tmux:
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
             mock_tmux.available.return_value = True
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception
-            result = spawn.run(args)
+            result = start.run(args)
 
         self.assertEqual(result, 0)
         mock_tmux.paste_buffer.assert_not_called()

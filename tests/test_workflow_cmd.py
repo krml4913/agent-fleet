@@ -50,7 +50,7 @@ class WorkflowCmdTests(unittest.TestCase):
         r = run_fleet("workflow", "--project", str(self.project), "show", "bare")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("workflow: bare", r.stdout)
-        self.assertIn("on_pre_spawn", r.stdout)
+        self.assertIn("on_pre_start", r.stdout)
         self.assertIn("on_post_done", r.stdout)
 
     def test_show_unknown(self) -> None:

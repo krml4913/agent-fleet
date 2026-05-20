@@ -1,7 +1,7 @@
 """``git_worktree`` workflow.
 
-On spawn: create a git worktree at ``<state_dir>/worktrees/task-<id>``
-on branch ``task/<id>`` from the project root. The spawn window's cwd
+On start: create a git worktree at ``<state_dir>/worktrees/task-<id>``
+on branch ``task/<id>`` from the project root. The start window's cwd
 is overridden to that worktree.
 
 On done: no-op for MVP. Worktree teardown will land in a follow-up
@@ -21,7 +21,7 @@ DESCRIPTION = (
 )
 
 
-def on_pre_spawn(ctx: dict[str, Any]) -> None:
+def on_pre_start(ctx: dict[str, Any]) -> None:
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
     target = Path(ctx.get("project_root") or state_dir.parent)
