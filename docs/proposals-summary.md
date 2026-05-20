@@ -13,7 +13,7 @@
 | # | proposal | §11 | status | 主な決定要素 |
 |---|---|---|---|---|
 | 1 | `cli-split-proposal.md` | — | **実装済み** (#7, #9, #12, #15) | `fleet` / `fleet-agent` 2 binaries |
-| 2 | `role-structure-proposal.md` | 4 | 議論待ち | task.yaml の `role:` を SOT、 env `FLEET_DRIVER_ROLE` 注入 |
+| 2 | `role-structure-proposal.md` | ~~4~~ | **却下** | 問題設定が誤り (詳細下記)。 §11 priority 4 ごと却下 |
 | 3 | `dialogue-trace-proposal.md` | 5 | 議論待ち | user→driver の answer/生入力を events.jsonl + dialogue.md に記録 |
 | 4 | `inbox-ack-proposal.md` | 6 | 議論待ち | helper 経由 auto-ack + watermark event の段階導入 |
 | 5 | `prompt-structure-proposal.md` | 7 | 議論待ち | 規約 + 行数 cap + base 1 ファイル維持 |
@@ -24,18 +24,19 @@
 
 ## 各 proposal の TL;DR
 
-### 2. role の構造化 (§11 priority 4)
+### 2. role の構造化 (§11 priority 4) — 【却下 2026-05-20】
 
-driver が自分の role を知る経路が現状 **散文 prompt 任せ**。 「dynamic prompt
-injection 廃止」 方針と矛盾しかけ。 実態は構造化情報が task.yaml と
-driver-prompt.md の front matter に二重で書かれているので **保管は既にある**、
-問題は driver が機械的に取り出す API が無いこと。
+proposal は「role が task.yaml と driver-prompt.md に二重管理されている」 を
+問題として立てたが、 これは誤り。 driver-prompt.md は spawn のたびに task.yaml
+から render される **揮発的派生物** で、 SOT は task.yaml 一本。 render 元と
+render 結果を 2 箇所と数えていただけ (task description も同じく driver-prompt
+に "二重" に存在するが問題視されない)。
 
-**推奨:** task.yaml の `role:` を SOT、 spawn 時に pane env
-`FLEET_DRIVER_ROLE` を注入、 取り出し用に `fleet-agent role` を追加。
-役割の値域は fix しない (topology が任意に決められる)。 role 切り替えは
-別 driver の spawn で扱う (§11 priority 2 = topology orchestration の領分)。
-`FLEET_ROLE` は cli-split-proposal §7-4 で却下した別概念なので **別名** にする。
+role は task description と同格の **task の本質的変数** で、 prompt に出るのは
+当然。 forge が廃止した 「肥大化する dynamic prompt injection」 とは別物。
+解くべき実害が無いため、 §11 priority 4 ごと却下。 `FLEET_DRIVER_ROLE` env や
+`fleet-agent role` CLI は無い問題への機能追加になる (cli-split で CLI を絞った
+精神に反する)。 詳細は `docs/role-structure-proposal.md` ヘッダ。
 
 ### 3. dialogue trace (§11 priority 5)
 
@@ -103,11 +104,11 @@ PR は誰の責務でもない (driver の自律判断か leader 代行)。 dogf
 
 ## 議論の進め方 (user 復帰時の想定)
 
-1. **role-structure (priority 4)** から議論する流れが自然 — env / cli / 命名の話で他 proposal の前提
-2. **inbox-ack** と **dialogue-trace** はセットで議論できる (両方が events.jsonl と driver 通信の話)
-3. **prompt-structure** は他 3 proposal の集大成 — 1 行ずつ base.md に書きたい要求群に対する規律
-4. **pr-workflow** は §11 priority 3 (commit 責務) の決着案を内包 — root 議論の前哨
-5. 合意がついたら **§11 priority 1-3 (root)** にようやく入れる:
+- ~~role-structure~~ は **却下済み** (上記)。 議論不要。
+1. **inbox-ack** と **dialogue-trace** はセットで議論できる (両方が events.jsonl と driver 通信の話)
+2. **prompt-structure** は他 proposal の集大成 — 1 行ずつ base.md に書きたい要求群に対する規律
+3. **pr-workflow** は §11 priority 3 (commit 責務) の決着案を内包 — root 議論の前哨
+4. 合意がついたら **§11 priority 1-3 (root)** にようやく入れる:
    - completed の定義
    - topology orchestration
    - driver / workflow 責務分界 (pr-workflow proposal の案がたたき台)

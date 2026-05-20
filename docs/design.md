@@ -344,7 +344,7 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 | 1 | completed の定義 | `fleet-agent done` が role 単位の完了か task 全体の完了か未区別。 implementer が done を叩いた瞬間に task 全体が completed 扱いになって reviewer が走らない | 未着手 (root、 user 判断待ち) |
 | 2 | topology orchestration | pair_review / multi_stage が役割を自動で進行する仕組みが無い。 現状 leader が手で次の role を spawn してる。 責務は topology runner か leader か | 未着手 (root、 user 判断待ち) |
 | 3 | driver の commit / workflow 責務分界 | driver が commit するのか workflow plugin がするのか未定義。 現状 driver が自律判断 (= 大体しない) で、 leader が代行 commit している | 未着手 (root)。 ※ `pr-workflow-proposal.md` にたたき台あり |
-| 4 | role の構造化 | driver が自分の role (implementer/reviewer/...) を文章ベース prompt で知る現状は dynamic prompt injection 廃止方針と矛盾しかけ。 env / task.yaml / 別仕組みで構造化したい | **提案済み**: `docs/role-structure-proposal.md` |
+| ~~4~~ | ~~role の構造化~~ | **却下 (2026-05-20)**: driver-prompt は task.yaml から都度 render される揮発的派生物で、 SOT は task.yaml 一本。 「二重管理」 ではなく render 元と結果。 role は task description と同格の本質的変数で、 prompt に出るのは forge 的な dynamic injection 肥大化とは別物。 解くべき実害が無い。 詳細は `docs/role-structure-proposal.md` (却下) | **却下** |
 | 5 | dialogue trace | driver pane で user が直接打った内容、 および `fleet-agent ask` への user の回答が events.jsonl に残らない。 ask/answer は片側のみ記録、 audit / 引き継ぎ困難 | **提案済み**: `docs/dialogue-trace-proposal.md` |
 | 6 | inbox の read/ack 機構 | leader → driver の inbox.md を driver が読んだか確認する return path が無い | **提案済み**: `docs/inbox-ack-proposal.md` |
 
@@ -361,7 +361,7 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 
 各論点は議論を継続する。 グループ A は **2026-05-20 の dogfooding セッションで露呈** した穴で、 機能追加より先に潰す方針。
 
-priority 4〜8 は 2026-05-20 の dogfooding で **方針提案ドラフトまで作成済み** (`docs/proposals-summary.md` が入り口)。 実装は user/leader の議論で合意してから。 root の 1〜3 は提案も未着手で、 まず user 判断が要る。
+priority 5〜8 は 2026-05-20 の dogfooding で **方針提案ドラフトまで作成済み** (`docs/proposals-summary.md` が入り口)。 実装は user/leader の議論で合意してから。 root の 1〜3 は提案も未着手で、 まず user 判断が要る。 priority 4 は議論の結果 **却下** (上表参照)。
 
 ---
 
@@ -382,6 +382,8 @@ priority 4〜8 は 2026-05-20 の dogfooding で **方針提案ドラフトま�
 11. **2026-05-20**: dogfooding 開始。 CLI 整理 (fleet / fleet-agent 2 バイナリ化) の方針合意、 実装着手
 12. **2026-05-20**: dogfooding で 6 つの穴が露呈 (completed の定義 / topology orchestration / driver の commit 責務 / role 構造化 / dialogue trace / inbox ack)。 §11 を再構成、 「足元固め」を機能追加より先行させる方針に転換
 13. **2026-05-20**: preset の codex agent を一時的に全部 claude に置換。 codex は動作未検証で、 まず claude スタックで安定化に集中する判断。 codex CLI / parse 自体は残し、 explicit に指定可能
+14. **2026-05-20**: dogfooding auto-pilot で §11 priority 4〜8 の方針提案ドラフトを作成 (role-structure / dialogue-trace / inbox-ack / prompt-structure / pr-workflow + archive-retention)。 `docs/proposals-summary.md` が入り口
+15. **2026-05-20**: §11 priority 4 「role の構造化」 を **却下**。 driver-prompt は task.yaml から render される揮発的派生物であり SOT は task.yaml 一本、 「二重管理」 という proposal の問題設定が誤り。 role は task description と同格の本質的変数で prompt に出て当然 (forge 的 dynamic injection 肥大化とは別物)。 解くべき実害が無いと判断。 proposal の前提を鵜呑みにせず実害ベースで却下した例
 
 ---
 
