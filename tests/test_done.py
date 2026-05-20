@@ -1,11 +1,13 @@
 """Tests for ``fleet done``."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -84,8 +86,9 @@ class DoneTests(unittest.TestCase):
 
     def test_done_multi_stage_advances_current_stage(self) -> None:
         """Done on a multi-stage task marks stage done and orchestrator sets next to running."""
+        sd = self.project / ".fleet-state"
         state.save_task(
-            self.project / ".fleet-state",
+            sd,
             "2",
             {
                 "id": "2",
@@ -102,14 +105,27 @@ class DoneTests(unittest.TestCase):
             },
         )
         # Create task directory so orchestrator can write driver-prompt.md
-        task_dir = self.project / ".fleet-state" / "tasks" / "task-2"
+        task_dir = sd / "tasks" / "task-2"
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "driver-prompt.md").write_text("test prompt")
         (task_dir / "inbox.md").write_text("")
         (task_dir / "outbox.md").write_text("")
-        r = self._run("done", "2")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        task = state.load_task(self.project / ".fleet-state", "2")
+
+        # Call done API directly (not subprocess) so we can mock _launch_driver_for_stage
+        # and prevent real tmux window creation.
+        from fleet.commands import done as done_mod
+
+        with (
+            unittest.mock.patch("fleet.orchestrator._launch_driver_for_stage"),
+            unittest.mock.patch(
+                "fleet.commands.done.task_context.resolve",
+                return_value=(sd, "2"),
+            ),
+        ):
+            ret = done_mod.run(argparse.Namespace(task_id="2", result="approved"))
+
+        self.assertEqual(ret, 0)
+        task = state.load_task(sd, "2")
         # Stage 0 done; orchestrator set stage 1 to running → overall running
         self.assertEqual(task["stages"][0]["status"], "done")
         self.assertEqual(task["stages"][1]["status"], "running")
