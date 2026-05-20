@@ -259,11 +259,40 @@ implement → peer_review (AI 査読ループ, max 3 回) → user_approval → 
 - changes-requested: peer_review の phase に応じてループを回す
 - peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
 
-### 6.4 preset / custom
+### 6.4 topology YAML schema
+
+topology YAML の必須・任意フィールドを以下に明記する。形式言語 (JSON Schema 等) は使わない (§1.4 原則 1)。
+
+**トップレベル**
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `name` | 必須 | topology の識別名。ファイル名 (stem) と一致すること |
+| `description` | 任意 | 人間向けの説明文 |
+| `stages` | 必須 | stage オブジェクトのリスト。1 件以上必要 |
+
+**`stages[]` (各 stage)**
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `role` | 必須 | driver が担う役割名 (例: `driver`, `implementer`, `designer`) |
+| `agent` | 任意 | 使用する agent (例: `claude:sonnet`)。省略時は `--agent` 引数の値が使われる |
+| `peer_review` | 任意 | AI 査読を挟む場合に指定。`role` サブフィールドで査読者の役割を指定する |
+| `user_approval` | 任意 | 人間の承認ポイント。`"required"` / `"optional"` の文字列、またはオブジェクト形式 |
+
+`validate()` はトップレベルの `name` / `stages` 必須チェックと、各 stage の `role` 必須チェックを行う。
+それ以上の形式検証 (`peer_review` の構造等) は orchestrator 側に委ねる。
+
+### 6.5 preset / custom
 
 - fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` の 3 つ
 - 各 project は `.fleet-state/topologies/` に自前 topology を定義可能 (preset を shadow)
 - タスク開始時に `fleet-agent start --topology <name> ...` で選択
+
+**preset は template である。** 同梱 preset は「こう書けば動く」という推奨デフォルト値を示すだけであり、
+プロジェクト固有の制約には合わない場合がある。実プロジェクトは `.fleet-state/topologies/` に同名ファイルを
+置くことで preset を上書きできるし、新しい名前で独自 topology を追加してもよい。
+`agent:` 既定値の変更、`user_approval` の追加・削除など、フィールドの自由な変更を推奨する。
 
 ---
 

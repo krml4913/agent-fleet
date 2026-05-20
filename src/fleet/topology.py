@@ -98,14 +98,11 @@ def expand_stages(topo: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def validate(data: dict[str, Any]) -> None:
-    """Run a minimal sanity check on a topology document.
+    """Sanity-check a topology document (design doc §6).
 
-    Requires:
-      * ``name`` field
-      * at least one of ``roles`` / ``stages``
-
-    More elaborate schema enforcement is deferred until topology consumers
-    (spawn / orchestrator) need richer guarantees.
+    Required fields:
+      * ``name``
+      * ``stages`` — non-empty list; each element must be a mapping with ``role``
     """
     if not isinstance(data, dict):
         raise ValueError("topology must be a YAML mapping at the top level")
@@ -115,6 +112,14 @@ def validate(data: dict[str, Any]) -> None:
         raise ValueError(
             f"topology must define 'stages'; got keys={sorted(data)}"
         )
+    stages = data["stages"]
+    if not isinstance(stages, list) or len(stages) == 0:
+        raise ValueError("topology 'stages' must be a non-empty list")
+    for i, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            raise ValueError(f"topology stages[{i}] must be a mapping, got {type(stage).__name__}")
+        if "role" not in stage:
+            raise ValueError(f"topology stages[{i}] missing required field: role")
 
 
 # ---------------------------------------------------------------------------
