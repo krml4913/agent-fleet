@@ -251,7 +251,20 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 
 これにより coding 以外 (research / monitoring / data analysis 等) の用途も plugin 次第で乗る。
 
-### 8.2 配置
+### 8.2 git 操作の責務分界 (確定: 2026-05-20)
+
+git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / rebase 失敗)。 Python コードで全例外を捌くのは破綻するため、 操作を 2 種類に分けて担い手を明確にする。
+
+| 種別 | 操作 | 担い手 | 理由 |
+|---|---|---|---|
+| **作業の git** | commit / push / PR 作成 / conflict 解決 / rebase | **driver (AI)** | 例外が多く AI が柔軟に対応できる |
+| **ライフサイクル境界の git** | `worktree add` / `worktree remove` | **plugin (仕組み側)** | 定型操作で例外がほぼ無い; driver が自分の作業場所を自分で作れない (鶏と卵) |
+
+- driver は作業完了後に `commit → push → gh pr create → fleet-agent done` を実行する。 手順は `docs/prompts/driver-base.md` に明記。
+- fleet core の Python コードは作業の git (commit / push / PR) を一切叩かない。
+- PR のマージは driver が行わない。 leader / user の判断に委ねる。
+
+### 8.3 配置
 
 | 機能 | 配置 | 備考 |
 |---|---|---|
@@ -262,21 +275,19 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 | events.jsonl 記録 | core | 監査 log は core |
 | dashboard 生成 | core | view layer |
 | `pre_spawn` / `post_done` hook 機構 | core | plugin がここに乗る |
-| worktree 作成 / 削除 | **plugin** | git workflow 専用 |
-| PR 作成 / merge | **plugin** | git workflow 専用 |
-| changelog 更新 | **plugin** | 開発フロー専用 |
-| review-request | **plugin** | topology と workflow に応じる |
+| worktree 作成 / 削除 | **plugin** | ライフサイクル境界の git |
+| commit / push / PR 作成 | **driver (AI)** | 作業の git; core は関与しない |
+| changelog 更新 | **driver (AI)** | 開発フローの一部; 作業の git と同様 |
+| review-request | **driver (AI)** | topology と workflow に応じて role が判断 |
 
-### 8.3 想定 workflow plugin
+### 8.4 想定 workflow plugin
 
-- `git-worktree-workflow`: forge 互換、 worktree + branch + PR
-- `bare-workspace-workflow`: worktree なし、 直接編集
-- `pr-based-workflow`: PR 作成 + auto-merge
-- `monorepo-workflow`: subdir 指定
-- `design-doc-workflow`: markdown 編集のみ、 git 関与なし
-- `research-workflow`: read-only 調査
+plugin の責務は worktree ライフサイクル (作成/削除) のみ。 PR / commit は plugin の担当ではない。
 
-詳細仕様は GitHub Issues で議論 (`workflow plugin` 関連の Issue)。
+- `git_worktree`: worktree + branch 作成/削除 (現行実装)
+- `bare`: worktree なし、 直接編集 (git 非依存)
+
+plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ねる。
 
 ---
 
