@@ -5,6 +5,17 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### race topology を廃止 (2026-05-20)
+
+**Migration note**: `race` topology preset および `candidates` shape は削除された。
+Issue #29 結論 E の実装 (root 大改修 段階 1)。
+
+- `src/fleet/presets/race.yaml` を削除
+- topology の valid shape は `roles` / `stages` のみ (`candidates` は無効)
+- preset は `solo` / `pair_review` / `multi_stage` の 3 つ
+
+`candidates` を使っていた topology YAML は `roles` / `stages` に書き直すこと。
+
 ### inbox delivery + ack 機構 (2026-05-20)
 
 leader → driver の通知を double-ended に強化。

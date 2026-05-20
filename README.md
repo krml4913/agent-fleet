@@ -54,7 +54,7 @@ is vendored under `vendor/`.
 1. The user talks to the **leader** for task assignment, and directly
    to a **driver** when refining one task.
 2. **Multi-vendor agents** (claude / codex) coexist in one project.
-3. **Team topology** (solo / pair-review / multi-stage / race) is
+3. **Team topology** (solo / pair-review / multi-stage) is
    chosen per task via YAML.
 4. **Workflow plugins** keep git-specific bits (worktrees, branches,
    PRs) out of the core; non-coding workflows can plug in the same
@@ -113,7 +113,7 @@ agent-fleet/
   src/fleet/          # cli, state, dashboard, ...
     commands/         # one module per subcommand
     plugins/          # bare, git_worktree
-    presets/          # solo, pair_review, multi_stage, race
+    presets/          # solo, pair_review, multi_stage
   vendor/             # PyYAML pure-Python (no pip required)
   tests/              # stdlib unittest, 111+ cases
   docs/design.md      # design document

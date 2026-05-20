@@ -204,17 +204,11 @@ stages:
   - role: user_review
     actor: human
 
-# Topology D: race (1 つの task を複数 agent で競争、 winner 採用)
-topology: race
-candidates:
-  - agent: claude:sonnet
-  - agent: codex:o4-mini
-winner_decision: leader
 ```
 
 ### 6.3 preset / custom
 
-- fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` / `race` 等 (詳細は別途設計)
+- fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` (詳細は別途設計)
 - 各 project は `.fleet-state/topologies/` に自前 topology を定義可能
 - spawn 時に `fleet-agent spawn --topology <name> ...` で選択
 

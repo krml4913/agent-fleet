@@ -21,7 +21,7 @@ class TopologyTests(unittest.TestCase):
         self.assertIn("solo", names)
         self.assertIn("pair_review", names)
         self.assertIn("multi_stage", names)
-        self.assertIn("race", names)
+        self.assertNotIn("race", names)
 
     # ---- loading + validating presets ----
 
@@ -73,7 +73,6 @@ class TopologyTests(unittest.TestCase):
     def test_validate_accepts_each_shape(self) -> None:
         topology.validate({"name": "a", "roles": [{"role": "r"}]})
         topology.validate({"name": "b", "stages": [{"role": "s"}]})
-        topology.validate({"name": "c", "candidates": [{"agent": "x"}]})
 
 
 if __name__ == "__main__":
