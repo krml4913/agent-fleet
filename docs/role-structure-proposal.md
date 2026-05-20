@@ -1,7 +1,14 @@
 # role の構造化 方針提案
 
 > 作成: 2026-05-20 / driver: task-role-structure
-> ステータス: 議論用ドラフト (実装前)
+> **ステータス: 却下 (2026-05-20)** —— 議論の結果、 この proposal の問題設定は誤り
+> と判断。 driver-prompt.md は task.yaml から都度 render される揮発的派生物で、
+> SOT は task.yaml 一本。 「role が二重管理されている」 は render 元と render 結果
+> を 2 箇所と数えた誤り (task description も同じく driver-prompt に "二重" に出るが
+> 誰も問題視しない)。 role は task の本質的変数で prompt に出るのは当然であり、
+> forge 的な dynamic injection 肥大化とは別物。 解くべき実害が無いため却下。
+> `FLEET_DRIVER_ROLE` env / `fleet-agent role` CLI は無い問題への機能追加になる。
+> 以下は却下に至った経緯の記録として残す。
 > 関連: `docs/design.md` §6 §11 priority 4、 `docs/cli-split-proposal.md` §7-4、
 >      `src/fleet/driver_prompt.py`、 `src/fleet/state.py`、 `src/fleet/topology.py`、
 >      `src/fleet/commands/spawn.py`、 `src/fleet/presets/*.yaml`、
