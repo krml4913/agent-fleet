@@ -20,8 +20,8 @@ from .. import tmux as tmux_mod
 from ..events import append_event
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file looking for the repo root (fleet-agent marker or .git)."""
+def _fleet_clone_root() -> Path:
+    """Return the agent-fleet clone root (where fleet-agent script lives)."""
     here = Path(__file__).resolve()
     for parent in here.parents:
         if (parent / "fleet-agent").exists() or (parent / ".git").is_dir():
@@ -47,11 +47,11 @@ def _git_toplevel(cwd: Path) -> Path | None:
     return Path(root).resolve() if root else None
 
 
-def _guard_codex_trust(vendor: str, state_dir: Path) -> int | None:
+def _guard_codex_trust(vendor: str, state_dir: Path, project_root: Path | None = None) -> int | None:
     if vendor != "codex":
         return None
 
-    repo_root = _git_toplevel(state_dir.parent)
+    repo_root = _git_toplevel(project_root or state_dir.parent)
     if repo_root is None:
         return None
     if agents_mod.codex_repo_trusted(repo_root):
@@ -98,7 +98,7 @@ def launch_stage_driver(
     try:
         import os
 
-        repo_root = _find_repo_root()
+        repo_root = _fleet_clone_root()
         driver_env = {
             "FLEET_TASK_ID": task_id,
             "FLEET_STATE_DIR": str(state_dir),
@@ -148,7 +148,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project path (default: cwd; .fleet-state/ is discovered upward)",
+        help="Project name (default: resolved from cwd via registry)",
     )
     p.add_argument(
         "--topology",
@@ -192,10 +192,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.discover_state_dir(Path(args.project))
+    project_arg = getattr(args, "project", ".")
+    project_name = project_arg if project_arg != "." else None
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
     if state_dir is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.project).resolve()}",
+            f"error: no registered project found for {project_arg!r}",
             file=sys.stderr,
         )
         return 1
@@ -243,7 +245,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    guard_rc = _guard_codex_trust(vendor, state_dir)
+    # Resolve project_root from project.yaml before the codex trust check.
+    try:
+        _pre_project = state_mod.load_project(state_dir)
+        _project_root_for_trust = Path(_pre_project.get("repo", str(state_dir.parent)))
+    except FileNotFoundError:
+        _project_root_for_trust = None
+
+    guard_rc = _guard_codex_trust(vendor, state_dir, _project_root_for_trust)
     if guard_rc is not None:
         return guard_rc
 
@@ -263,7 +272,7 @@ def run(args: argparse.Namespace) -> int:
         "agent": agent_spec,
         "description": args.description,
         "title": title,
-        "project_root": state_dir.parent,
+        "project_root": _project_root_for_trust or state_dir.parent,
         "dry_run": bool(args.dry_run),
     }
     try:
@@ -297,8 +306,7 @@ def run(args: argparse.Namespace) -> int:
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt)
 
-    project = state_mod.load_project(state_dir)
-    project_name = project.get("name", "?")
+    project_name = (_pre_project or {}).get("name", "?")
     append_event(
         state_dir / "events.jsonl",
         "start",

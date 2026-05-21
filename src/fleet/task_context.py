@@ -31,19 +31,20 @@ def resolve(
     """Return ``(state_dir, task_id)`` for the current invocation."""
     here = Path(cwd) if cwd is not None else Path.cwd()
 
-    # Try cwd-based discovery first; fall back to FLEET_STATE_DIR when that
-    # fails (e.g. the driver pane's CWD is outside the project tree but
-    # FLEET_STATE_DIR was injected by spawn).
-    state_dir = state_mod.discover_state_dir(here)
+    # FLEET_STATE_DIR wins (always set in spawned driver panes).
+    state_dir: Path | None = None
+    env_state_dir = os.environ.get("FLEET_STATE_DIR")
+    if env_state_dir:
+        candidate = Path(env_state_dir)
+        state_dir = candidate if candidate.is_dir() else None
+
+    # Fall back to registry-based resolution from cwd.
     if state_dir is None:
-        env_state_dir = os.environ.get("FLEET_STATE_DIR")
-        if env_state_dir:
-            candidate = Path(env_state_dir)
-            state_dir = candidate if candidate.is_dir() else None
+        state_dir = state_mod.resolve_state_dir(here)
 
     if state_dir is None:
         raise TaskNotFound(
-            f"no .fleet-state/ found in any parent of {here.resolve()}"
+            f"no registered project found for {here.resolve()}"
         )
 
     task_id = explicit_id or os.environ.get("FLEET_TASK_ID")
@@ -68,5 +69,5 @@ def _from_cwd(cwd: Path, state_dir: Path) -> str | None:
         return None
     head = rel.parts[0]
     if head.startswith("task-"):
-        return head[len("task-") :]
+        return head[len("task-"):]
     return None

@@ -10,10 +10,12 @@ adapt it to argparse.
 """
 from __future__ import annotations
 
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-# PyYAML (vendored or system) for task.yaml — supports nested stages structure.
+# PyYAML (vendored or system) for task.yaml and projects.yaml.
 _VENDOR = Path(__file__).resolve().parent.parent.parent / "vendor"
 if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
@@ -21,11 +23,16 @@ if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
 import yaml as _yaml
 
 from .events import utcnow_iso
-from .locking import atomic_write
+from .locking import atomic_update, atomic_write
 from . import simple_yaml  # kept for flat project.yaml
 
 
-STATE_DIR_NAME = ".fleet-state"
+# Name of the central state directory inside the agent-fleet clone, and the
+# global registry / per-project subdir within it (design doc §5, Issue #67).
+STATE_HOME_NAME = "fleet-state"
+REGISTRY_NAME = "projects.yaml"
+PROJECTS_SUBDIR = "projects"
+REGISTRY_VERSION = 1
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "prompts"
 
@@ -37,12 +44,188 @@ _MEMORY_INDEX_TEMPLATE = """\
 
 
 # ---------------------------------------------------------------------------
+# fleet_home — central state root
+# ---------------------------------------------------------------------------
+
+
+def fleet_home() -> Path:
+    """Return the central ``fleet-state/`` directory.
+
+    Resolution order:
+    1. ``$FLEET_HOME`` env var (override, useful in tests and alternative setups).
+    2. ``<agent-fleet clone>/fleet-state/`` — derived from ``__file__``.
+    """
+    env = os.environ.get("FLEET_HOME")
+    if env:
+        return Path(env).expanduser().resolve()
+    # src/fleet/state.py → parents[0]=fleet, [1]=src, [2]=clone root
+    clone_root = Path(__file__).resolve().parents[2]
+    return clone_root / STATE_HOME_NAME
+
+
+def registry_path() -> Path:
+    """Return the path to the global ``projects.yaml`` registry."""
+    return fleet_home() / REGISTRY_NAME
+
+
+# ---------------------------------------------------------------------------
+# Registry read/write
+# ---------------------------------------------------------------------------
+
+
+def _empty_registry() -> dict:
+    return {"version": REGISTRY_VERSION, "projects": {}}
+
+
+def load_registry() -> dict:
+    """Load (or synthesise) the global registry.
+
+    Returns ``{"version": 1, "projects": {...}}``; never raises on absent file.
+    """
+    path = registry_path()
+    if not path.exists():
+        return _empty_registry()
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        return _empty_registry()
+    data = _yaml.safe_load(text) or {}
+    data.setdefault("version", REGISTRY_VERSION)
+    data.setdefault("projects", {})
+    return data
+
+
+def _dump_registry(registry: dict) -> str:
+    return _yaml.safe_dump(
+        registry,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
+def register_project(name: str, repo: Path) -> None:
+    """Register *name* → *repo* in the global registry (flock + atomic RMW).
+
+    Raises ``ValueError`` on name collision or repo-path collision.
+    """
+    repo_resolved = Path(repo).resolve()
+
+    def _mutate(old_text: str) -> str:
+        reg = _yaml.safe_load(old_text) if old_text.strip() else None
+        if reg is None:
+            reg = _empty_registry()
+        reg.setdefault("projects", {})
+
+        if name in reg["projects"]:
+            raise ValueError(
+                f"project name {name!r} already registered "
+                f"(repo: {reg['projects'][name].get('repo')}); "
+                f"use --name <other> to pick a different name"
+            )
+        for existing_name, entry in reg["projects"].items():
+            if Path(entry.get("repo", "")).resolve() == repo_resolved:
+                raise ValueError(
+                    f"repo path {repo_resolved} already registered as {existing_name!r}"
+                )
+
+        reg["projects"][name] = {
+            "repo": str(repo_resolved),
+            "created_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+        }
+        return _dump_registry(reg)
+
+    atomic_update(registry_path(), _mutate)
+
+
+def unregister_project(name: str) -> None:
+    """Remove *name* from the global registry (flock + atomic RMW).
+
+    Raises ``KeyError`` when *name* is not registered.
+    """
+    def _mutate(old_text: str) -> str:
+        reg = _yaml.safe_load(old_text) if old_text.strip() else None
+        if reg is None or name not in reg.get("projects", {}):
+            raise KeyError(f"project {name!r} not found in registry")
+        del reg["projects"][name]
+        return _dump_registry(reg)
+
+    atomic_update(registry_path(), _mutate)
+
+
+# ---------------------------------------------------------------------------
+# Project state-dir helpers
+# ---------------------------------------------------------------------------
+
+
+def project_state_dir(name: str) -> Path:
+    """Return ``fleet_home()/projects/<name>`` (may not exist yet)."""
+    return fleet_home() / PROJECTS_SUBDIR / name
+
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+
+def _path_contains(ancestor: Path, descendant: Path) -> bool:
+    """Return True when *descendant* equals *ancestor* or is under it."""
+    return descendant == ancestor or ancestor in descendant.parents
+
+
+def resolve_state_dir(cwd: Path, *, project_name: str | None = None) -> Path | None:
+    """Resolve which project's state dir applies to *cwd*.
+
+    Priority:
+    1. *project_name* explicit → registry lookup by name.
+    2. *cwd* is inside the fleet-state tree
+       (``fleet_home()/projects/<name>/…``) → the enclosing project.
+    3. *cwd* is under a registered repo path → longest-path-match wins.
+
+    Returns ``None`` when no project can be determined.
+    """
+    cwd_r = Path(cwd).resolve()
+
+    # 1. Explicit name
+    if project_name is not None:
+        reg = load_registry()
+        if project_name not in reg.get("projects", {}):
+            return None
+        return project_state_dir(project_name)
+
+    # 2. cwd inside fleet-state/projects/<name>/
+    projects_root = fleet_home() / PROJECTS_SUBDIR
+    if _path_contains(projects_root, cwd_r):
+        try:
+            rel = cwd_r.relative_to(projects_root)
+        except ValueError:
+            pass
+        else:
+            if rel.parts:
+                name = rel.parts[0]
+                candidate = projects_root / name
+                if candidate.is_dir():
+                    return candidate
+
+    # 3. Longest-path-match against registered repo paths
+    reg = load_registry()
+    best: Path | None = None
+    best_len: int = -1
+    for name, entry in reg.get("projects", {}).items():
+        repo = Path(entry.get("repo", "")).resolve()
+        if _path_contains(repo, cwd_r) and len(repo.parts) > best_len:
+            best = project_state_dir(name)
+            best_len = len(repo.parts)
+
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
 
 
-def init_state(state_dir: Path, *, name: str) -> None:
-    """Create a fresh ``.fleet-state/`` directory tree.
+def init_state(state_dir: Path, *, name: str, repo: Path | None = None) -> None:
+    """Create a fresh project state directory tree.
 
     Caller is expected to verify ``state_dir`` does not exist; this function
     will let ``FileExistsError`` propagate if it does.
@@ -53,18 +236,19 @@ def init_state(state_dir: Path, *, name: str) -> None:
 
     _init_memory(state_dir)
 
-    save_project(
-        state_dir,
-        {
-            "name": name,
-            "created_at": utcnow_iso(),
-            "version": "0.0.1",
-        },
-    )
+    project_data: dict[str, str] = {
+        "name": name,
+        "created_at": utcnow_iso(),
+        "version": "0.0.1",
+    }
+    if repo is not None:
+        project_data["repo"] = str(Path(repo).resolve())
+
+    save_project(state_dir, project_data)
 
 
 def _init_memory(state_dir: Path) -> None:
-    """Populate ``.fleet-state/memory/`` with MEMORY.md and GUIDE.md."""
+    """Populate ``memory/`` with MEMORY.md and GUIDE.md."""
     memory_dir = state_dir / "memory"
     memory_dir.mkdir(exist_ok=True)
 
@@ -75,31 +259,12 @@ def _init_memory(state_dir: Path) -> None:
     guide_dest = memory_dir / "GUIDE.md"
     if not guide_dest.exists():
         guide_src = _PROMPTS_DIR / "fleet-memory-guide.md"
-        guide_dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
+        if guide_src.exists():
+            guide_dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
-
-def discover_state_dir(start: Path) -> Path | None:
-    """Walk up from ``start`` looking for a ``.fleet-state/`` directory.
-
-    Returns the located state dir or ``None`` if none exists in any ancestor.
-    """
-    cur = Path(start).resolve()
-    while True:
-        candidate = cur / STATE_DIR_NAME
-        if candidate.is_dir():
-            return candidate
-        if cur.parent == cur:
-            return None
-        cur = cur.parent
-
-
-# ---------------------------------------------------------------------------
-# Project (`.fleet-state/project.yaml`)
+# Project (`project.yaml`)
 # ---------------------------------------------------------------------------
 
 
@@ -122,7 +287,7 @@ def save_project(state_dir: Path, data: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tasks (`.fleet-state/tasks/task-<id>/task.yaml`)
+# Tasks (`tasks/task-<id>/task.yaml`)
 # ---------------------------------------------------------------------------
 
 
@@ -178,17 +343,12 @@ def save_task(state_dir: Path, task_id: str, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stage helpers (new schema: task has stages list as SOT)
+# Stage helpers
 # ---------------------------------------------------------------------------
 
 
 def derive_task_status(stages: list[dict]) -> str:
-    """Compute task-level status from stage list.
-
-    SOT is the stages list; ``task.status`` is a cached projection of it.
-    Stages with any progress (running or done) mean the task is "running";
-    "spawning" only when nothing has started yet (all pending).
-    """
+    """Compute task-level status from stage list."""
     if not stages:
         return "completed"
     statuses = [s.get("status", "pending") for s in stages]
@@ -213,11 +373,6 @@ def get_current_stage_index(stages: list[dict]) -> int:
 
 
 def _maybe_rebuild_dashboard(state_dir: Path) -> None:
-    """Rebuild ``dashboard.md`` after a state write.
-
-    Imported lazily to break the dashboard ↔ state import cycle (dashboard
-    needs to call back into ``list_tasks`` / ``load_project``).
-    """
     from . import dashboard  # local import: cycle break
 
     dashboard.rebuild(state_dir)

@@ -1,26 +1,27 @@
-"""``fleet init`` — initialize a project's ``.fleet-state/`` directory."""
+"""``fleet init`` — initialize a project in the central fleet-state registry."""
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
 
-from ..state import init_state
+from ..state import fleet_home, init_state, project_state_dir, register_project
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "init",
-        help="Initialize .fleet-state/ for a project",
+        help="Register a project and create its fleet-state directory",
         description=(
-            "Create .fleet-state/ inside the given project directory and "
-            "record the project name."
+            "Register the project repo in fleet-state/projects.yaml and "
+            "create fleet-state/projects/<name>/ with the initial state layout. "
+            "If --name is omitted the repo directory basename is used."
         ),
     )
     p.add_argument(
         "--name",
-        required=True,
-        help="Project name (used for the tmux session: fleet-<name>)",
+        default=None,
+        help="Project name (default: basename of path). Must be unique.",
     )
     p.add_argument(
         "path",
@@ -32,18 +33,39 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    project_path = Path(args.path).resolve()
-    if not project_path.is_dir():
-        print(f"error: not a directory: {project_path}", file=sys.stderr)
+    repo = Path(args.path).resolve()
+    if not repo.is_dir():
+        print(f"error: not a directory: {repo}", file=sys.stderr)
         return 1
 
-    state_dir = project_path / ".fleet-state"
+    name = args.name if args.name else repo.name
+    state_dir = project_state_dir(name)
+
     if state_dir.exists():
-        print(f"error: already initialized: {state_dir}", file=sys.stderr)
+        print(f"error: already registered: {name}", file=sys.stderr)
         return 1
 
-    init_state(state_dir, name=args.name)
-    print(f"Initialized fleet state at: {state_dir}")
-    print(f"  project name: {args.name}")
-    print(f"  tmux session: fleet-{args.name}")
+    try:
+        register_project(name, repo)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        init_state(state_dir, name=name, repo=repo)
+    except Exception as e:
+        # Roll back registry entry if state creation fails.
+        try:
+            from ..state import unregister_project
+            unregister_project(name)
+        except Exception:
+            pass
+        print(f"error: failed to create state directory: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Initialized fleet state:")
+    print(f"  project name: {name}")
+    print(f"  repo:         {repo}")
+    print(f"  state dir:    {state_dir}")
+    print(f"  tmux session: fleet-{name}")
     return 0

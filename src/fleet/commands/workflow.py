@@ -21,7 +21,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project path (default: cwd)",
+        help="Project name (default: resolved from cwd)",
     )
     sp = p.add_subparsers(dest="workflow_cmd", required=True, metavar="<sub>")
 
@@ -38,7 +38,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def _state_dir(project: str) -> Path | None:
-    return state_mod.discover_state_dir(Path(project))
+    project_name = project if project != "." else None
+    return state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
 
 
 def run_list(args: argparse.Namespace) -> int:
@@ -49,7 +50,7 @@ def run_list(args: argparse.Namespace) -> int:
     print()
     print("custom workflows:")
     if sd is None:
-        print("  (no .fleet-state/ found — run `fleet init` first)")
+        print("  (no registered project found for cwd — run `fleet init` first)")
     else:
         custom = plugins_mod.list_custom(sd)
         if not custom:
@@ -92,7 +93,7 @@ def run_set(args: argparse.Namespace) -> int:
     sd = _state_dir(args.project)
     if sd is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.project).resolve()}",
+            f"error: no registered project found for {args.project!r}",
             file=sys.stderr,
         )
         return 1

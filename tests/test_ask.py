@@ -15,58 +15,39 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
-
-
-def run_fleet(*args: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
-    return subprocess.run(
-        [sys.executable, str(FLEET), *args],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
 
 
 class AskTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
-        state.init_state(self.project / ".fleet-state", name="demo")
-        # Disable notification side-effects in tests.
-        (self.project / ".fleet-state" / "notify.yaml").write_text(
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "demo", self.project)
+        (self.state_dir / "notify.yaml").write_text(
             "macos:\n  enabled: false\nslack:\n  enabled: false\n"
         )
         # Spawn one task to ask about.
-        result = run_fleet(
-            "start",
-            "--project", str(self.project),
-            "--dry-run",
-            "1", "Implement foo",
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run", "1", "Implement foo",
+            fleet_home=self.fleet_home,
         )
         assert result.returncode == 0, result.stderr
 
     def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
     def test_records_needs_input(self) -> None:
-        result = run_fleet(
-            "ask",
-            "--task-id", "1",
-            "Should I use approach A or B?",
-            env_extra={"FLEET_TASK_ID": ""},  # explicit --task-id wins anyway
-        )
-        # Ensure cwd discovery has somewhere to look — pass cwd=project via cwd kw.
-        # subprocess respects cwd separately; here we set --task-id so resolve()
-        # only needs state_dir lookup. State lookup walks up from cwd which is
-        # claude-forge (parent of agent-fleet) — neither has .fleet-state.
-        # Use --task-id + explicit project. There is no --project on `ask`,
-        # but task_context.resolve walks from cwd. We need cwd to be inside
-        # the project. Easier: re-run with cwd argument.
-        # Fall back: invoke from inside project root via cwd.
         env = os.environ.copy()
+        env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "--task-id", "1",
              "Should I use approach A or B?"],
@@ -76,22 +57,22 @@ class AskTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        sd = self.project / ".fleet-state"
-        task = state.load_task(sd, "1")
+        task = state.load_task(self.state_dir, "1")
         self.assertEqual(task["status"], "needs_input")
-        questions = (sd / "tasks" / "task-1" / "questions.md").read_text()
+        questions = (self.state_dir / "tasks" / "task-1" / "questions.md").read_text()
         self.assertIn("approach A or B", questions)
         events = [
-            json.loads(l) for l in (sd / "events.jsonl").read_text().splitlines() if l
+            json.loads(l) for l in (self.state_dir / "events.jsonl").read_text().splitlines() if l
         ]
         needs_input_events = [e for e in events if e["type"] == "needs_input"]
         self.assertEqual(len(needs_input_events), 1)
         self.assertEqual(needs_input_events[0]["task_id"], "1")
 
     def test_resolves_from_cwd(self) -> None:
-        task_cwd = self.project / ".fleet-state" / "tasks" / "task-1"
+        task_cwd = self.state_dir / "tasks" / "task-1"
         env = os.environ.copy()
         env.pop("FLEET_TASK_ID", None)
+        env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "from cwd"],
             capture_output=True, text=True,
@@ -102,6 +83,7 @@ class AskTests(unittest.TestCase):
 
     def test_unknown_task(self) -> None:
         env = os.environ.copy()
+        env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "--task-id", "999", "?"],
             capture_output=True, text=True,

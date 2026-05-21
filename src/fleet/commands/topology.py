@@ -23,7 +23,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project path used to resolve custom topologies (default: cwd)",
+        help="Project name used to resolve custom topologies (default: resolved from cwd)",
     )
     sp = p.add_subparsers(dest="topology_cmd", required=True, metavar="<sub>")
 
@@ -36,7 +36,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def _state_dir(project: str) -> Path | None:
-    return state_mod.discover_state_dir(Path(project))
+    project_name = project if project != "." else None
+    return state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
 
 
 def run_list(args: argparse.Namespace) -> int:
@@ -51,7 +52,7 @@ def run_list(args: argparse.Namespace) -> int:
     print()
     print("custom topologies:")
     if state_dir is None:
-        print("  (no .fleet-state/ found — run `fleet init` first)")
+        print("  (no registered project found for cwd — run `fleet init` first)")
     else:
         custom = topology_mod.list_custom(state_dir)
         if not custom:

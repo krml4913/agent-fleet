@@ -9,6 +9,7 @@ from pathlib import Path
 from .. import heartbeat
 from .. import state as state_mod
 from ..events import read_events
+from ..state import load_registry, project_state_dir
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -24,10 +25,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         description="Show project info, task list, and recent events.",
     )
     p.add_argument(
-        "path",
+        "name",
         nargs="?",
-        default=".",
-        help="Project root path (default: cwd)",
+        default=None,
+        help="Project name (default: resolved from cwd via registry)",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_projects",
+        help="Show summary for all registered projects",
     )
     p.add_argument(
         "--events",
@@ -40,10 +47,15 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.discover_state_dir(Path(args.path))
+    if getattr(args, "all_projects", False):
+        return _run_all(args)
+
+    project_name = getattr(args, "name", None)
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
     if state_dir is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.path).resolve()}",
+            f"error: no registered project found for {project_name!r}" if project_name
+            else "error: no registered project found for cwd",
             file=sys.stderr,
         )
         return 1
@@ -142,6 +154,61 @@ def run(args: argparse.Namespace) -> int:
     for status in ("done", "running", "needs_input"):
         legend.append(f"{_style('●', _status_color(status), use_color)} {status}")
     print("  ".join(legend))
+
+    return 0
+
+
+def _run_all(args: argparse.Namespace) -> int:
+    """Print a summary for every registered project."""
+    reg = state_mod.load_registry()
+    projects = reg.get("projects", {})
+    use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+    if not projects:
+        print("(no registered projects — run `fleet init` first)")
+        return 0
+
+    for name, entry in projects.items():
+        repo = entry.get("repo", "?")
+        state_dir = state_mod.project_state_dir(name)
+        repo_exists = Path(repo).is_dir()
+
+        header = _style(f"▶ {name}", _BOLD, use_color)
+        print(header + f"  ({repo})")
+
+        if not repo_exists:
+            print(
+                f"  {_style('⚠ repo missing', _RED + _BOLD, use_color)}"
+                f"  — fleet rm {name}"
+            )
+
+        if not state_dir.is_dir():
+            print("  (state dir not found)")
+            print()
+            continue
+
+        tasks = state_mod.list_tasks(state_dir)
+        by_status: dict[str, int] = {}
+        needs_input_tasks = []
+        for t in tasks:
+            s = t.get("status", "?")
+            by_status[s] = by_status.get(s, 0) + 1
+            if s == "needs_input":
+                needs_input_tasks.append(t)
+
+        task_summary = "  ".join(
+            f"{count} {_style('●', _status_color(st), use_color)} {st}"
+            for st, count in sorted(by_status.items())
+        ) if by_status else "(no tasks)"
+        print(f"  tasks: {task_summary}")
+
+        if needs_input_tasks:
+            print(
+                f"  {_style('⚠ needs input', _RED + _BOLD, use_color)}: "
+                + ", ".join(f"task-{t.get('id','?')}" for t in needs_input_tasks)
+            )
+
+        print()
 
     return 0
 
