@@ -68,8 +68,20 @@ class GitWorktreeTests(unittest.TestCase):
         worktree = self.state_dir / "worktrees" / "task-7"
         self.assertTrue(worktree.is_dir())
         self.assertEqual(ctx["task_extra"]["worktree"], str(worktree))
-        self.assertEqual(ctx["task_extra"]["branch"], "task/7")
+        self.assertEqual(ctx["task_extra"]["branch"], "testproj/task/7")
         self.assertEqual(ctx["cwd"], worktree)
+
+    def test_branch_name_is_project_scoped(self) -> None:
+        """Branch name must be <project-name>/task/<id> to avoid cross-project conflicts."""
+        ctx: dict = {
+            "state_dir": self.state_dir,
+            "task_id": "42",
+            "project_root": self.project,
+        }
+        git_worktree.on_pre_start(ctx)
+        branch = ctx["task_extra"]["branch"]
+        project_name = self.state_dir.name  # "testproj"
+        self.assertEqual(branch, f"{project_name}/task/42")
 
     def test_pre_start_rejects_duplicate(self) -> None:
         ctx: dict = {
@@ -92,7 +104,7 @@ class GitWorktreeTests(unittest.TestCase):
         self.assertTrue(worktree.is_dir())
 
         r = subprocess.run(
-            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/task/9"],
+            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/testproj/task/9"],
             capture_output=True,
         )
         self.assertEqual(r.returncode, 0)
@@ -106,7 +118,7 @@ class GitWorktreeTests(unittest.TestCase):
 
         self.assertFalse(worktree.exists())
         r = subprocess.run(
-            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/task/9"],
+            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/testproj/task/9"],
             capture_output=True,
         )
         self.assertNotEqual(r.returncode, 0)
