@@ -67,6 +67,70 @@ class StartTests(unittest.TestCase):
         self.assertEqual(starts[0]["task_id"], "7")
         self.assertTrue(starts[0].get("dry_run"))
 
+    def test_prompt_file_reads_description(self) -> None:
+        prompt_file = self.project / "task-prompt.md"
+        prompt_text = "File prompt first line\nSecond line from file\n"
+        prompt_file.write_text(prompt_text)
+
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--prompt-file", str(prompt_file), "from-file",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tdir = self.state_dir / "tasks" / "task-from-file"
+        task_data = state.load_task(self.state_dir, "from-file")
+        self.assertEqual(task_data["description"], prompt_text)
+        self.assertEqual(task_data["title"], "File prompt first line")
+        prompt = (tdir / "driver-prompt.md").read_text()
+        self.assertIn(prompt_text, prompt)
+        lines = [
+            json.loads(l)
+            for l in (self.state_dir / "events.jsonl").read_text().splitlines()
+            if l
+        ]
+        starts = [e for e in lines if e.get("type") == "start"]
+        self.assertEqual(starts[-1]["description"], prompt_text)
+
+    def test_prompt_file_and_description_is_error(self) -> None:
+        prompt_file = self.project / "task-prompt.md"
+        prompt_file.write_text("File prompt")
+
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--prompt-file", str(prompt_file), "both", "Inline prompt",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("either description or --prompt-file", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-both").exists())
+
+    def test_missing_description_and_prompt_file_is_error(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run", "missing-prompt",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("either description or --prompt-file", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-missing-prompt").exists())
+
+    def test_missing_prompt_file_is_error(self) -> None:
+        missing = self.project / "does-not-exist.md"
+
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--prompt-file", str(missing), "missing-file",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot read --prompt-file", result.stderr)
+        self.assertIn(str(missing), result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-missing-file").exists())
+
     def test_bare_workflow_prompt_omits_git_fragment(self) -> None:
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",

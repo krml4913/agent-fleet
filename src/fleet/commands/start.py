@@ -144,7 +144,13 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument("task_id", help="Unique task id within the project")
     p.add_argument(
         "description",
+        nargs="?",
         help="Task description (becomes the body of driver-prompt.md)",
+    )
+    p.add_argument(
+        "--prompt-file",
+        metavar="PATH",
+        help="Read the task description from PATH instead of a positional argument",
     )
     p.add_argument(
         "--project",
@@ -192,7 +198,33 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=run)
 
 
+def _resolve_description(args: argparse.Namespace) -> str | None:
+    description = getattr(args, "description", None)
+    prompt_file = getattr(args, "prompt_file", None)
+    has_description = description is not None
+    has_prompt_file = prompt_file is not None
+
+    if has_description and has_prompt_file:
+        print("error: pass either description or --prompt-file, not both", file=sys.stderr)
+        return None
+    if not has_description and not has_prompt_file:
+        print("error: pass either description or --prompt-file", file=sys.stderr)
+        return None
+    if has_prompt_file:
+        path = Path(prompt_file)
+        try:
+            return path.read_text()
+        except OSError as e:
+            print(f"error: cannot read --prompt-file {path}: {e}", file=sys.stderr)
+            return None
+    return description
+
+
 def run(args: argparse.Namespace) -> int:
+    description = _resolve_description(args)
+    if description is None:
+        return 1
+
     project_arg = getattr(args, "project", ".")
     project_name = project_arg if project_arg != "." else None
     state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
@@ -260,7 +292,7 @@ def run(args: argparse.Namespace) -> int:
     # Mark current stage as running
     expanded_stages[current_stage_idx]["status"] = "running"
 
-    title = args.title or args.description.splitlines()[0][:80]
+    title = args.title or (description.splitlines() or [""])[0][:80]
 
     # Workflow plugin: on_pre_start hook can attach extra task fields and/or
     # override the window cwd (e.g. git_worktree creates the worktree here).
@@ -271,7 +303,7 @@ def run(args: argparse.Namespace) -> int:
         "topology": args.topology,
         "role": role_name,
         "agent": agent_spec,
-        "description": args.description,
+        "description": description,
         "title": title,
         "project_root": _project_root_for_trust or state_dir.parent,
         "dry_run": bool(args.dry_run),
@@ -285,7 +317,7 @@ def run(args: argparse.Namespace) -> int:
     task_data: dict = {
         "id": args.task_id,
         "title": title,
-        "description": args.description,
+        "description": description,
         "status": "spawning",
         "topology": args.topology,
         "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
@@ -300,7 +332,7 @@ def run(args: argparse.Namespace) -> int:
     (task_dir_path / "outbox.md").write_text("")
     prompt = dp.render(
         task_id=args.task_id,
-        description=args.description,
+        description=description,
         topology_name=args.topology,
         role=role_name,
         agent=agent_spec,
@@ -316,6 +348,7 @@ def run(args: argparse.Namespace) -> int:
         topology=args.topology,
         role=role_name,
         agent=agent_spec,
+        description=description,
         dry_run=bool(args.dry_run),
     )
 
