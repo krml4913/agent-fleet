@@ -52,6 +52,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"  start it: fleet leader --project {args.project or name}", file=sys.stderr)
         return 1
 
+    # 前回の attach で残った stale な view session を掃除 (best-effort)
+    _sweep_stale_view_sessions(session)
+
     if args.target == "leader":
         window = "leader"
     else:
@@ -93,22 +96,12 @@ def run(args: argparse.Namespace) -> int:
                 return 1
 
         r3 = subprocess.run(
-            ["tmux", "set-option", "-t", view, "destroy-unattached", "on"],
-            capture_output=True,
-            text=True,
-        )
-        if r3.returncode != 0:
-            print(f"error: failed to configure view session: {r3.stderr.strip()}", file=sys.stderr)
-            subprocess.run(["tmux", "kill-session", "-t", view], capture_output=True)
-            return 1
-
-        r4 = subprocess.run(
             ["tmux", "select-window", "-t", f"{view}:{window}"],
             capture_output=True,
             text=True,
         )
-        if r4.returncode != 0:
-            print(f"error: failed to select window in view session: {r4.stderr.strip()}", file=sys.stderr)
+        if r3.returncode != 0:
+            print(f"error: failed to select window in view session: {r3.stderr.strip()}", file=sys.stderr)
             subprocess.run(["tmux", "kill-session", "-t", view], capture_output=True)
             return 1
 
@@ -117,3 +110,25 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     os.execvp("tmux", ["tmux", "attach", "-t", view])
+
+
+def _sweep_stale_view_sessions(session: str) -> None:
+    """クライアントが attach されていない古い view session を kill する (best-effort)。"""
+    try:
+        r = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            return
+        prefix = f"{session}-view-"
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name, attached = parts[0], parts[1]
+            if name.startswith(prefix) and attached == "0":
+                subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True)
+    except FileNotFoundError:
+        pass
