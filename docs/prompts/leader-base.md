@@ -28,6 +28,7 @@ Commands:
                         state when asked — never poll on a timer.
   - `fleet-agent ...` — agent-facing CLI. As leader you use:
         start <id> "<desc>" [--topology T] [--agent A]  — spawn a task
+        start <id> --prompt-file PATH [--topology T] [--agent A]
         inbox <id> "<msg>"                              — instruct a driver
         cleanup <id> [--archive]                        — retire a finished task
         send-prompt <id>                                — re-paste a driver prompt

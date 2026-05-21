@@ -119,6 +119,7 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
 
 - ユーザーとのタスク依頼会話
 - `fleet-agent start` でタスク開始 (どの agent vendor / model / topology で起動するか決める)
+  - 長い task description は `fleet-agent start <id> --prompt-file PATH` でファイルから渡せる
 - 必要に応じてユーザーへの高レベル進捗報告
 
 leader は driver の状態を polling したり、 needs_input を検知したりは **しない**。 これらは構造 (events / dashboard / 通知) が user に直接届ける。

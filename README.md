@@ -90,6 +90,7 @@ Leader-side (run by the leader agent):
 | Command | Purpose |
 |---|---|
 | `fleet-agent start <id> "<desc>" [--topology T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes prompt by default) |
+| `fleet-agent start <id> --prompt-file PATH [--topology T] [--agent A]` | Start a new task using the description read from a file |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
 | `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
