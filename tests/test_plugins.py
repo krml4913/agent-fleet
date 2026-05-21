@@ -40,6 +40,18 @@ class PluginsTests(unittest.TestCase):
         module = plugins.load_workflow(self.state_dir)
         self.assertEqual(module.WORKFLOW_NAME, "git_worktree")
 
+    def test_git_worktree_has_driver_prompt_fragment(self) -> None:
+        project = state.load_project(self.state_dir)
+        project["workflow"] = "git_worktree"
+        state.save_project(self.state_dir, project)
+        module = plugins.load_workflow(self.state_dir)
+        self.assertIn("Git workflow", module.DRIVER_PROMPT_FRAGMENT)
+        self.assertIn("gh pr create", module.DRIVER_PROMPT_FRAGMENT)
+
+    def test_bare_has_no_driver_prompt_fragment(self) -> None:
+        module = plugins.load_workflow(self.state_dir)
+        self.assertFalse(getattr(module, "DRIVER_PROMPT_FRAGMENT", ""))
+
     def test_run_hook_no_op_when_missing(self) -> None:
         module = plugins.load_workflow(self.state_dir)
         # bare has on_pre_start / on_post_done; nonexistent hook returns None.

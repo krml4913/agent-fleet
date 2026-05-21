@@ -181,6 +181,7 @@ def _launch_driver_for_stage(
 ) -> None:
     """Render driver-prompt.md for a stage and open its tmux window."""
     from . import driver_prompt as dp
+    from . import plugins as plugins_mod
     from . import tmux as tmux_mod
     from .commands.start import launch_stage_driver
 
@@ -195,6 +196,7 @@ def _launch_driver_for_stage(
     agent_spec = stage.get("agent", "")
     topology_name = task.get("topology", "unknown")
     description = task.get("description") or task.get("title", "")
+    workflow = plugins_mod.load_workflow(state_dir)
 
     prompt = dp.render(
         task_id=task_id,
@@ -202,6 +204,7 @@ def _launch_driver_for_stage(
         topology_name=topology_name,
         role=role_name,
         agent=agent_spec,
+        workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 

@@ -474,10 +474,13 @@ class WindowCwdTests(unittest.TestCase):
         worktree_path = "/tmp/fake-worktree-wt1"
         task = self._make_task("wt1", worktree=worktree_path)
         stage = task["stages"][0]
+        project = state.load_project(self.sd)
+        project["workflow"] = "git_worktree"
+        state.save_project(self.sd, project)
 
         with (
             unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt"),
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt") as mock_render,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator._launch_driver_for_stage(self.sd, "wt1", task, 0, stage)
@@ -485,6 +488,7 @@ class WindowCwdTests(unittest.TestCase):
         mock_launch.assert_called_once()
         kwargs = mock_launch.call_args.kwargs
         self.assertEqual(kwargs["window_cwd"], Path(worktree_path))
+        self.assertIn("Git workflow", mock_render.call_args.kwargs["workflow_fragment"])
 
     def test_no_worktree_task_passes_window_cwd_none(self) -> None:
         task = self._make_task("wt2", worktree=None)
@@ -492,7 +496,7 @@ class WindowCwdTests(unittest.TestCase):
 
         with (
             unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt"),
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt") as mock_render,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator._launch_driver_for_stage(self.sd, "wt2", task, 0, stage)
@@ -500,6 +504,7 @@ class WindowCwdTests(unittest.TestCase):
         mock_launch.assert_called_once()
         kwargs = mock_launch.call_args.kwargs
         self.assertIsNone(kwargs.get("window_cwd"))
+        self.assertEqual(mock_render.call_args.kwargs["workflow_fragment"], "")
 
     def test_tmux_unavailable_skips_launch(self) -> None:
         task = self._make_task("wt3", worktree="/tmp/fake-worktree-wt3")

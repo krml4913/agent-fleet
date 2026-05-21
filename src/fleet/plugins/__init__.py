@@ -8,6 +8,7 @@ live in ``<state_dir>/plugins/<name>.py`` and take priority.
 Plugin contract (everything optional):
 
     WORKFLOW_NAME: str
+    DRIVER_PROMPT_FRAGMENT: str
     on_pre_start(ctx: dict) -> None
     on_post_done(ctx: dict) -> None
 

@@ -1,8 +1,8 @@
 """``fleet preflight`` — environment dependency check.
 
-Verifies the toolbelt fleet relies on: Python version, tmux, git, and
-the agent CLIs (claude / codex). Required tools missing → exit 1;
-optional tools missing → warn but continue.
+Verifies the toolbelt fleet relies on: Python version, tmux, workflow
+dependencies, and the agent CLIs (claude / codex). Required tools
+missing → exit 1; optional tools missing → warn but continue.
 """
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .. import agents as agents_mod
+from .. import plugins as plugins_mod
+from .. import state as state_mod
 
 
 class CheckResult(NamedTuple):
@@ -54,10 +56,11 @@ def run(args: argparse.Namespace) -> int:
 
 
 def check_all() -> list[CheckResult]:
+    git_required = _git_required_for_cwd(Path.cwd())
     return [
         _check_python(),
         _check_command("tmux", ["tmux", "-V"], required=True),
-        _check_command("git", ["git", "--version"], required=True),
+        _check_command("git", ["git", "--version"], required=git_required),
         _check_command("claude", ["claude", "--version"], required=False),
         _check_command("codex", ["codex", "--version"], required=False),
         _check_codex_trust(),
@@ -85,6 +88,17 @@ def _check_command(name: str, version_argv: list[str], *, required: bool) -> Che
         return CheckResult(name, True, detail, required)
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return CheckResult(name, False, f"{type(e).__name__}", required)
+
+
+def _git_required_for_cwd(cwd: Path) -> bool:
+    state_dir = state_mod.resolve_state_dir(cwd)
+    if state_dir is None:
+        return False
+    try:
+        workflow = plugins_mod.load_workflow(state_dir)
+    except Exception:
+        return False
+    return getattr(workflow, "WORKFLOW_NAME", "bare") == "git_worktree"
 
 
 def _git_toplevel(cwd: Path) -> Path | None:
