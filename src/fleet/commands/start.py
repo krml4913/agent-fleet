@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +27,43 @@ def _find_repo_root() -> Path:
         if (parent / "fleet-agent").exists() or (parent / ".git").is_dir():
             return parent
     return here.parent.parent.parent.parent
+
+
+def _git_toplevel(cwd: Path) -> Path | None:
+    """Return git toplevel for ``cwd``, or None when cwd is not in a git repo."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    root = r.stdout.strip()
+    return Path(root).resolve() if root else None
+
+
+def _guard_codex_trust(vendor: str, state_dir: Path) -> int | None:
+    if vendor != "codex":
+        return None
+
+    repo_root = _git_toplevel(state_dir.parent)
+    if repo_root is None:
+        return None
+    if agents_mod.codex_repo_trusted(repo_root):
+        return None
+
+    print(
+        f"error: codex はこの repo ({repo_root}) を信頼していません。\n"
+        "       codex driver を起動する前に、一度このディレクトリで `codex` を起動し\n"
+        "       「1. Yes, continue」で承認してください。その後 start を再実行してください。",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def launch_stage_driver(
@@ -200,10 +238,14 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        agents_mod.parse_spec(agent_spec)
+        vendor, _model = agents_mod.parse_spec(agent_spec)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+
+    guard_rc = _guard_codex_trust(vendor, state_dir)
+    if guard_rc is not None:
+        return guard_rc
 
     # Mark current stage as running
     expanded_stages[current_stage_idx]["status"] = "running"

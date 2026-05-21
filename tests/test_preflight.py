@@ -4,6 +4,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,36 @@ class PreflightLibraryTests(unittest.TestCase):
         results = {r.name: r for r in preflight.check_all()}
         self.assertFalse(results["claude"].required)
         self.assertFalse(results["codex"].required)
+        self.assertFalse(results["codex-trust"].required)
+
+    def test_codex_trust_warns_when_untrusted(self) -> None:
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which",
+                return_value="/bin/codex",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._git_toplevel",
+                return_value=Path("/tmp/repo"),
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.agents_mod.codex_repo_trusted",
+                return_value=False,
+            ),
+        ):
+            result = preflight._check_codex_trust()
+
+        self.assertEqual(result.name, "codex-trust")
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("not trusted", result.detail)
+
+    def test_codex_trust_skips_without_codex(self) -> None:
+        with unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=None):
+            result = preflight._check_codex_trust()
+
+        self.assertTrue(result.ok)
+        self.assertIn("skipped", result.detail)
 
 
 class PreflightCmdSmokeTest(unittest.TestCase):

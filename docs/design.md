@@ -123,6 +123,8 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
 
 leader は driver の状態を polling したり、 needs_input を検知したりは **しない**。 これらは構造 (events / dashboard / 通知) が user に直接届ける。
 
+codex driver は初回起動時に directory trust prompt を出すため、 `fleet-agent start` は codex の初段 driver を起動する前に git repo root が `~/.codex/config.toml` 上で trusted かを read-only に確認する。 未信頼なら worktree / task state / prompt を作らず中断し、 user にその repo で一度 `codex` を起動して承認してから再実行するよう誘導する。 `fleet preflight` も同じ trust 状態を optional check として表示する。
+
 ### 4.2 driver の責務
 
 - 与えられたタスクの実装 (member subagent への委譲含む)

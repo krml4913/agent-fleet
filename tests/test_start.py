@@ -100,6 +100,37 @@ class StartTests(unittest.TestCase):
         ).read_text()
         self.assertIn("agent: codex:o4-mini", text)
 
+    def test_codex_untrusted_repo_stops_before_task_creation(self) -> None:
+        from fleet.commands import start
+
+        args = argparse.Namespace(
+            project=str(self.project),
+            task_id="codex-untrusted",
+            description="Do the codex thing",
+            topology="solo",
+            agent="codex:o4-mini",
+            title=None,
+            dry_run=True,
+            auto_paste=True,
+            prompt_delay=0.0,
+        )
+
+        with (
+            unittest.mock.patch("fleet.commands.start._git_toplevel", return_value=self.project),
+            unittest.mock.patch(
+                "fleet.commands.start.agents_mod.codex_repo_trusted",
+                return_value=False,
+            ),
+            unittest.mock.patch("fleet.commands.start.plugins_mod.run_hook") as run_hook,
+        ):
+            result = start.run(args)
+
+        self.assertEqual(result, 1)
+        self.assertFalse(
+            (self.project / ".fleet-state" / "tasks" / "task-codex-untrusted").exists()
+        )
+        run_hook.assert_not_called()
+
     def test_topology_pair_review_starts_first_stage(self) -> None:
         result = run_fleet(
             "start",

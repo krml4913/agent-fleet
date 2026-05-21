@@ -10,7 +10,10 @@ import argparse
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import NamedTuple
+
+from .. import agents as agents_mod
 
 
 class CheckResult(NamedTuple):
@@ -57,6 +60,7 @@ def check_all() -> list[CheckResult]:
         _check_command("git", ["git", "--version"], required=True),
         _check_command("claude", ["claude", "--version"], required=False),
         _check_command("codex", ["codex", "--version"], required=False),
+        _check_codex_trust(),
     ]
 
 
@@ -81,3 +85,48 @@ def _check_command(name: str, version_argv: list[str], *, required: bool) -> Che
         return CheckResult(name, True, detail, required)
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return CheckResult(name, False, f"{type(e).__name__}", required)
+
+
+def _git_toplevel(cwd: Path) -> Path | None:
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    root = r.stdout.strip()
+    return Path(root).resolve() if root else None
+
+
+def _check_codex_trust() -> CheckResult:
+    if not shutil.which("codex"):
+        return CheckResult(
+            "codex-trust",
+            True,
+            "skipped (codex not on PATH)",
+            required=False,
+        )
+
+    repo_root = _git_toplevel(Path.cwd())
+    if repo_root is None:
+        return CheckResult(
+            "codex-trust",
+            True,
+            "skipped (not in a git repo)",
+            required=False,
+        )
+
+    if agents_mod.codex_repo_trusted(repo_root):
+        return CheckResult("codex-trust", True, f"trusted: {repo_root}", required=False)
+    return CheckResult(
+        "codex-trust",
+        False,
+        f"not trusted: {repo_root} (run `codex` here and approve)",
+        required=False,
+    )

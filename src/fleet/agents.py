@@ -6,6 +6,9 @@ local LLMs are out of scope per design doc §13.2.
 """
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 SUPPORTED_VENDORS: frozenset[str] = frozenset({"claude", "codex"})
 
 
@@ -37,3 +40,21 @@ def cli_command(spec: str) -> list[str]:
     if vendor == "codex":
         return ["codex", "--dangerously-bypass-approvals-and-sandbox", "-m", model]
     raise AssertionError("unreachable; parse_spec already filtered vendor")
+
+
+def codex_repo_trusted(repo_root, *, config_path=None) -> bool:
+    """Return True if codex trusts ``repo_root`` (read-only check)."""
+    config = (
+        Path(config_path).expanduser()
+        if config_path
+        else Path.home() / ".codex" / "config.toml"
+    )
+    try:
+        with config.open("rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+
+    repo_key = str(Path(repo_root).expanduser().resolve())
+    project = data.get("projects", {}).get(repo_key, {})
+    return project.get("trust_level") == "trusted"
