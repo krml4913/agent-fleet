@@ -1,8 +1,8 @@
 """``git_worktree`` workflow.
 
 On start: create a git worktree at ``<state_dir>/worktrees/task-<id>``
-on branch ``task/<id>`` from the project root. The start window's cwd
-is overridden to that worktree.
+on branch ``<project-name>/task/<id>`` from the project root. The start
+window's cwd is overridden to that worktree.
 
 On done: no-op for MVP. Worktree teardown will land in a follow-up
 phase (likely a separate ``fleet-agent cleanup`` CLI rather than a hook —
@@ -17,16 +17,17 @@ from typing import Any
 
 WORKFLOW_NAME = "git_worktree"
 DESCRIPTION = (
-    "Per-task git worktree on branch task/<id>, rooted at the project dir."
+    "Per-task git worktree on branch <project-name>/task/<id>, rooted at the project dir."
 )
 
 
 def on_pre_start(ctx: dict[str, Any]) -> None:
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
+    project_name: str = state_dir.name
     target = Path(ctx.get("project_root") or state_dir.parent)
     worktree = state_dir / "worktrees" / f"task-{task_id}"
-    branch = f"task/{task_id}"
+    branch = f"{project_name}/task/{task_id}"
 
     worktree.parent.mkdir(parents=True, exist_ok=True)
 
@@ -65,9 +66,10 @@ def on_cleanup(ctx: dict[str, Any]) -> None:
     """Remove the per-task worktree + branch. Errors warn but don't raise."""
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
+    project_name: str = state_dir.name
     project_root = Path(ctx.get("project_root") or state_dir.parent)
     worktree = state_dir / "worktrees" / f"task-{task_id}"
-    branch = f"task/{task_id}"
+    branch = f"{project_name}/task/{task_id}"
 
     if worktree.exists():
         r = subprocess.run(
