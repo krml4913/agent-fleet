@@ -143,47 +143,82 @@ codex driver は初回起動時に directory trust prompt を出すため、 `fl
 
 ## 5. project / state 配置
 
-### 5.1 配置方針
+> **2026-05-21 決定**: §5.1〜§5.3 を全面改訂。旧設計 (repo 内 `.fleet-state/`、
+> global metadata なし) は撤回。GitHub Issue #67 の確定設計に差し替え。
 
-- 各 project repo 内 `.fleet-state/` にすべて閉じる
-- **global metadata なし** (ホーム配下 `~/.fleet/` 等には何も置かない)
-- これにより複数 project の state が衝突しない、 PJ 削除時に state も自然に消える
+### 5.1 配置方針 (確定: 2026-05-21)
 
-### 5.2 multi-project 同時起動
+state は **`<agent-fleet クローン>/fleet-state/`** に中央化する。
 
-- 各 project ごとに `fleet init --name <project-name>` で初期化
-- tmux session 名 `fleet-<project-name>` で project ごとに分離
-- 複数 PJ 同時起動可能、 衝突しない設計
+- project repo の中には fleet 関連物を一切置かない。全 state は中央に集約。
+- `fleet-state/` は gitignore 対象 (`fleet-state/` をエントリに追記)。
+  ただし dotfolder (.付き) にはしない — 見えるフォルダとして扱う。
+- ホーム配下 (`~/.fleet/` 等) には置かない。`$FLEET_HOME` 環境変数で上書き可能。
+- fleet は `__file__` から clone root を解決 (`src/fleet/state.py` の 3 階層上)。
+  `$FLEET_HOME` が set されていればそちらを優先する。
+- **per-project leader を維持**。shared leader 方式は却下済み。
+
+### 5.2 multi-project 同時起動 (確定: 2026-05-21)
+
+グローバルレジストリ (`fleet-state/projects.yaml`) で全 project を一元管理する。
+
+- project 識別子は **name** のみ。registry で一意強制。
+- `fleet init` に `--name` を省略すると repo ディレクトリの basename を使用。
+- tmux session 名 `fleet-<name>` はレジストリで name 一意性が保証されるため、
+  同名衝突の footgun が構造的に消える。
 
 ```bash
-fleet init --name image-gallery /path/to/image-gallery
-fleet init --name learn-xgboost /path/to/learn-xgboost
+fleet init /path/to/image-gallery        # name は basename "image-gallery"
+fleet init --name api /path/to/api-repo  # 明示指定
+fleet status --all                       # 全 project 横断サマリ
 # tmux ls
 #   fleet-image-gallery: 1 windows
-#   fleet-learn-xgboost: 1 windows
-fleet attach image-gallery   # 特定 project の leader へ
+#   fleet-api: 1 windows
+fleet leader --project image-gallery     # 特定 project の leader へ
 ```
 
-### 5.3 state 構造 (確定)
+不要になった project は `fleet rm <name>` で registry から削除し state ツリーも一括削除する。
+
+### 5.3 state 構造 (確定: 2026-05-21)
 
 ```
-<project-root>/
-  .fleet-state/
-    project.yaml          # project name / 全体 config / active topology 等
-    events.jsonl          # append-only audit log
-    dashboard.md          # read-only view (state から自動生成、 直接編集禁止)
-    memory/
-      MEMORY.md           # 知見インデックス (各 driver が都度追記)
-      GUIDE.md            # fleet memory 規律 (read/write のルール)
-      *.md                # 個別 memory ファイル (driver が書く)
-    tasks/
-      task-<id>/
-        task.yaml         # task 状態 (status / title / progress / assignee 等)
-        inbox.md          # leader → driver の指示
-        outbox.md         # driver → leader の報告
-        driver-prompt.md  # spawn 時に展開済みの prompt
-        heartbeat         # mtime で活動検知
+<agent-fleet クローン>/
+  src/  fleet  fleet-agent  ...        ← コード (git 管理)
+  fleet-state/                         ← gitignore 対象。dotfolder にしない
+    projects.yaml                      ← グローバルレジストリ (name → repo map)
+    projects.yaml.lock                 ← flock 用
+    projects/
+      <name>/                          ← 1 project の state_dir
+        project.yaml     # name / repo / created_at / version / workflow
+        events.jsonl     # append-only audit log
+        dashboard.md     # read-only view (自動生成、直接編集禁止)
+        notify.yaml      # 通知設定
+        memory/
+          MEMORY.md      # 知見インデックス (各 driver が都度追記)
+          GUIDE.md       # fleet memory 規律
+          *.md           # 個別 memory ファイル
+        tasks/
+          task-<id>/
+            task.yaml         # task 状態
+            inbox.md          # leader → driver の指示
+            outbox.md         # driver → leader の報告
+            driver-prompt.md  # spawn 時に展開済みの prompt
+        worktrees/
+          task-<id>/     # git_worktree plugin 使用時のみ
 ```
+
+#### project 解決ロジック
+
+`resolve_state_dir(cwd, *, project_name=None)` が以下の優先順で解決する:
+
+1. **`project_name` 明示** (`--project <name>`): registry の name で直接解決。
+2. **cwd が fleet-state ツリー内** (`fleet-state/projects/<name>/…`):
+   その `<name>` に解決。worktree / task dir から fleet コマンドを叩いた場合に効く。
+3. **cwd が登録 repo パス配下**: registry の全 `repo` のうち、cwd の祖先で
+   **パス長が最長のもの**を選ぶ (monorepo のネスト登録を自然に捌く)。
+
+`FLEET_STATE_DIR` 環境変数 (driver pane に必ず注入) は `resolve_state_dir` より
+さらに優先される (driver 向け `task_context.resolve` のみ)。
 
 ### 5.4 race 対策
 
@@ -196,14 +231,10 @@ forge では `yq -i` / `sed -i` の partial update + lock 不徹底が race の�
 | **partial update 禁止** | 既存ファイルへの `sed` / `>>` 等は禁止、 必ず全文 rewrite |
 | **1 task = 1 file** | cross-task の同時更新が原理的に起きない構造 |
 | **events.jsonl** | append-only、 POSIX `O_APPEND` で atomic、 lock 不要 |
+| **registry RMW** | `atomic_update(projects.yaml, mutate)` で flock + read + write を1区間に収める |
 
-書き込みは必ず context manager 経由:
-
-```python
-with state_writer(path) as w:
-    w.update(...)
-# exit 時に flock 解放 + dashboard 自動 rebuild
-```
+書き込みは必ず `locking.atomic_write` / `locking.atomic_update` 経由。
+registry の read-modify-write は `atomic_update` がフルロック区間でカバーする。
 
 ### 5.5 dashboard 更新ポリシー
 

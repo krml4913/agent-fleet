@@ -22,13 +22,9 @@ class EventEmitTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
-        state.init_state(self.project / ".fleet-state", name="demo")
-        # Pre-create task dir so cwd resolution works.
-        state.save_task(
-            self.project / ".fleet-state",
-            "1",
-            {"id": "1", "title": "x", "status": "spawning"},
-        )
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo", repo=self.project)
+        state.save_task(self.state_dir, "1", {"id": "1", "title": "x", "status": "spawning"})
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -36,6 +32,7 @@ class EventEmitTests(unittest.TestCase):
     def _run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.pop("FLEET_TASK_ID", None)
+        env["FLEET_STATE_DIR"] = str(self.state_dir)
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
             capture_output=True, text=True,
@@ -53,11 +50,8 @@ class EventEmitTests(unittest.TestCase):
 
     def test_emit_with_fields(self) -> None:
         r = self._run(
-            "event", "emit", "progress",
-            "--task-id", "1",
-            "--field", "done=3",
-            "--field", "total=7",
-            "--field", "note=halfway",
+            "event", "emit", "progress", "--task-id", "1",
+            "--field", "done=3", "--field", "total=7", "--field", "note=halfway",
         )
         self.assertEqual(r.returncode, 0, r.stderr)
         events = self._events()
@@ -68,17 +62,13 @@ class EventEmitTests(unittest.TestCase):
         self.assertEqual(prog[0]["note"], "halfway")
 
     def test_emit_bad_field(self) -> None:
-        r = self._run(
-            "event", "emit", "x", "--task-id", "1", "--field", "no-equals-sign",
-        )
+        r = self._run("event", "emit", "x", "--task-id", "1", "--field", "no-equals-sign")
         self.assertEqual(r.returncode, 1)
         self.assertIn("expects K=V", r.stderr)
 
     def _events(self) -> list[dict]:
-        events_path = self.project / ".fleet-state" / "events.jsonl"
-        return [
-            json.loads(l) for l in events_path.read_text().splitlines() if l
-        ]
+        events_path = self.state_dir / "events.jsonl"
+        return [json.loads(l) for l in events_path.read_text().splitlines() if l]
 
 
 if __name__ == "__main__":

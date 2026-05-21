@@ -27,6 +27,7 @@ from .commands import init as init_cmd
 from .commands import leader as leader_cmd
 from .commands import log as log_cmd
 from .commands import preflight as preflight_cmd
+from .commands import rm as rm_cmd
 from .commands import send_prompt as send_prompt_cmd
 from .commands import start as start_cmd
 from .commands import status as status_cmd
@@ -53,6 +54,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     log_cmd.add_parser(sub)
     topology_cmd.add_parser(sub)
     workflow_cmd.add_parser(sub)
+    rm_cmd.add_parser(sub)
     return parser
 
 

@@ -2,45 +2,49 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet"
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
 from fleet.commands.status import _unread_tasks  # noqa: E402
-
-
-def run_fleet(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(FLEET), *args],
-        capture_output=True,
-        text=True,
-    )
+from tests._fleet_test_helpers import run_fleet, make_project  # noqa: E402
 
 
 class StatusCommandTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
 
     def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
     def test_status_without_init(self) -> None:
-        result = run_fleet("status", str(self.project))
+        # cwd has no registered project → error
+        result = run_fleet("status", "nonexistent",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("no .fleet-state/", result.stderr)
+        self.assertIn("no registered project", result.stderr)
 
     def test_status_after_init(self) -> None:
-        state.init_state(self.project / ".fleet-state", name="demo")
-        result = run_fleet("status", str(self.project))
+        make_project(self.fleet_home, "demo", self.project)
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("demo  ·  bare  ·  v0.0.1  ·  since ", result.stdout)
         self.assertIn("TASKS  0", result.stdout)
@@ -48,76 +52,74 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("  (none)", result.stdout)
 
     def test_status_lists_tasks(self) -> None:
-        state.init_state(self.project / ".fleet-state", name="demo")
-        state.save_task(
-            self.project / ".fleet-state",
-            "1",
-            {
-                "title": "do thing",
-                "status": "pending",
-                "current_stage": 0,
-                "stages": [
-                    {"role": "driver", "agent": "claude:sonnet", "status": "running"}
-                ],
-            },
-        )
-        result = run_fleet("status", str(self.project))
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "do thing", "status": "pending",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TASKS  1", result.stdout)
         self.assertIn("● task-1  pending  seen —", result.stdout)
         self.assertIn("      do thing  (agent claude:sonnet  workflow -)", result.stdout)
 
     def test_status_task_without_stages_falls_back_to_dash_agent(self) -> None:
-        state.init_state(self.project / ".fleet-state", name="demo")
-        state.save_task(
-            self.project / ".fleet-state",
-            "1",
-            {"title": "legacy thing", "status": "pending"},
-        )
-        result = run_fleet("status", str(self.project))
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {"title": "legacy thing", "status": "pending"})
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("      legacy thing  (agent -  workflow -)", result.stdout)
 
     def test_status_shows_needs_input_section(self) -> None:
-        state.init_state(self.project / ".fleet-state", name="demo")
-        state.save_task(
-            self.project / ".fleet-state",
-            "1",
-            {"title": "answer question", "status": "needs_input", "agent": "codex"},
-        )
-        result = run_fleet("status", str(self.project))
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {"title": "answer question", "status": "needs_input", "agent": "codex"})
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("⚠ needs your input  1", result.stdout)
         self.assertIn("  task-1  answer question", result.stdout)
 
     def test_status_formats_recent_events(self) -> None:
-        state.init_state(self.project / ".fleet-state", name="demo")
-        ev_path = self.project / ".fleet-state" / "events.jsonl"
+        sd = make_project(self.fleet_home, "demo", self.project)
+        ev_path = sd / "events.jsonl"
         with open(ev_path, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {"ts": "2026-05-20T15:09:00Z", "type": "cleanup", "task_id": "one"}
-                )
-                + "\n"
-            )
-            f.write(
-                json.dumps(
-                    {"ts": "2026-05-20T15:43:00Z", "type": "start", "task_id": "two"}
-                )
-                + "\n"
-            )
-        result = run_fleet("status", str(self.project))
+            f.write(json.dumps({"ts": "2026-05-20T15:09:00Z", "type": "cleanup", "task_id": "one"}) + "\n")
+            f.write(json.dumps({"ts": "2026-05-20T15:43:00Z", "type": "start", "task_id": "two"}) + "\n")
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("EVENTS  last 5 / 2", result.stdout)
         self.assertIn("  15:09  cleanup  task-one", result.stdout)
         self.assertIn("  15:43  start    task-two", result.stdout)
 
+    def test_status_all(self) -> None:
+        proj2 = Path(self._tmp.name) / "proj2"
+        proj2.mkdir()
+        make_project(self.fleet_home, "alpha", self.project)
+        make_project(self.fleet_home, "beta", proj2)
+        result = run_fleet("status", "--all", fleet_home=self.fleet_home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
+
+    def test_status_all_orphan_warning(self) -> None:
+        missing = Path(self._tmp.name) / "gone"
+        missing.mkdir()
+        make_project(self.fleet_home, "orphan", missing)
+        import shutil
+        shutil.rmtree(missing)
+        result = run_fleet("status", "--all", fleet_home=self.fleet_home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("repo missing", result.stdout)
+        self.assertIn("fleet rm orphan", result.stdout)
+
 
 class UnreadTasksTests(unittest.TestCase):
     def test_unread_when_no_ack(self) -> None:
-        events = [
-            {"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"},
-        ]
+        events = [{"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}]
         self.assertEqual(_unread_tasks(events), {"1"})
 
     def test_read_when_watermark_matches(self) -> None:
@@ -149,39 +151,21 @@ class UnreadTasksTests(unittest.TestCase):
     def test_status_output_shows_unread_flag(self) -> None:
         tmp = TemporaryDirectory()
         try:
+            fleet_home = Path(tmp.name) / "fleet-state"
+            fleet_home.mkdir()
             project = Path(tmp.name) / "proj"
             project.mkdir()
-            sd = project / ".fleet-state"
-            state.init_state(sd, name="demo")
-            state.save_task(
-                sd,
-                "1",
-                {
-                    "id": "1",
-                    "title": "t",
-                    "status": "in_progress",
-                    "current_stage": 0,
-                    "stages": [{"role": "driver", "agent": "x", "status": "running"}],
-                    "workflow": "bare",
-                },
-            )
-            # Write an inbox_message event manually
+            sd = make_project(fleet_home, "demo", project)
+            state.save_task(sd, "1", {
+                "id": "1", "title": "t", "status": "in_progress",
+                "current_stage": 0,
+                "stages": [{"role": "driver", "agent": "x", "status": "running"}],
+                "workflow": "bare",
+            })
             ev_path = sd / "events.jsonl"
             with open(ev_path, "a", encoding="utf-8") as f:
-                f.write(
-                    json.dumps(
-                        {
-                            "ts": "2026-05-20T10:00:00Z",
-                            "type": "inbox_message",
-                            "task_id": "1",
-                        }
-                    )
-                    + "\n"
-                )
-            result = subprocess.run(
-                [sys.executable, str(FLEET), "status", str(project)],
-                capture_output=True, text=True,
-            )
+                f.write(json.dumps({"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}) + "\n")
+            result = run_fleet("status", "demo", fleet_home=fleet_home, cwd=project)
             self.assertIn("[unread inbox]", result.stdout)
         finally:
             tmp.cleanup()

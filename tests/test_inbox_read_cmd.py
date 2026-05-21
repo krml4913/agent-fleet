@@ -58,13 +58,9 @@ class InboxReadCmdTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
-        self.state_dir = self.project / ".fleet-state"
-        state.init_state(self.state_dir, name="demo")
-        state.save_task(
-            self.state_dir,
-            "1",
-            {"id": "1", "title": "x", "status": "in_progress"},
-        )
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo", repo=self.project)
+        state.save_task(self.state_dir, "1", {"id": "1", "title": "x", "status": "in_progress"})
         self.task_dir = self.state_dir / "tasks" / "task-1"
 
     def tearDown(self) -> None:
@@ -81,7 +77,7 @@ class InboxReadCmdTests(unittest.TestCase):
         self._write_inbox("### 2026-05-20T10:00:00Z\n\nhello world\n\n")
         r = run_fleet_agent(
             "inbox-read",
-            env={"FLEET_TASK_ID": "1"},
+            env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -91,7 +87,7 @@ class InboxReadCmdTests(unittest.TestCase):
         self._write_inbox("### 2026-05-20T10:00:00Z\n\nhello\n\n")
         run_fleet_agent(
             "inbox-read",
-            env={"FLEET_TASK_ID": "1"},
+            env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
         events = self._events()
@@ -107,7 +103,7 @@ class InboxReadCmdTests(unittest.TestCase):
         )
         run_fleet_agent(
             "inbox-read",
-            env={"FLEET_TASK_ID": "1"},
+            env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
         events = self._events()
@@ -118,7 +114,7 @@ class InboxReadCmdTests(unittest.TestCase):
         self._write_inbox("")
         r = run_fleet_agent(
             "inbox-read",
-            env={"FLEET_TASK_ID": "1"},
+            env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -130,14 +126,13 @@ class InboxReadCmdTests(unittest.TestCase):
         (self.task_dir / "inbox.md").unlink(missing_ok=True)
         r = run_fleet_agent(
             "inbox-read",
-            env={"FLEET_TASK_ID": "1"},
+            env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
         self.assertEqual(r.returncode, 1)
         self.assertIn("not found", r.stderr)
 
     def test_no_task_id_returns_error(self) -> None:
-        # No FLEET_TASK_ID and no cwd that resolves a task
         r = run_fleet_agent(
             "inbox-read",
             cwd=Path(self._tmp.name),

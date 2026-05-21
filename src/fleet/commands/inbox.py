@@ -29,15 +29,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         nargs="+",
         help="Message body (joined with spaces if multiple words)",
     )
-    p.add_argument("--project", default=".", help="Project path (default: cwd)")
+    p.add_argument("--project", default=".", help="Project name (default: resolved from cwd)")
     p.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.discover_state_dir(Path(args.project))
+    project_name = args.project if args.project != "." else None
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
     if state_dir is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.project).resolve()}",
+            f"error: no registered project found for {args.project!r}",
             file=sys.stderr,
         )
         return 1

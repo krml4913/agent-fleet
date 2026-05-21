@@ -24,15 +24,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("task_id", help="Task id")
-    p.add_argument("--project", default=".", help="Project path (default: cwd)")
+    p.add_argument("--project", default=".", help="Project name (default: resolved from cwd)")
     p.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.discover_state_dir(Path(args.project))
+    project_name = args.project if args.project != "." else None
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
     if state_dir is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.project).resolve()}",
+            f"error: no registered project found for {args.project!r}",
             file=sys.stderr,
         )
         return 1
@@ -55,7 +56,7 @@ def run(args: argparse.Namespace) -> int:
     if not tmux_mod.session_exists(session):
         print(
             f"error: session not running: {session}\n"
-            f"  start it:  fleet leader --project {args.project}",
+            f"  start it:  fleet leader --project {project_name or args.project}",
             file=sys.stderr,
         )
         return 1

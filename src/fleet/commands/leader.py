@@ -40,7 +40,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project path (default: cwd)",
+        help="Project name (default: resolved from cwd via registry)",
     )
     p.add_argument(
         "--agent",
@@ -56,10 +56,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.discover_state_dir(Path(args.project))
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=args.project if args.project != "." else None)
     if state_dir is None:
         print(
-            f"error: no .fleet-state/ found under {Path(args.project).resolve()}",
+            f"error: no registered project found for {args.project!r}",
             file=sys.stderr,
         )
         return 1
@@ -93,7 +93,7 @@ def run(args: argparse.Namespace) -> int:
     cli = agents_mod.cli_command(args.agent)
     cli_quoted = " ".join(shlex.quote(p) for p in cli)
 
-    project_root = state_dir.parent
+    project_root = Path(project.get("repo", str(state_dir.parent)))
 
     try:
         tmux_mod.new_session(

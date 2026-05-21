@@ -9,8 +9,8 @@ __pycache__/
 .venv/
 *.egg-info/
 
-# fleet state when dogfooding agent-fleet itself
-.fleet-state/
+# fleet state when dogfooding agent-fleet itself (central layout, not hidden)
+fleet-state/
 
 # editor / OS
 .DS_Store

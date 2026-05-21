@@ -1,6 +1,7 @@
 """Tests for the ``git_worktree`` plugin (requires a working ``git`` binary)."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,6 @@ class GitWorktreeTests(unittest.TestCase):
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
 
-        # Bootstrap a real git repo with one commit.
         env_extra = {
             "GIT_AUTHOR_NAME": "Test",
             "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -46,8 +46,14 @@ class GitWorktreeTests(unittest.TestCase):
         git("add", "README.md")
         git("commit", "-q", "-m", "initial")
 
-        self.state_dir = self.project / ".fleet-state"
-        self.state_dir.mkdir()
+        # state_dir is now stored in fleet-state/projects/<name>/,
+        # but the plugin only cares that state_dir.is_dir() and
+        # state_dir / "worktrees" is where it creates the worktree.
+        # We simulate this by using a tempdir as the state_dir directly.
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.state_dir = self.fleet_home / "projects" / "testproj"
+        self.state_dir.mkdir(parents=True)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -85,10 +91,8 @@ class GitWorktreeTests(unittest.TestCase):
         worktree = self.state_dir / "worktrees" / "task-9"
         self.assertTrue(worktree.is_dir())
 
-        # Branch should exist.
         r = subprocess.run(
-            ["git", "-C", str(self.project), "show-ref", "--verify",
-             "refs/heads/task/9"],
+            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/task/9"],
             capture_output=True,
         )
         self.assertEqual(r.returncode, 0)
@@ -102,8 +106,7 @@ class GitWorktreeTests(unittest.TestCase):
 
         self.assertFalse(worktree.exists())
         r = subprocess.run(
-            ["git", "-C", str(self.project), "show-ref", "--verify",
-             "refs/heads/task/9"],
+            ["git", "-C", str(self.project), "show-ref", "--verify", "refs/heads/task/9"],
             capture_output=True,
         )
         self.assertNotEqual(r.returncode, 0)
