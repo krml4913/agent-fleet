@@ -75,6 +75,46 @@ class DriverPromptTests(unittest.TestCase):
         self.assertIn("Git workflow", text)
         self.assertIn("gh pr create", text)
 
+    def test_includes_role_fragment_when_role_file_exists(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            topology_name="pair_review",
+            role="implementer",
+            agent="claude:sonnet",
+        )
+        self.assertIn("あなたは実装者", text)
+        self.assertIn("承認された設計", text)
+
+    def test_skips_role_fragment_when_role_file_is_missing(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            topology_name="solo",
+            role="unknown-role",
+            agent="claude:sonnet",
+        )
+        self.assertNotIn("あなたは実装者", text)
+        self.assertNotIn("あなたは査読者", text)
+        self.assertNotIn("あなたは設計者", text)
+
+    def test_composes_base_workflow_role_then_description(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="Task description sentinel.",
+            topology_name="pair_review",
+            role="implementer",
+            agent="claude:sonnet",
+            workflow_fragment="Workflow sentinel.",
+        )
+        base_idx = text.index("You are a fleet driver")
+        workflow_idx = text.index("Workflow sentinel.")
+        role_idx = text.index("あなたは実装者")
+        description_idx = text.index("Task description sentinel.")
+        self.assertLess(base_idx, workflow_idx)
+        self.assertLess(workflow_idx, role_idx)
+        self.assertLess(role_idx, description_idx)
+
 
 if __name__ == "__main__":
     unittest.main()
