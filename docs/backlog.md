@@ -5,7 +5,10 @@
 
 ## priority
 
-(空)
+- `fleet-agent start` に `--prompt-file PATH` を追加する。現状 driver-prompt は
+  `"$(cat file)"` で巨大なシェル引数として渡しており、引数長・クォートのエッジケースの
+  リスクがある。ファイルを直接食わせられるようにして `$(cat)` を廃止する。
+  Issue #67 (multi-project 再設計) が落ち着いてから着手。
 
 ## someday
 
