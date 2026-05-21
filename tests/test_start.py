@@ -317,5 +317,117 @@ class StartAutopasteEnterTests(unittest.TestCase):
         mock_tmux.paste_buffer.assert_not_called()
 
 
+class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
+    """Verify that launch_stage_driver kills a pre-existing same-named window before creating a new one."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self.state_dir = self.project / ".fleet-state"
+        state.init_state(self.state_dir, name="demo")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_task_dir(self, task_id: str) -> Path:
+        task_dir = self.state_dir / "tasks" / f"task-{task_id}"
+        task_dir.mkdir(parents=True)
+        (task_dir / "driver-prompt.md").write_text("prompt content")
+        return task_dir
+
+    def test_kill_window_if_exists_called_before_new_window(self) -> None:
+        """kill_window_if_exists must be called before new_window for the same window name."""
+        from fleet.commands import start
+
+        task_id = "multiproject"
+        task_dir = self._make_task_dir(task_id)
+        call_order: list[str] = []
+
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+            mock_tmux.kill_window_if_exists.side_effect = lambda *a, **kw: call_order.append("kill")
+            mock_tmux.new_window.side_effect = lambda *a, **kw: call_order.append("new")
+
+            result = start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "claude:sonnet", "role": "driver"},
+                project_name="demo",
+                auto_paste=False,
+                prompt_delay=0.0,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("kill", call_order, "kill_window_if_exists was not called")
+        self.assertIn("new", call_order, "new_window was not called")
+        # kill must precede new_window
+        self.assertLess(
+            call_order.index("kill"),
+            call_order.index("new"),
+            "kill_window_if_exists must be called before new_window",
+        )
+
+    def test_kill_targets_only_this_task_window(self) -> None:
+        """kill_window_if_exists must be called with exactly the window for this task."""
+        from fleet.commands import start
+
+        task_id = "mytask"
+        task_dir = self._make_task_dir(task_id)
+
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+
+            start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "claude:sonnet", "role": "driver"},
+                project_name="demo",
+                auto_paste=False,
+                prompt_delay=0.0,
+            )
+
+        kill_calls = mock_tmux.kill_window_if_exists.call_args_list
+        self.assertEqual(len(kill_calls), 1, "kill_window_if_exists should be called exactly once")
+        _session, window_arg = kill_calls[0][0]
+        self.assertEqual(window_arg, f"task-{task_id}")
+
+    def test_launch_succeeds_even_when_window_already_exists(self) -> None:
+        """Simulates stage transition: new_window does not fail even if a stale window exists."""
+        from fleet.commands import start
+
+        task_id = "stage-transition"
+        task_dir = self._make_task_dir(task_id)
+
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+            # kill_window_if_exists silently succeeds (window existed — now gone)
+            mock_tmux.kill_window_if_exists.return_value = None
+            # new_window succeeds cleanly
+            mock_tmux.new_window.return_value = None
+
+            result = start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=1,
+                stage={"agent": "claude:sonnet", "role": "implementer"},
+                project_name="demo",
+                auto_paste=False,
+                prompt_delay=0.0,
+            )
+
+        self.assertEqual(result, 0)
+        mock_tmux.kill_window_if_exists.assert_called_once()
+        mock_tmux.new_window.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
