@@ -52,13 +52,31 @@ class StatusCommandTests(unittest.TestCase):
         state.save_task(
             self.project / ".fleet-state",
             "1",
-            {"title": "do thing", "status": "pending", "agent": "claude:sonnet"},
+            {
+                "title": "do thing",
+                "status": "pending",
+                "current_stage": 0,
+                "stages": [
+                    {"role": "driver", "agent": "claude:sonnet", "status": "running"}
+                ],
+            },
         )
         result = run_fleet("status", str(self.project))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TASKS  1", result.stdout)
         self.assertIn("● task-1  pending  seen —", result.stdout)
         self.assertIn("      do thing  (agent claude:sonnet  workflow -)", result.stdout)
+
+    def test_status_task_without_stages_falls_back_to_dash_agent(self) -> None:
+        state.init_state(self.project / ".fleet-state", name="demo")
+        state.save_task(
+            self.project / ".fleet-state",
+            "1",
+            {"title": "legacy thing", "status": "pending"},
+        )
+        result = run_fleet("status", str(self.project))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("      legacy thing  (agent -  workflow -)", result.stdout)
 
     def test_status_shows_needs_input_section(self) -> None:
         state.init_state(self.project / ".fleet-state", name="demo")
@@ -142,7 +160,8 @@ class UnreadTasksTests(unittest.TestCase):
                     "id": "1",
                     "title": "t",
                     "status": "in_progress",
-                    "agent": "x",
+                    "current_stage": 0,
+                    "stages": [{"role": "driver", "agent": "x", "status": "running"}],
                     "workflow": "bare",
                 },
             )
