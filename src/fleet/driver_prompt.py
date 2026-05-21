@@ -9,11 +9,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_TEMPLATE_PATH = Path(__file__).parent.parent.parent / "docs" / "prompts" / "driver-base.md"
+_PROMPTS_DIR = Path(__file__).parent.parent.parent / "docs" / "prompts"
+_TEMPLATE_PATH = _PROMPTS_DIR / "driver-base.md"
+_ROLES_DIR = _PROMPTS_DIR / "roles"
 
 
 def _load_base() -> str:
     return _TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _load_role_fragment(role: str) -> str:
+    if "/" in role or "\\" in role:
+        return ""
+    path = _ROLES_DIR / f"{role}.md"
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 def render(
@@ -31,6 +42,9 @@ def render(
     fragment = workflow_fragment.strip()
     if fragment:
         parts.append(fragment)
+    role_fragment = _load_role_fragment(role).strip()
+    if role_fragment:
+        parts.append(role_fragment)
     body = "\n\n".join(parts)
     return (
         body

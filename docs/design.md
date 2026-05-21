@@ -413,7 +413,7 @@ git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / 
 | **作業の git** | commit / push / PR 作成 / conflict 解決 / rebase | **driver (AI)** | 例外が多く AI が柔軟に対応できる |
 | **ライフサイクル境界の git** | `worktree add` / `worktree remove` | **plugin (仕組み側)** | 定型操作で例外がほぼ無い; driver が自分の作業場所を自分で作れない (鶏と卵) |
 
-- driver-prompt は `docs/prompts/driver-base.md` の fleet 共通プロトコルに、workflow plugin が任意で提供する `DRIVER_PROMPT_FRAGMENT` と task description を合成して生成する。 `git_worktree` は作業完了後の `commit → push → gh pr create → fleet-agent done` 手順を断片として持ち、`bare` は持たない。
+- driver-prompt は `docs/prompts/driver-base.md` の fleet 共通プロトコルに、workflow plugin が任意で提供する `DRIVER_PROMPT_FRAGMENT`、`docs/prompts/roles/<role>.md` の role 断片、task description を合成して生成する。 `git_worktree` は作業完了後の `commit → push → gh pr create → fleet-agent done` 手順を断片として持ち、`bare` は持たない。
 - fleet core の Python コードは作業の git (commit / push / PR) を一切叩かない。
 - PR のマージは driver が行わない。 leader / user の判断に委ねる。
 

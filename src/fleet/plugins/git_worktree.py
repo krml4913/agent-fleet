@@ -33,7 +33,7 @@ Git workflow (作業の git は driver が担う):
   - push reject された場合も driver が原因を調べて対処する (force-with-lease / rebase 等)。
   - 作業の git (commit / push / PR) は fleet core ではなく driver (AI) の責務。
     fleet core が git commit / push / PR を自動実行することはない。
-  - 各 role 固有の git 手順 (branch 命名規則、 PR テンプレート等) は role のベースプロンプトに記載する。
+  - 各 role 固有の追加規律は role 断片に記載する。
 """
 
 
