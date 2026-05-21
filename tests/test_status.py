@@ -63,7 +63,10 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TASKS  1", result.stdout)
         self.assertIn("● task-1  pending  seen —", result.stdout)
-        self.assertIn("      do thing  (agent claude:sonnet  workflow -)", result.stdout)
+        self.assertIn(
+            "      do thing  (topology -  agent claude:sonnet  workflow -)",
+            result.stdout,
+        )
 
     def test_status_task_without_stages_falls_back_to_dash_agent(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
@@ -71,7 +74,72 @@ class StatusCommandTests(unittest.TestCase):
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("      legacy thing  (agent -  workflow -)", result.stdout)
+        self.assertIn(
+            "      legacy thing  (topology -  agent -  workflow -)",
+            result.stdout,
+        )
+
+    def test_status_shows_topology_and_stage_progress(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "multi thing",
+            "status": "running",
+            "topology": "multi_stage",
+            "workflow": "git_worktree",
+            "current_stage": 1,
+            "stages": [
+                {"role": "plan", "agent": "codex:gpt-5.5", "status": "done"},
+                {"role": "driver", "agent": "codex:gpt-5.5", "status": "running"},
+                {"role": "review", "agent": "claude:sonnet", "status": "pending"},
+            ],
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("● task-1  running  stage 2/3  seen —", result.stdout)
+        self.assertIn(
+            "      multi thing  (topology multi_stage  agent codex:gpt-5.5  workflow git_worktree)",
+            result.stdout,
+        )
+
+    def test_status_shows_peer_review_progress(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "review thing",
+            "status": "running",
+            "topology": "pair_review",
+            "current_stage": 0,
+            "stages": [{
+                "role": "driver",
+                "agent": "codex:gpt-5.5",
+                "status": "running",
+                "peer_review": {
+                    "role": "code-reviewer",
+                    "phase": "reviewing",
+                    "iteration": 1,
+                },
+            }],
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("● task-1  running  review ×1  seen —", result.stdout)
+
+    def test_status_hides_solo_progress_token(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "solo thing",
+            "status": "running",
+            "topology": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "codex:gpt-5.5", "status": "running"}],
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("● task-1  running  seen —", result.stdout)
+        self.assertNotIn("stage 1/1", result.stdout)
+        self.assertNotIn("review ×", result.stdout)
 
     def test_status_shows_needs_input_section(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
