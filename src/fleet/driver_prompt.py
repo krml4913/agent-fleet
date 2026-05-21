@@ -23,11 +23,17 @@ def render(
     topology_name: str,
     role: str,
     agent: str,
+    workflow_fragment: str = "",
 ) -> str:
     """Return the prompt string to send to the driver."""
     base = _load_base()
+    parts = [base.rstrip()]
+    fragment = workflow_fragment.strip()
+    if fragment:
+        parts.append(fragment)
+    body = "\n\n".join(parts)
     return (
-        base
+        body
         + "\n---\n"
         + f"task id:   task-{task_id}\n"
         + f"topology:  {topology_name}\n"

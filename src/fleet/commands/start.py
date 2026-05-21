@@ -304,6 +304,7 @@ def run(args: argparse.Namespace) -> int:
         topology_name=args.topology,
         role=role_name,
         agent=agent_spec,
+        workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt)
 
