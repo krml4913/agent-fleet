@@ -73,6 +73,14 @@ def kill_window(session: str, window_name: str) -> None:
     _run(["tmux", "kill-window", "-t", f"{session}:{window_name}"])
 
 
+def kill_window_if_exists(session: str, window_name: str) -> None:
+    """Best-effort window cleanup. Missing window is not an error."""
+    subprocess.run(
+        ["tmux", "kill-window", "-t", f"{session}:{window_name}"],
+        capture_output=True,
+    )
+
+
 def load_buffer(buffer_name: str, source_path: str) -> None:
     """Load a file into a named tmux buffer (overwrites if it already exists)."""
     _run(["tmux", "load-buffer", "-b", buffer_name, "--", source_path])
