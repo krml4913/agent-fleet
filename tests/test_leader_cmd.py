@@ -65,6 +65,25 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("already exists", r2.stdout)
 
+    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    def test_launch_writes_leader_prompt(self) -> None:
+        r = run_fleet("leader", "--project", self.project_name,
+                      "--prompt-delay", "0",
+                      fleet_home=self.fleet_home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompt_path = self.state_dir / "leader-prompt.md"
+        self.assertTrue(prompt_path.exists(), "leader-prompt.md was not written")
+        content = prompt_path.read_text()
+        self.assertIn("You are the leader of a fleet project", content)
+        self.assertIn(self.project_name, content)
+
+    def test_no_auto_paste_skips_prompt_file(self) -> None:
+        run_fleet("leader", "--project", self.project_name,
+                  "--no-auto-paste",
+                  fleet_home=self.fleet_home)
+        prompt_path = self.state_dir / "leader-prompt.md"
+        self.assertFalse(prompt_path.exists(), "leader-prompt.md should not be written with --no-auto-paste")
+
 
 if __name__ == "__main__":
     unittest.main()

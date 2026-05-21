@@ -15,9 +15,11 @@ import argparse
 import os
 import shlex
 import sys
+import time
 from pathlib import Path
 
 from .. import agents as agents_mod
+from .. import leader_prompt as lp
 from .. import state as state_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
@@ -52,7 +54,19 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="After starting, exec `tmux attach -t <session>` (foreground).",
     )
-    p.set_defaults(func=run)
+    p.add_argument(
+        "--no-auto-paste",
+        dest="auto_paste",
+        action="store_false",
+        help="Skip pasting the leader prompt into the pane.",
+    )
+    p.add_argument(
+        "--prompt-delay",
+        type=float,
+        default=3.0,
+        help="Seconds to wait for the agent CLI to start before pasting (default: 3.0).",
+    )
+    p.set_defaults(func=run, auto_paste=True)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -109,6 +123,20 @@ def run(args: argparse.Namespace) -> int:
     except tmux_mod.TmuxError as e:
         print(f"error: tmux setup failed: {e}", file=sys.stderr)
         return 1
+
+    if args.auto_paste:
+        prompt_text = lp.render(project_name=name, state_dir=state_dir)
+        prompt_path = state_dir / "leader-prompt.md"
+        prompt_path.write_text(prompt_text, encoding="utf-8")
+        buffer_name = f"fleet-leader-{name}"
+        try:
+            tmux_mod.load_buffer(buffer_name, str(prompt_path))
+            time.sleep(max(0.0, args.prompt_delay))
+            tmux_mod.paste_buffer(session, "leader", buffer_name)
+            time.sleep(0.8)
+            tmux_mod.send_keys(session, "leader", "", enter=True)
+        except tmux_mod.TmuxError as e:
+            print(f"warn: leader prompt paste failed: {e}", file=sys.stderr)
 
     append_event(
         state_dir / "events.jsonl",
