@@ -55,16 +55,26 @@ def run(args: argparse.Namespace) -> int:
     # 前回の attach で残った stale な view session を掃除 (best-effort)
     _sweep_stale_view_sessions(session)
 
-    if args.target == "leader":
-        window = "leader"
-    else:
-        window = f"task-{args.target}"
-
     try:
         windows = tmux_mod.list_windows(session)
     except tmux_mod.TmuxError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if args.target == "leader":
+        window = "leader"
+    else:
+        matches = tmux_mod.matching_task_window_names(windows, args.target)
+        if len(matches) == 1:
+            window = matches[0]
+        elif len(matches) > 1:
+            print(
+                f"error: multiple windows found for task: {args.target}\n"
+                f"  matching: {', '.join(matches)}",
+                file=sys.stderr,
+            )
+            return 1
+        else:
+            window = args.target
     if window not in windows:
         print(
             f"error: window not found: {session}:{window}\n"

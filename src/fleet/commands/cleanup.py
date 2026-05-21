@@ -101,13 +101,11 @@ def run(args: argparse.Namespace) -> int:
     project = state_mod.load_project(state_dir)
     project_name = project.get("name") or "fleet"
     session = f"fleet-{project_name}"
-    window = f"task-{task_id}"
     buffer_name = f"fleet-task-{task_id}"
     if tmux_mod.available():
         if tmux_mod.session_exists(session):
             try:
-                if window in tmux_mod.list_windows(session):
-                    tmux_mod.kill_window(session, window)
+                tmux_mod.kill_task_windows(session, task_id)
             except tmux_mod.TmuxError as e:
                 print(f"warn: kill_window failed: {e}", file=sys.stderr)
         tmux_mod.delete_buffer(buffer_name)
