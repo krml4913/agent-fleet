@@ -1,18 +1,21 @@
-"""Tests for ``fleet attach`` — error paths (success path execs tmux)."""
+"""Tests for ``fleet attach`` — error paths and grouped-session attach flow."""
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, call, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import tmux  # noqa: E402
+from fleet.commands.attach import run  # noqa: E402
 from tests._fleet_test_helpers import run_fleet, make_project  # noqa: E402
 
 
@@ -61,6 +64,183 @@ class AttachCmdTests(unittest.TestCase):
             self.assertIn("window not found", r.stderr)
         finally:
             tmux.kill_session(self.session)
+
+
+class AttachGroupedSessionTests(unittest.TestCase):
+    """grouped session 経由の attach フローをモックで検証する。"""
+
+    def _make_args(self, target: str = "leader", project: str = "testproj") -> MagicMock:
+        args = MagicMock()
+        args.target = target
+        args.project = project
+        return args
+
+    def _ok(self) -> MagicMock:
+        r = MagicMock()
+        r.returncode = 0
+        r.stderr = ""
+        return r
+
+    def _fail(self, stderr: str = "err") -> MagicMock:
+        r = MagicMock()
+        r.returncode = 1
+        r.stderr = stderr
+        return r
+
+    @patch("fleet.commands.attach.os.execvp")
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_grouped_session_flow(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+        mock_execvp,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        mock_subproc.return_value = self._ok()
+        mock_execvp.side_effect = SystemExit(0)  # execvp でプロセス置換をシミュレート
+
+        args = self._make_args(target="leader")
+        with self.assertRaises(SystemExit):
+            run(args)
+
+        calls = mock_subproc.call_args_list
+        # 1) new-session (grouped)
+        self.assertTrue(
+            any("new-session" in str(c) and "-t" in str(c) for c in calls),
+            f"new-session not called: {calls}",
+        )
+        # 2) set-option destroy-unattached
+        self.assertTrue(
+            any("set-option" in str(c) and "destroy-unattached" in str(c) for c in calls),
+            f"set-option not called: {calls}",
+        )
+        # 3) select-window
+        self.assertTrue(
+            any("select-window" in str(c) for c in calls),
+            f"select-window not called: {calls}",
+        )
+        # 4) execvp で view session に attach
+        execvp_args = mock_execvp.call_args[0]
+        self.assertEqual(execvp_args[0], "tmux")
+        tmux_cmd = execvp_args[1]
+        self.assertIn("attach", tmux_cmd)
+        # view session 名は "<session>-view-<pid>" の形式
+        view_name = tmux_cmd[-1]
+        self.assertIn("-view-", view_name)
+        self.assertNotIn("fleet-testproj:", view_name)
+
+    @patch("fleet.commands.attach.os.execvp")
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader", "task-42"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_task_window_flow(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+        mock_execvp,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        mock_subproc.return_value = self._ok()
+        mock_execvp.side_effect = SystemExit(0)
+
+        args = self._make_args(target="42")
+        with self.assertRaises(SystemExit):
+            run(args)
+
+        # select-window が task-42 を対象にしていることを確認
+        calls = mock_subproc.call_args_list
+        select_calls = [c for c in calls if "select-window" in str(c)]
+        self.assertTrue(len(select_calls) > 0)
+        self.assertIn("task-42", str(select_calls[0]))
+
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_new_session_failure_returns_error(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        # 1回目も2回目も失敗 (pid + retry も失敗)
+        mock_subproc.return_value = self._fail("duplicate session")
+
+        args = self._make_args(target="leader")
+        result = run(args)
+        self.assertEqual(result, 1)
+
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_set_option_failure_returns_error(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        ok = self._ok()
+        fail = self._fail("set-option failed")
+        # new-session 成功, set-option 失敗, kill-session (cleanup)
+        mock_subproc.side_effect = [ok, fail, ok]
+
+        args = self._make_args(target="leader")
+        result = run(args)
+        self.assertEqual(result, 1)
+
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_select_window_failure_returns_error(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        ok = self._ok()
+        fail = self._fail("select-window failed")
+        # new-session 成功, set-option 成功, select-window 失敗, kill-session (cleanup)
+        mock_subproc.side_effect = [ok, ok, fail, ok]
+
+        args = self._make_args(target="leader")
+        result = run(args)
+        self.assertEqual(result, 1)
 
 
 if __name__ == "__main__":
