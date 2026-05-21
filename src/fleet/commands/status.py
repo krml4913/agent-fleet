@@ -94,7 +94,7 @@ def run(args: argparse.Namespace) -> int:
                     "status": str(t.get("status", "-")),
                     "seen": last_seen.get(tid, "—"),
                     "title": t.get("title", "-"),
-                    "agent": t.get("agent", "-"),
+                    "agent": _task_agent(t),
                     "workflow": t.get("workflow", "-"),
                     "unread": tid in unread,
                 }
@@ -160,6 +160,19 @@ def _status_color(status: str) -> str:
     if status in {"needs_input", "failed", "changes-requested"}:
         return _RED
     return ""
+
+
+def _task_agent(task: dict) -> str:
+    current_stage = task.get("current_stage", 0)
+    stages = task.get("stages") or []
+    if not isinstance(current_stage, int):
+        return "-"
+    if current_stage < 0 or current_stage >= len(stages):
+        return "-"
+    stage = stages[current_stage]
+    if not isinstance(stage, dict):
+        return "-"
+    return str(stage.get("agent") or "-")
 
 
 def _short_date(value: str) -> str:
