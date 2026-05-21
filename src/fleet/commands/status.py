@@ -104,28 +104,34 @@ def run(args: argparse.Namespace) -> int:
                 {
                     "id": f"task-{tid}",
                     "status": str(t.get("status", "-")),
+                    "progress": _task_progress(t),
                     "seen": last_seen.get(tid, "—"),
                     "title": t.get("title", "-"),
+                    "topology": str(t.get("topology") or "-"),
                     "agent": _task_agent(t),
                     "workflow": t.get("workflow", "-"),
                     "unread": tid in unread,
                 }
             )
         id_width = max(len(r["id"]) for r in task_rows)
-        status_width = max(len(r["status"]) for r in task_rows)
+        status_width = max(len(_status_text(r)) for r in task_rows)
         for row in task_rows:
             bullet = _style("●", _status_color(row["status"]), use_color)
+            status_text = _status_text(row)
             print(
                 "  {bullet} {id:<{id_width}}  {status:<{status_width}}  seen {seen}".format(
                     bullet=bullet,
                     id=row["id"],
                     id_width=id_width,
-                    status=row["status"],
+                    status=status_text,
                     status_width=status_width,
                     seen=row["seen"],
                 )
             )
-            meta = f"agent {row['agent']}  workflow {row['workflow']}"
+            meta = (
+                f"topology {row['topology']}  "
+                f"agent {row['agent']}  workflow {row['workflow']}"
+            )
             if row["unread"]:
                 meta += "  [unread inbox]"
             print(f"      {row['title']}  ({meta})")
@@ -229,6 +235,13 @@ def _status_color(status: str) -> str:
     return ""
 
 
+def _status_text(row: dict) -> str:
+    progress = row.get("progress")
+    if progress:
+        return f"{row['status']}  {progress}"
+    return str(row["status"])
+
+
 def _task_agent(task: dict) -> str:
     current_stage = task.get("current_stage", 0)
     stages = task.get("stages") or []
@@ -240,6 +253,41 @@ def _task_agent(task: dict) -> str:
     if not isinstance(stage, dict):
         return "-"
     return str(stage.get("agent") or "-")
+
+
+def _task_progress(task: dict) -> str:
+    current_stage = task.get("current_stage", 0)
+    stages = task.get("stages") or []
+    if not isinstance(stages, list):
+        return ""
+    if not isinstance(current_stage, int):
+        return ""
+    if current_stage < 0 or current_stage >= len(stages):
+        return ""
+
+    parts = []
+    if len(stages) > 1:
+        parts.append(f"stage {current_stage + 1}/{len(stages)}")
+
+    stage = stages[current_stage]
+    if isinstance(stage, dict):
+        review = _peer_review_progress(stage.get("peer_review"))
+        if review:
+            parts.append(review)
+
+    return "  ".join(parts)
+
+
+def _peer_review_progress(peer_review: object) -> str:
+    if not isinstance(peer_review, dict):
+        return ""
+    if peer_review.get("phase") not in {"implementing", "reviewing"}:
+        return ""
+
+    iteration = peer_review.get("iteration")
+    if iteration is None or iteration == "":
+        return "review"
+    return f"review ×{iteration}"
 
 
 def _short_date(value: str) -> str:
