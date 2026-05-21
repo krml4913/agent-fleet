@@ -205,6 +205,7 @@ def _launch_driver_for_stage(
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
+    worktree = task.get("worktree")
     launch_stage_driver(
         state_dir=state_dir,
         task_id=task_id,
@@ -212,6 +213,7 @@ def _launch_driver_for_stage(
         stage_idx=stage_idx,
         stage=stage,
         project_name=project_name,
+        window_cwd=Path(worktree) if worktree else None,
     )
 
 
