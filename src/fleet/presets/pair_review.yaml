@@ -3,7 +3,7 @@ name: pair_review
 description: Implementer with AI peer review; the user has the final say.
 stages:
   - role: implementer
-    agent: claude:sonnet
+    agent: codex:gpt-5.5
     peer_review:
       role: code-reviewer
       agent: claude:opus

@@ -132,19 +132,32 @@ class StartTests(unittest.TestCase):
         run_hook.assert_not_called()
 
     def test_topology_pair_review_starts_first_stage(self) -> None:
-        result = run_fleet(
-            "start",
-            "--project", str(self.project),
-            "--dry-run",
-            "--topology", "pair_review",
-            "3", "Pair flow",
+        # pair_review's first stage is a codex implementer; run in-process and
+        # stub the codex trust check so the test doesn't depend on ~/.codex.
+        from fleet.commands import start
+
+        args = argparse.Namespace(
+            project=str(self.project),
+            task_id="3",
+            description="Pair flow",
+            topology="pair_review",
+            agent=None,
+            title=None,
+            dry_run=True,
+            auto_paste=True,
+            prompt_delay=0.0,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        with unittest.mock.patch(
+            "fleet.commands.start.agents_mod.codex_repo_trusted",
+            return_value=True,
+        ):
+            result = start.run(args)
+        self.assertEqual(result, 0)
         sd = self.project / ".fleet-state"
         text = (sd / "tasks" / "task-3" / "task.yaml").read_text()
-        # First stage of pair_review is implementer with claude:sonnet
+        # First stage of pair_review is the implementer (codex by preset default).
         self.assertIn("role: implementer", text)
-        self.assertIn("agent: claude:sonnet", text)
+        self.assertIn("agent: codex:gpt-5.5", text)
         # pair_review now has 1 stage (implementer with inline peer_review)
         task_data = state.load_task(sd, "3")
         self.assertEqual(len(task_data["stages"]), 1)
