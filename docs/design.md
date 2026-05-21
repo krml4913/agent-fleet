@@ -267,7 +267,7 @@ stages:
 name: pair_review
 stages:
   - role: implementer
-    agent: claude:sonnet
+    agent: codex:gpt-5.5
     peer_review:
       role: code-reviewer
       agent: claude:opus
