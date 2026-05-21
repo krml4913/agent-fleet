@@ -92,7 +92,7 @@ def launch_stage_driver(
     session = f"fleet-{project_name}"
     if not tmux_mod.session_exists(session):
         tmux_mod.new_session(session)
-    window = f"task-{task_id}"
+    window = f"{task_id}·{role_name}"
     effective_cwd = window_cwd or task_dir
 
     try:
@@ -104,7 +104,7 @@ def launch_stage_driver(
             "FLEET_STATE_DIR": str(state_dir),
             "PATH": f"{repo_root}:{os.environ.get('PATH', '')}",
         }
-        tmux_mod.kill_window_if_exists(session, window)
+        tmux_mod.kill_task_windows(session, task_id)
         tmux_mod.new_window(session, window, cwd=str(effective_cwd), env=driver_env)
         tmux_mod.load_buffer(buffer_name, str(prompt_path))
 

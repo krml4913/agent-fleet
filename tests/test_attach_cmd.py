@@ -140,7 +140,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
 
     @patch("fleet.commands.attach.os.execvp")
     @patch("fleet.commands.attach.subprocess.run")
-    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader", "task-42"])
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader", "42·implementer"])
     @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
     @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
     @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
@@ -163,11 +163,34 @@ class AttachGroupedSessionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run(args)
 
-        # select-window が task-42 を対象にしていることを確認
+        # select-window が task id に対応する role 付き window を対象にしていることを確認
         calls = mock_subproc.call_args_list
         select_calls = [c for c in calls if "select-window" in str(c)]
         self.assertTrue(len(select_calls) > 0)
-        self.assertIn("task-42", str(select_calls[0]))
+        self.assertIn("42·implementer", str(select_calls[0]))
+
+    @patch("fleet.commands.attach.subprocess.run")
+    @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader", "42·designer", "42·implementer"])
+    @patch("fleet.commands.attach.tmux_mod.session_exists", return_value=True)
+    @patch("fleet.commands.attach.tmux_mod.available", return_value=True)
+    @patch("fleet.commands.attach.state_mod.load_project", return_value={"name": "testproj"})
+    @patch("fleet.commands.attach.state_mod.resolve_state_dir")
+    def test_task_window_ambiguous_returns_error(
+        self,
+        mock_resolve,
+        mock_load,
+        mock_avail,
+        mock_exists,
+        mock_windows,
+        mock_subproc,
+    ) -> None:
+        mock_resolve.return_value = Path("/fake/state")
+        mock_subproc.return_value = self._ok()
+
+        result = run(self._make_args(target="42"))
+
+        self.assertEqual(result, 1)
+        self.assertFalse(any("select-window" in str(c) for c in mock_subproc.call_args_list))
 
     @patch("fleet.commands.attach.subprocess.run")
     @patch("fleet.commands.attach.tmux_mod.list_windows", return_value=["leader"])

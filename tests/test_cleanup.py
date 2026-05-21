@@ -8,6 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 FLEET = ROOT / "fleet-agent"
@@ -15,6 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
+from fleet.commands.cleanup import run  # noqa: E402
 
 
 class CleanupCmdTests(unittest.TestCase):
@@ -80,6 +82,28 @@ class CleanupCmdTests(unittest.TestCase):
         r = self._run("cleanup", "999")
         self.assertEqual(r.returncode, 1)
         self.assertIn("task.yaml missing", r.stderr)
+
+    @patch("fleet.commands.cleanup.tmux_mod")
+    def test_cleanup_kills_task_windows_by_task_id(self, mock_tmux: MagicMock) -> None:
+        self._save("stage-transition", "completed")
+        mock_tmux.available.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.TmuxError = Exception
+        args = MagicMock()
+        args.task_id = "stage-transition"
+        args.project = str(self.project)
+        args.archive = False
+        args.force = False
+
+        with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False):
+            result = run(args)
+
+        self.assertEqual(result, 0)
+        mock_tmux.kill_task_windows.assert_called_once_with(
+            "fleet-demo",
+            "stage-transition",
+        )
+        mock_tmux.delete_buffer.assert_called_once_with("fleet-task-stage-transition")
 
 
 if __name__ == "__main__":

@@ -89,13 +89,14 @@ class InboxDeliveryTests(unittest.TestCase):
     def test_sends_keys_when_tmux_available(self) -> None:
         with (
             patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
+            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
             patch("fleet.commands.inbox.tmux_mod.send_keys") as mock_send,
         ):
             inbox_mod._wake_driver_pane(self.state_dir, "42")
             mock_send.assert_called_once()
             call_args = mock_send.call_args
             self.assertEqual(call_args[0][0], "fleet-testproj")
-            self.assertEqual(call_args[0][1], "task-42")
+            self.assertEqual(call_args[0][1], "42·implementer")
             self.assertIn("inbox-read", call_args[0][2])
 
     def test_skips_when_tmux_unavailable(self) -> None:
@@ -113,6 +114,7 @@ class InboxDeliveryTests(unittest.TestCase):
 
         with (
             patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
+            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
             patch(
                 "fleet.commands.inbox.tmux_mod.send_keys",
                 side_effect=TmuxError("no pane"),

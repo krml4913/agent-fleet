@@ -81,6 +81,27 @@ def kill_window_if_exists(session: str, window_name: str) -> None:
     )
 
 
+def task_window_names(session: str, task_id: str) -> list[str]:
+    """Return tmux windows that belong to ``task_id``."""
+    return matching_task_window_names(list_windows(session), task_id)
+
+
+def matching_task_window_names(window_names: list[str], task_id: str) -> list[str]:
+    """Filter ``window_names`` to entries that belong to ``task_id``."""
+    prefix = f"{task_id}·"
+    return [
+        name
+        for name in window_names
+        if name == task_id or name.startswith(prefix)
+    ]
+
+
+def kill_task_windows(session: str, task_id: str) -> None:
+    """Kill all tmux windows that belong to ``task_id``."""
+    for window_name in task_window_names(session, task_id):
+        kill_window(session, window_name)
+
+
 def load_buffer(buffer_name: str, source_path: str) -> None:
     """Load a file into a named tmux buffer (overwrites if it already exists)."""
     _run(["tmux", "load-buffer", "-b", buffer_name, "--", source_path])

@@ -331,7 +331,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
 
 
 class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
-    """Verify that launch_stage_driver kills a pre-existing same-named window before creating a new one."""
+    """Verify launch_stage_driver cleans old task windows before creating a new one."""
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -349,8 +349,8 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         (task_dir / "driver-prompt.md").write_text("prompt content")
         return task_dir
 
-    def test_kill_window_if_exists_called_before_new_window(self) -> None:
-        """kill_window_if_exists must be called before new_window for the same window name."""
+    def test_kill_task_windows_called_before_new_window(self) -> None:
+        """Existing windows for the task must be killed before new_window."""
         from fleet.commands import start
 
         task_id = "multiproject"
@@ -360,7 +360,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception
-            mock_tmux.kill_window_if_exists.side_effect = lambda *a, **kw: call_order.append("kill")
+            mock_tmux.kill_task_windows.side_effect = lambda *a, **kw: call_order.append("kill")
             mock_tmux.new_window.side_effect = lambda *a, **kw: call_order.append("new")
 
             result = start.launch_stage_driver(
@@ -375,17 +375,17 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertIn("kill", call_order, "kill_window_if_exists was not called")
+        self.assertIn("kill", call_order, "kill_task_windows was not called")
         self.assertIn("new", call_order, "new_window was not called")
         # kill must precede new_window
         self.assertLess(
             call_order.index("kill"),
             call_order.index("new"),
-            "kill_window_if_exists must be called before new_window",
+            "kill_task_windows must be called before new_window",
         )
 
-    def test_kill_targets_only_this_task_window(self) -> None:
-        """kill_window_if_exists must be called with exactly the window for this task."""
+    def test_launch_uses_task_id_and_role_window_name(self) -> None:
+        """new_window uses <task-id>·<role> and cleanup targets the task id."""
         from fleet.commands import start
 
         task_id = "mytask"
@@ -400,16 +400,15 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 task_id=task_id,
                 task_dir=task_dir,
                 stage_idx=0,
-                stage={"agent": "claude:sonnet", "role": "driver"},
+                stage={"agent": "claude:sonnet", "role": "implementer"},
                 project_name="demo",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
 
-        kill_calls = mock_tmux.kill_window_if_exists.call_args_list
-        self.assertEqual(len(kill_calls), 1, "kill_window_if_exists should be called exactly once")
-        _session, window_arg = kill_calls[0][0]
-        self.assertEqual(window_arg, f"task-{task_id}")
+        mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", task_id)
+        new_args = mock_tmux.new_window.call_args[0]
+        self.assertEqual(new_args[1], f"{task_id}·implementer")
 
     def test_launch_succeeds_even_when_window_already_exists(self) -> None:
         """Simulates stage transition: new_window does not fail even if a stale window exists."""
@@ -421,8 +420,8 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception
-            # kill_window_if_exists silently succeeds (window existed — now gone)
-            mock_tmux.kill_window_if_exists.return_value = None
+            # kill_task_windows removes stale windows from previous stages.
+            mock_tmux.kill_task_windows.return_value = None
             # new_window succeeds cleanly
             mock_tmux.new_window.return_value = None
 
@@ -438,7 +437,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        mock_tmux.kill_window_if_exists.assert_called_once()
+        mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", task_id)
         mock_tmux.new_window.assert_called_once()
 
 

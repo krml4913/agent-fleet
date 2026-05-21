@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -60,6 +61,36 @@ class SendPromptTests(unittest.TestCase):
                             fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 1)
         self.assertIn("session not running", r.stderr)
+
+    @patch("fleet.commands.send_prompt.tmux_mod")
+    @patch("fleet.commands.send_prompt.state_mod.resolve_state_dir")
+    def test_uses_task_window_lookup(self, mock_resolve, mock_tmux: MagicMock) -> None:
+        from fleet.commands.send_prompt import run
+
+        td = state.task_dir(self.state_dir, "1")
+        td.mkdir(parents=True)
+        (td / "driver-prompt.md").write_text("hello\n")
+        mock_resolve.return_value = self.state_dir
+        mock_tmux.available.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.task_window_names.return_value = ["1·implementer"]
+        mock_tmux.TmuxError = Exception
+        args = MagicMock()
+        args.task_id = "1"
+        args.project = self.project_name
+
+        result = run(args)
+
+        self.assertEqual(result, 0)
+        mock_tmux.task_window_names.assert_called_once_with(
+            f"fleet-{self.project_name}",
+            "1",
+        )
+        mock_tmux.paste_buffer.assert_called_once_with(
+            f"fleet-{self.project_name}",
+            "1·implementer",
+            "fleet-task-1",
+        )
 
 
 if __name__ == "__main__":

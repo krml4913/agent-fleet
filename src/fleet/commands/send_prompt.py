@@ -20,7 +20,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Paste driver-prompt.md into the task pane",
         description=(
             "Re-loads <state>/tasks/task-<id>/driver-prompt.md into the "
-            "named tmux buffer and pastes it into fleet-<project>:task-<id>."
+            "named tmux buffer and pastes it into the task's tmux window."
         ),
     )
     p.add_argument("task_id", help="Task id")
@@ -50,7 +50,6 @@ def run(args: argparse.Namespace) -> int:
     project = state_mod.load_project(state_dir)
     name = project.get("name") or "fleet"
     session = f"fleet-{name}"
-    window = f"task-{args.task_id}"
     buffer_name = f"fleet-task-{args.task_id}"
 
     if not tmux_mod.session_exists(session):
@@ -60,12 +59,23 @@ def run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    if window not in tmux_mod.list_windows(session):
+    try:
+        matches = tmux_mod.task_window_names(session, args.task_id)
+    except tmux_mod.TmuxError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    if len(matches) != 1:
+        detail = (
+            f"multiple windows found: {', '.join(matches)}"
+            if matches
+            else "window not found"
+        )
         print(
-            f"error: window not found: {session}:{window}",
+            f"error: {detail}: {session}:{args.task_id}",
             file=sys.stderr,
         )
         return 1
+    window = matches[0]
 
     try:
         tmux_mod.load_buffer(buffer_name, str(prompt_path))

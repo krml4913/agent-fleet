@@ -85,16 +85,17 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
     if not project_name:
         return
     session = f"fleet-{project_name}"
-    window = f"task-{task_id}"
     try:
-        tmux_mod.send_keys(
-            session,
-            window,
-            "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
-        )
+        windows = tmux_mod.task_window_names(session, task_id)
+        for window in windows:
+            tmux_mod.send_keys(
+                session,
+                window,
+                "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
+            )
     except tmux_mod.TmuxError:
         # Pane not found or session gone — warn and continue.
         print(
-            f"warn: could not wake driver pane {session}:{window} (not spawned or already done)",
+            f"warn: could not wake driver pane {session}:{task_id} (not spawned or already done)",
             file=sys.stderr,
         )
