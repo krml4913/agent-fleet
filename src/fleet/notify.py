@@ -17,6 +17,7 @@ never raise. Nothing in this module imports anything heavy.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -46,6 +47,8 @@ def load_config(state_dir: Path) -> dict[str, Any]:
 
 
 def send(state_dir: Path, title: str, message: str) -> None:
+    if os.environ.get("FLEET_NO_NOTIFY"):
+        return
     cfg = load_config(state_dir)
     _macos_notify(cfg.get("macos") or {}, title, message)
     _slack_notify(cfg.get("slack") or {}, title, message)

@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
+os.environ.setdefault("FLEET_NO_NOTIFY", "1")
+
 
 def make_project(fleet_home: Path, name: str, repo: Path) -> Path:
     """Register *name*→*repo* in *fleet_home* and create the state dir.
