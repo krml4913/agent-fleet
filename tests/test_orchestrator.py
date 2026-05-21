@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -435,6 +436,82 @@ class UserApprovalGateTests(unittest.TestCase):
         orchestrator.advance(self.sd, "34", task, result="approved", dry_run=True)
         task = state.load_task(self.sd, "34")
         self.assertEqual(task["stages"][0]["user_approval"]["status"], "approved")
+
+
+class WindowCwdTests(unittest.TestCase):
+    """_launch_driver_for_stage が worktree の有無で window_cwd を正しく渡すことを検証。"""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self.sd = self.project / ".fleet-state"
+        state.init_state(self.sd, name="demo")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_task(self, task_id: str, worktree: str | None) -> dict:
+        task_data: dict = {
+            "id": task_id,
+            "title": "test task",
+            "description": "test description",
+            "status": "running",
+            "topology": "pair_review",
+            "workflow": "git_worktree" if worktree else "bare",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
+        }
+        if worktree is not None:
+            task_data["worktree"] = worktree
+        state.save_task(self.sd, task_id, task_data)
+        task_dir = state.task_dir(self.sd, task_id)
+        (task_dir / "driver-prompt.md").write_text("test prompt", encoding="utf-8")
+        (task_dir / "inbox.md").write_text("", encoding="utf-8")
+        return task_data
+
+    def test_worktree_task_passes_window_cwd_as_worktree_path(self) -> None:
+        worktree_path = "/tmp/fake-worktree-wt1"
+        task = self._make_task("wt1", worktree=worktree_path)
+        stage = task["stages"][0]
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt"),
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator._launch_driver_for_stage(self.sd, "wt1", task, 0, stage)
+
+        mock_launch.assert_called_once()
+        kwargs = mock_launch.call_args.kwargs
+        self.assertEqual(kwargs["window_cwd"], Path(worktree_path))
+
+    def test_no_worktree_task_passes_window_cwd_none(self) -> None:
+        task = self._make_task("wt2", worktree=None)
+        stage = task["stages"][0]
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt"),
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator._launch_driver_for_stage(self.sd, "wt2", task, 0, stage)
+
+        mock_launch.assert_called_once()
+        kwargs = mock_launch.call_args.kwargs
+        self.assertIsNone(kwargs.get("window_cwd"))
+
+    def test_tmux_unavailable_skips_launch(self) -> None:
+        task = self._make_task("wt3", worktree="/tmp/fake-worktree-wt3")
+        stage = task["stages"][0]
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=False),
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator._launch_driver_for_stage(self.sd, "wt3", task, 0, stage)
+
+        mock_launch.assert_not_called()
 
 
 if __name__ == "__main__":
