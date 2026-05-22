@@ -5,23 +5,27 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
-### race topology を廃止 (2026-05-20)
+### topology → formation 改称 (Issue #88)
 
-**Migration note**: `race` topology preset および `candidates` shape は削除された。
+- 概念名 `topology` を `formation` に全面改称
+
+### race formation を廃止 (2026-05-20)
+
+**Migration note**: `race` formation preset および `candidates` shape は削除された。
 Issue #29 結論 E の実装 (root 大改修 段階 1)。
 
 - `src/fleet/presets/race.yaml` を削除
-- topology の valid shape は `roles` / `stages` のみ (`candidates` は無効)
+- formation の valid shape は `roles` / `stages` のみ (`candidates` は無効)
 - preset は `solo` / `pair_review` / `multi_stage` の 3 つ
 
-`candidates` を使っていた topology YAML は `roles` / `stages` に書き直すこと。
+`candidates` を使っていた formation YAML は `roles` / `stages` に書き直すこと。
 
 ### task.yaml スキーマ刷新 (2026-05-20)
 
 root 大改修 段階 2 (PR #46)。Issue #28/#29 結論 D の実装。
 
-- `task.yaml` を「1 task = 1 topology、複数 stage を持つ」新スキーマに刷新
-- task 作成時に topology 定義を task.yaml に展開コピー (snapshot)
+- `task.yaml` を「1 task = 1 formation、複数 stage を持つ」新スキーマに刷新
+- task 作成時に formation 定義を task.yaml に展開コピー (snapshot)
 - 各 stage は `status` (pending/running/done)、任意で `peer_review` / `user_approval` を持つ
 - task 全体の `status` は stages から導出するキャッシュ
 
@@ -31,7 +35,7 @@ root 大改修 段階 3 (PR #47)。Issue #29 結論 C の実装。
 
 **Migration note**: `fleet-agent spawn` は廃止。driver 起動は `fleet-agent start`。
 
-- `fleet start <id> "<desc>" --topology T` = task 開始 (task.yaml 作成 + worktree + 最初の stage の driver 起動)
+- `fleet start <id> "<desc>" --formation T` = task 開始 (task.yaml 作成 + worktree + 最初の stage の driver 起動)
 - `--role` オプション廃止 (orchestrator が stage を順に回す)
 - 「指定 stage の driver を起動」を `launch_stage_driver()` に切り出し (start と orchestrator で共用)
 - `save_task` を `yaml.safe_dump` に変更 — title 等に `:` `#` を含んでも task.yaml が壊れない
@@ -159,7 +163,7 @@ No backwards-compatibility aliases. One-time cutover.
 | `fleet attach` | `fleet attach` | `fleet` |
 | `fleet status` | `fleet status` | `fleet` |
 | `fleet log` | `fleet log` | `fleet` |
-| `fleet topology` | `fleet topology` | `fleet` |
+| `fleet formation` | `fleet formation` | `fleet` |
 | `fleet workflow` | `fleet workflow` | `fleet` |
 | `fleet spawn` | **`fleet-agent spawn`** | `fleet-agent` |
 | `fleet inbox` | **`fleet-agent inbox`** | `fleet-agent` |
@@ -323,7 +327,7 @@ live in an opt-in plugin.
     Custom plugins under `<state>/plugins/<name>.py` shadow built-ins.
   - `run_hook(module, hook_name, ctx)` — silent no-op if the hook
     isn't defined; `ctx` is a mutable dict carrying state_dir, task_id,
-    topology, role, agent, etc.
+    formation, role, agent, etc.
   - `list_builtin()` / `list_custom(state_dir)`.
 - Built-in plugins:
   - `bare` — default no-op for non-git projects.
@@ -363,22 +367,22 @@ Drivers can now report up to the user without going through the leader
 - Tests: 69 unittest cases pass total (+ Phase 4: task_context 6,
   notify 5, ask 3, event 3, done 3).
 
-### Phase 3 — topology YAML + `fleet spawn` (2026-05-19)
+### Phase 3 — formation YAML + `fleet spawn` (2026-05-19)
 
 `fleet` can now actually spawn a driver. End-to-end:
 `fleet init` → `fleet spawn <id> "<desc>"` → claude/codex CLI lives in a
 tmux window, with task state + prompt prepared on disk.
 
-**Topology layer (3a):**
+**Formation layer (3a):**
 - `vendor/yaml/`: PyYAML 6.0.3 pure-Python sources, MIT license preserved.
   `./fleet` prepends `vendor/` to `sys.path`, so `import yaml` works
   without `pip install`.
-- `src/fleet/presets/`: 4 stock topologies — `solo`, `pair_review`,
+- `src/fleet/presets/`: 4 stock formations — `solo`, `pair_review`,
   `multi_stage`, `race`. Cover roles / stages / candidates shapes.
-- `fleet.topology`: `list_presets`, `list_custom`, `load_preset`,
+- `fleet.formation`: `list_presets`, `list_custom`, `load_preset`,
   `load_custom`, `load(name, state_dir=)` (custom wins), `validate`
   (requires `name` + one of roles|stages|candidates).
-- `fleet topology list` / `fleet topology show <name>` CLI.
+- `fleet formation list` / `fleet formation show <name>` CLI.
 
 **Spawn layer (3b):**
 - `fleet.agents.parse_spec("claude:sonnet")` / `cli_command(...)` —
@@ -389,8 +393,8 @@ tmux window, with task state + prompt prepared on disk.
 - `fleet.tmux` — thin `subprocess` wrap around tmux session/window/keys.
   Mechanism only, no fleet vocabulary.
 - `fleet spawn <id> "<description>"`:
-  - Resolves topology + role + agent (with `--role` / `--agent` overrides).
-  - Writes `task.yaml` (status=spawning, agent, topology, role).
+  - Resolves formation + role + agent (with `--role` / `--agent` overrides).
+  - Writes `task.yaml` (status=spawning, agent, formation, role).
   - Writes empty `inbox.md` / `outbox.md` + rendered `driver-prompt.md`.
   - Emits a `spawn` event.
   - Opens a tmux window and launches the agent CLI inside.
@@ -408,7 +412,7 @@ State updates are now race-safe and `dashboard.md` is regenerated on every write
 - `fleet.events.append_event(path, type, **fields)` — POSIX `O_APPEND`
   audit log helper for `events.jsonl`.
 - `fleet.simple_yaml` — minimal flat `key: value` reader/writer (the real
-  YAML parser lands in Phase 3 when topology files demand nesting).
+  YAML parser lands in Phase 3 when formation files demand nesting).
 - `fleet.state` extended:
   - `discover_state_dir(start)` walks parents looking for `.fleet-state/`
   - `load_project` / `save_project`

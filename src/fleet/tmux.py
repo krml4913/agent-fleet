@@ -2,7 +2,7 @@
 
 We deliberately keep this module mechanism-only: it knows how to start
 sessions, open windows, and send keys, but it does **not** know about
-fleet concepts like driver, topology, or task. Higher layers compose
+fleet concepts like driver, formation, or task. Higher layers compose
 those abstractions on top.
 """
 from __future__ import annotations

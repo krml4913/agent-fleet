@@ -194,14 +194,14 @@ def _launch_driver_for_stage(
 
     role_name = stage.get("role", "driver")
     agent_spec = stage.get("agent", "")
-    topology_name = task.get("topology", "unknown")
+    formation_name = task.get("formation", "unknown")
     description = task.get("description") or task.get("title", "")
     workflow = plugins_mod.load_workflow(state_dir)
 
     prompt = dp.render(
         task_id=task_id,
         description=description,
-        topology_name=topology_name,
+        formation_name=formation_name,
         role=role_name,
         agent=agent_spec,
         workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),

@@ -3,7 +3,7 @@
 Hierarchical multi-vendor agent orchestration over tmux.
 
 `fleet` lets a human leader collaborate with one or more **driver
-agents** (claude / codex) inside tmux panes, with **team topology**
+agents** (claude / codex) inside tmux panes, with **team formation**
 defined per-project in YAML and an opt-in **workflow plugin** layer
 for git / PR / cleanup mechanics.
 
@@ -54,7 +54,7 @@ is vendored under `vendor/`.
 1. The user talks to the **leader** for task assignment, and directly
    to a **driver** when refining one task.
 2. **Multi-vendor agents** (claude / codex) coexist in one project.
-3. **Team topology** (solo / pair-review / multi-stage) is
+3. **Team formation** (solo / pair-review / multi-stage) is
    chosen per task via YAML.
 4. **Workflow plugins** keep git-specific bits (worktrees, branches,
    PRs) out of the core; non-coding workflows can plug in the same
@@ -80,7 +80,7 @@ is vendored under `vendor/`.
 | `fleet attach [<target>]` | Attach to leader or a task pane |
 | `fleet status [path] [--events N]` | Print project info + tasks + recent events |
 | `fleet log [<id>] [-n N] [--type T]` | Tail `events.jsonl` |
-| `fleet topology list \| show <name>` | Inspect available topologies |
+| `fleet formation list \| show <name>` | Inspect available formations |
 | `fleet workflow list \| show <name> \| set <name>` | Inspect / pick the active workflow plugin |
 
 ### `fleet-agent` — agent CLI (leader / driver internal use)
@@ -89,8 +89,8 @@ Leader-side (run by the leader agent):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent start <id> "<desc>" [--topology T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes prompt by default) |
-| `fleet-agent start <id> --prompt-file PATH [--topology T] [--agent A]` | Start a new task using the description read from a file |
+| `fleet-agent start <id> "<desc>" [--formation T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes prompt by default) |
+| `fleet-agent start <id> --prompt-file PATH [--formation T] [--agent A]` | Start a new task using the description read from a file |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
 | `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
@@ -130,7 +130,7 @@ agent-fleet/
     notify.yaml             # macOS + Slack settings (optional)
     events.jsonl            # append-only audit log
     dashboard.md            # auto-generated read-only view
-    topologies/             # custom YAML topologies (shadow built-ins)
+    formations/             # custom YAML formations (shadow built-ins)
     plugins/                # custom workflow plugins (shadow built-ins)
     worktrees/              # git_worktree plugin lives here
     tasks/

@@ -17,13 +17,13 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="42",
             description="Implement the foo feature.",
-            topology_name="solo",
+            formation_name="solo",
             role="driver",
             agent="claude:sonnet",
             workflow_fragment="Workflow-specific instructions.",
         )
         self.assertIn("task id:   task-42", text)
-        self.assertIn("topology:  solo", text)
+        self.assertIn("formation:  solo", text)
         self.assertIn("role:      driver", text)
         self.assertIn("agent:     claude:sonnet", text)
         self.assertIn("Workflow-specific instructions.", text)
@@ -33,7 +33,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="solo",
+            formation_name="solo",
             role="driver",
             agent="claude:sonnet",
         )
@@ -45,7 +45,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="solo",
+            formation_name="solo",
             role="driver",
             agent="claude:sonnet",
         )
@@ -57,7 +57,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="solo",
+            formation_name="solo",
             role="driver",
             agent="claude:sonnet",
         )
@@ -67,7 +67,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="solo",
+            formation_name="solo",
             role="driver",
             agent="claude:sonnet",
             workflow_fragment=git_worktree.DRIVER_PROMPT_FRAGMENT,
@@ -79,7 +79,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="pair_review",
+            formation_name="pair_review",
             role="implementer",
             agent="claude:sonnet",
         )
@@ -90,7 +90,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="x",
-            topology_name="solo",
+            formation_name="solo",
             role="unknown-role",
             agent="claude:sonnet",
         )
@@ -102,7 +102,7 @@ class DriverPromptTests(unittest.TestCase):
         text = driver_prompt.render(
             task_id="1",
             description="Task description sentinel.",
-            topology_name="pair_review",
+            formation_name="pair_review",
             role="implementer",
             agent="claude:sonnet",
             workflow_fragment="Workflow sentinel.",

@@ -2,7 +2,7 @@
 
 For Phase 2 we only need to round-trip ``project.yaml`` and ``task.yaml``,
 both of which are intentionally restricted to flat string maps. A real
-YAML parser (PyYAML, vendored) lands in Phase 3 when topology files —
+YAML parser (PyYAML, vendored) lands in Phase 3 when formation files —
 which need nested structures and lists — arrive.
 
 Constraints (intentional, to keep this file tiny):
