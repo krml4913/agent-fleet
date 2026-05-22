@@ -553,6 +553,32 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", task_id)
         mock_tmux.new_window.assert_called_once()
 
+    def test_launch_can_preserve_existing_task_windows(self) -> None:
+        from fleet.commands import start
+
+        task_id = "keep-live"
+        task_dir = self._make_task_dir(task_id)
+
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+
+            result = start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "claude:sonnet", "role": "code-reviewer"},
+                project_name="demo",
+                auto_paste=False,
+                prompt_delay=0.0,
+                replace_task_windows=False,
+            )
+
+        self.assertEqual(result, 0)
+        mock_tmux.kill_task_windows.assert_not_called()
+        mock_tmux.new_window.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

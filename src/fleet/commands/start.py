@@ -80,6 +80,7 @@ def launch_stage_driver(
     prompt_delay: float = 3.0,
     prompt_timeout: float = prompt_deliverer.DEFAULT_TIMEOUT_SECONDS,
     window_cwd: Path | None = None,
+    replace_task_windows: bool = True,
 ) -> int:
     """Open a tmux window for a specific stage driver.
 
@@ -107,7 +108,8 @@ def launch_stage_driver(
             "FLEET_STATE_DIR": str(state_dir),
             "PATH": f"{repo_root}:{os.environ.get('PATH', '')}",
         }
-        tmux_mod.kill_task_windows(session, task_id)
+        if replace_task_windows:
+            tmux_mod.kill_task_windows(session, task_id)
         tmux_mod.new_window(session, window, cwd=str(effective_cwd), env=driver_env)
         prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
 

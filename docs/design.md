@@ -335,15 +335,21 @@ stages:
 implement → peer_review (AI 査読ループ, max 3 回) → user_approval → stage 完了
 ```
 
+peer_review 付き stage では、実装者と reviewer の agent CLI は stage の間は起動したまま保持する。
+初回の reviewer だけ必要に応じて新しい tmux window として起動し、その後の iteration handoff は
+既存 pane に inbox 通知を `send-keys` して起こす。これにより agent context を保持し、agent CLI の
+boot gate は stage 内の初回起動時だけ通る。multi_stage ではこの長命化は stage-local であり、
+stage を跨ぐ通常の advance は次 stage の driver を新しく launch する。
+
 ### 6.3 state machine (orchestrator)
 
 - `fleet-agent done --result approved|changes-requested` が呼ばれると `orchestrator.advance()` が次を判断する
-- approved: driver / reviewer の作業完了を受け、peer_review / user_approval の次状態を判断する。user_approval が無ければ現 stage を done にして次 stage を launch (次がなければ task completed)
-- changes-requested: peer_review の phase に応じてループを回す
+- approved: driver / reviewer の作業完了を受け、peer_review / user_approval の次状態を判断する。peer_review handoff は live pane があれば inbox 通知で起こし、なければその role を初回 launch する。user_approval が無ければ現 stage を done にして次 stage を launch (次がなければ task completed)
+- changes-requested: peer_review の phase に応じてループを回す。実装者に戻す場合は既存 implementer pane に inbox 通知を流し込み、relaunch しない
 - peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
 - `user_approval.status == asked` のゲートは leader が user の判断を受けて `fleet-agent approve <id>` / `fleet-agent reject <id>` で中継する
   - approve: `user_approval.status` を `approved` にし、stage 完了処理へ進む
-  - reject: `user_approval.status` を `pending` に戻し、該当 stage を implementation に戻す
+  - reject: `user_approval.status` を `pending` に戻し、該当 stage を implementation に戻す。peer_review stage では既存 implementer pane を起こす
 - 後方互換として `done --result approved|changes-requested` による asked gate の承認/差し戻し中継は当面残すが、新しい導線では使わない
 
 ### 6.4 formation YAML schema
