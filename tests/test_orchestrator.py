@@ -344,6 +344,46 @@ class PeerReviewLoopTests(unittest.TestCase):
         self.assertEqual(task["stages"][0]["status"], "done")
         self.assertEqual(task["status"], "completed")
 
+    def test_first_review_handoff_launches_reviewer_without_killing_implementer(self) -> None:
+        task = _make_task(self.sd, "29", self._make_pr_stage())
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch(
+                "fleet.tmux.task_window_names",
+                return_value=["29·implementer"],
+            ),
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator.advance(self.sd, "29", task, result="approved")
+
+        mock_launch.assert_called_once()
+        kwargs = mock_launch.call_args.kwargs
+        self.assertEqual(kwargs["stage"]["role"], "code-reviewer")
+        self.assertFalse(kwargs["replace_task_windows"])
+
+    def test_rework_handoff_wakes_existing_implementer_without_relaunch(self) -> None:
+        stages = self._make_pr_stage()
+        stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 1}
+        task = _make_task(self.sd, "2a", stages)
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch(
+                "fleet.tmux.task_window_names",
+                return_value=["2a·implementer", "2a·code-reviewer"],
+            ),
+            unittest.mock.patch("fleet.tmux.send_keys") as mock_send,
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator.advance(self.sd, "2a", task, result="changes-requested")
+
+        mock_launch.assert_not_called()
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.args[1], "2a·implementer")
+        inbox = state.task_dir(self.sd, "2a") / "inbox.md"
+        self.assertIn("role=implementer", inbox.read_text(encoding="utf-8"))
+
 
 class UserApprovalGateTests(unittest.TestCase):
     """Tests for the user_approval gate."""

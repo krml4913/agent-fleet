@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import state as state_mod
+from .events import append_event, utcnow_iso
 
 
 class UserApprovalError(ValueError):
@@ -65,7 +66,7 @@ def advance(
         phase = pr.get("phase", "implementing")
 
         if phase == "implementing":
-            # Implementer called done; launch reviewer.
+            # Implementer called done; hand off to reviewer.
             pr.setdefault("iteration", 1)
             pr["phase"] = "reviewing"
             stage["peer_review"] = pr
@@ -78,8 +79,17 @@ def advance(
                     "agent": pr.get("agent") or stage.get("agent") or "claude:sonnet",
                     "status": "running",
                 }
-                _launch_driver_for_stage(
-                    state_dir, task_id, task, current_idx, reviewer_stage
+                _handoff_to_stage_driver(
+                    state_dir,
+                    task_id,
+                    task,
+                    current_idx,
+                    reviewer_stage,
+                    message=_peer_review_handoff_message(
+                        target_role=reviewer_stage["role"],
+                        phase="reviewing",
+                        iteration=int(pr.get("iteration", 1) or 1),
+                    ),
                 )
             return
 
@@ -93,7 +103,7 @@ def advance(
                     state_mod.save_task(state_dir, task_id, task)
                     _notify_escalation(state_dir, task_id, task, stage)
                     return
-                # Re-launch implementer for next iteration.
+                # Return to the already-running implementer for the next iteration.
                 pr["iteration"] = iteration + 1
                 pr["phase"] = "implementing"
                 stage["peer_review"] = pr
@@ -101,8 +111,17 @@ def advance(
                 task["stages"] = stages
                 state_mod.save_task(state_dir, task_id, task)
                 if not dry_run:
-                    _launch_driver_for_stage(
-                        state_dir, task_id, task, current_idx, stage
+                    _handoff_to_stage_driver(
+                        state_dir,
+                        task_id,
+                        task,
+                        current_idx,
+                        stage,
+                        message=_peer_review_handoff_message(
+                            target_role=stage.get("role", "driver"),
+                            phase="implementing",
+                            iteration=int(pr.get("iteration", 1) or 1),
+                        ),
                     )
                 return
 
@@ -219,7 +238,22 @@ def reject_user_approval(
     state_mod.save_task(state_dir, task_id, task)
 
     if not dry_run:
-        _launch_driver_for_stage(state_dir, task_id, task, current_idx, stage)
+        pr = stage.get("peer_review")
+        if isinstance(pr, dict) and pr.get("role"):
+            _handoff_to_stage_driver(
+                state_dir,
+                task_id,
+                task,
+                current_idx,
+                stage,
+                message=_peer_review_handoff_message(
+                    target_role=stage.get("role", "driver"),
+                    phase="implementing",
+                    iteration=int(pr.get("iteration", 1) or 1),
+                ),
+            )
+        else:
+            _launch_driver_for_stage(state_dir, task_id, task, current_idx, stage)
 
 
 def _require_user_relay_target(
@@ -298,6 +332,8 @@ def _launch_driver_for_stage(
     task: dict,
     stage_idx: int,
     stage: dict,
+    *,
+    replace_task_windows: bool = True,
 ) -> None:
     """Render driver-prompt.md for a stage and open its tmux window."""
     from . import driver_prompt as dp
@@ -337,6 +373,101 @@ def _launch_driver_for_stage(
         stage=stage,
         project_name=project_name,
         window_cwd=Path(worktree) if worktree else None,
+        replace_task_windows=replace_task_windows,
+    )
+
+
+def _handoff_to_stage_driver(
+    state_dir: Path,
+    task_id: str,
+    task: dict,
+    stage_idx: int,
+    stage: dict,
+    *,
+    message: str,
+) -> None:
+    """Wake a live stage driver, launching it first if its pane does not exist."""
+    from . import tmux as tmux_mod
+
+    if not tmux_mod.available():
+        return
+
+    project = state_mod.load_project(state_dir)
+    session = f"fleet-{project.get('name', '?')}"
+    window = _stage_window_name(task_id, stage)
+
+    try:
+        windows = tmux_mod.task_window_names(session, task_id)
+    except tmux_mod.TmuxError:
+        windows = []
+
+    if window not in windows:
+        _launch_driver_for_stage(
+            state_dir,
+            task_id,
+            task,
+            stage_idx,
+            stage,
+            replace_task_windows=False,
+        )
+        append_event(
+            state_dir / "events.jsonl",
+            "handoff_launch",
+            task_id=task_id,
+            role=stage.get("role", "driver"),
+        )
+        return
+
+    _append_handoff_inbox(state_dir, task_id, message)
+    try:
+        tmux_mod.send_keys(
+            session,
+            window,
+            "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
+        )
+    except tmux_mod.TmuxError:
+        return
+    append_event(
+        state_dir / "events.jsonl",
+        "handoff_message",
+        task_id=task_id,
+        role=stage.get("role", "driver"),
+    )
+
+
+def _stage_window_name(task_id: str, stage: dict) -> str:
+    role_name = stage.get("role", "driver")
+    return f"{task_id}·{role_name}"
+
+
+def _append_handoff_inbox(state_dir: Path, task_id: str, message: str) -> None:
+    task_dir_path = state_mod.task_dir(state_dir, task_id)
+    inbox_path = task_dir_path / "inbox.md"
+    ts = utcnow_iso()
+    block = f"### {ts}\n\n{message}\n\n"
+    existing = inbox_path.read_text(encoding="utf-8") if inbox_path.exists() else ""
+    inbox_path.write_text(existing + block, encoding="utf-8")
+    append_event(
+        state_dir / "events.jsonl",
+        "inbox_message",
+        task_id=task_id,
+        message=message,
+        inbox_ts=ts,
+    )
+
+
+def _peer_review_handoff_message(
+    *,
+    target_role: str,
+    phase: str,
+    iteration: int,
+) -> str:
+    return (
+        f"[fleet handoff] role={target_role} phase={phase} iteration={iteration}. "
+        "It is your turn now. Run `fleet-agent inbox-read` if you have not "
+        "already, continue from the retained pane context, and call "
+        "`fleet-agent done --result approved` when finished. Reviewers should "
+        "use `--result changes-requested` when rework is needed."
     )
 
 

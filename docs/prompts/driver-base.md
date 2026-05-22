@@ -7,7 +7,7 @@ Environment:
     the task automatically from those — no --task-id needed.
 
 Communication:
-  - inbox.md   — instructions from the leader; read with `fleet-agent inbox-read`
+  - inbox.md   — instructions / turn handoffs; read with `fleet-agent inbox-read`
                  (not cat/Read directly — ack won't fire otherwise).
                  When woken by a "[fleet] inbox に新着メッセージ" notification,
                  run `fleet-agent inbox-read` immediately.
