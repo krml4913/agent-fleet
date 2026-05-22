@@ -366,8 +366,10 @@ class StartAutopasteEnterTests(unittest.TestCase):
         loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
         self.assertEqual(loaded_path.name, ".driver-prompt.md.paste-pointer")
         pointer = loaded_path.read_text(encoding="utf-8")
-        self.assertIn("Read this prompt file", pointer)
-        self.assertIn(str((self.state_dir / "tasks" / "task-200" / "driver-prompt.md").resolve()), pointer)
+        prompt_path = self.state_dir / "tasks" / "task-200" / "driver-prompt.md"
+        self.assertIn("Read the prompt file at this path", pointer)
+        self.assertTrue(pointer.endswith(str(prompt_path.resolve())))
+        self.assertEqual(pointer.count("\n"), 0)
         self.assertNotIn("auto-paste enter integration test", pointer)
         enter_calls = [
             c for c in mock_tmux.send_keys.call_args_list

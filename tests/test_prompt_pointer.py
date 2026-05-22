@@ -30,8 +30,9 @@ class PromptPointerTests(unittest.TestCase):
             self.assertEqual(pointer_path, prompt_pointer.pointer_path(prompt_path))
             tmux.load_buffer.assert_called_once_with("fleet-task-1", str(pointer_path))
             text = pointer_path.read_text(encoding="utf-8")
-            self.assertIn("Read this prompt file", text)
-            self.assertIn(str(prompt_path.resolve()), text)
+            self.assertIn("Read the prompt file at this path", text)
+            self.assertTrue(text.endswith(str(prompt_path.resolve())))
+            self.assertEqual(text.count("\n"), 0)
             self.assertNotIn("full prompt body", text)
             self.assertNotIn("日本語", text)
 

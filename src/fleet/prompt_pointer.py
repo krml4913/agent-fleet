@@ -9,10 +9,8 @@ def pointer_text(prompt_path: Path) -> str:
     """Return the small tmux-pasted instruction for a full prompt file."""
     resolved = prompt_path.resolve()
     return (
-        "Read this prompt file before doing anything else:\n"
-        f"{resolved}\n\n"
-        "Use your Read/file-reading tool to read the full file now, then "
-        "follow its instructions."
+        "Read the prompt file at this path before doing anything else, "
+        f"then follow its instructions: {resolved}"
     )
 
 
