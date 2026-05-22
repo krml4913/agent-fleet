@@ -113,10 +113,36 @@ class PromptDelivererTests(unittest.TestCase):
     def test_codex_blocking_update_menu_emits_needs_input(self) -> None:
         panes = iter(
             [
-                "Update available\n1. Update now\n2. Skip this version\n3. Skip for now\n",
+                "Update available\n› 1. Update now\n  2. Skip this version\n  3. Skip for now\n",
                 "›\n",
             ]
         )
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys"),
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [e["type"] for e in self._events()],
+            ["needs_input", "prompt_delivered"],
+        )
+
+    def test_codex_trust_menu_cursor_is_not_ready(self) -> None:
+        pane = """
+> You are in /private/tmp
+  Do you trust the contents of this directory?
+› 1. Yes, continue
+  2. No, quit
+  Press enter to continue
+"""
+        panes = iter([pane, "› Run /review on my current changes\n"])
         with (
             patch(
                 "fleet.prompt_deliverer.tmux.capture_pane",
@@ -146,15 +172,42 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
+    def test_claude_menu_cursor_is_not_ready(self) -> None:
+        panes = iter(
+            [
+                "Do you trust this workspace?\n❯ 1. Yes, proceed\n  2. No\n",
+                'status\n❯ Try "help"\n',
+            ]
+        )
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys"),
+        ):
+            result = self._deliver(agent="claude:opus")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [e["type"] for e in self._events()],
+            ["needs_input", "prompt_delivered"],
+        )
+
     def test_gate_emits_needs_input_but_keeps_polling_until_ready(self) -> None:
         panes = iter(
             [
-                "Do you trust the contents of this directory?\n1. Yes, continue\n",
+                "Do you trust the contents of this directory?\n› 1. Yes, continue\n",
                 "all set\n›\n",
             ]
         )
         with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", side_effect=lambda *_a, **_k: next(panes)),
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
             patch("fleet.prompt_deliverer.tmux.send_keys"),

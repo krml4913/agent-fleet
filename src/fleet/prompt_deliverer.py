@@ -26,19 +26,21 @@ class PromptAdapter:
 
 ADAPTERS: dict[str, PromptAdapter] = {
     "claude": PromptAdapter(
-        ready=re.compile(r"(?m)^\s*❯(?:\s|$)"),
+        ready=re.compile(r"(?m)^\s*❯(?!\s*\d+\.)"),
         gate=re.compile(
             r"(?im)"
             r"(?:login|log in|sign in|authentication|authenticate|"
-            r"^\s*1\.\s*Update now\b|trust (?:this )?(?:folder|directory|workspace)|"
-            r"do you trust|continue\?)"
+            r"^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"
+            r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
+            r"trust (?:this )?(?:folder|directory|workspace)|do you trust|continue\?)"
         ),
     ),
     "codex": PromptAdapter(
-        ready=re.compile(r"(?im)^\s*›(?:\s|$)|ask codex|what can i help"),
+        ready=re.compile(r"(?m)^\s*›(?!\s*\d+\.)"),
         gate=re.compile(
             r"(?im)"
-            r"(?:^\s*1\.\s*Update now\b|"
+            r"(?:^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"
+            r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
             r"do you trust the contents of this directory|yes,\s*continue|"
             r"sign in|login|log in|authentication|authenticate|api key)"
         ),
