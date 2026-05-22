@@ -278,6 +278,37 @@ class PeerReviewLoopTests(unittest.TestCase):
         self.assertTrue(qpath.exists())
         self.assertIn("exceeded", qpath.read_text())
 
+    def test_approve_resolves_peer_review_escalation(self) -> None:
+        stages = self._make_pr_stage(with_user_approval=True)
+        stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 3}
+        task = _make_task(self.sd, "27", stages)
+        task["status"] = "needs_input"
+        state.save_task(self.sd, "27", task)
+
+        orchestrator.approve_user_approval(self.sd, "27", task, dry_run=True)
+
+        updated = state.load_task(self.sd, "27")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "approved")
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "approved")
+        self.assertEqual(updated["stages"][0]["status"], "done")
+        self.assertEqual(updated["status"], "completed")
+
+    def test_reject_resolves_peer_review_escalation(self) -> None:
+        stages = self._make_pr_stage(with_user_approval=True)
+        stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 3}
+        task = _make_task(self.sd, "28", stages)
+        task["status"] = "needs_input"
+        state.save_task(self.sd, "28", task)
+
+        orchestrator.reject_user_approval(self.sd, "28", task, dry_run=True)
+
+        updated = state.load_task(self.sd, "28")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "implementing")
+        self.assertEqual(updated["stages"][0]["peer_review"]["iteration"], 4)
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "pending")
+        self.assertEqual(updated["stages"][0]["status"], "running")
+        self.assertEqual(updated["status"], "running")
+
     # ── full peer_review cycle (no user_approval) ─────────────────────────
 
     def test_full_peer_review_cycle_approved(self) -> None:
@@ -366,6 +397,25 @@ class UserApprovalGateTests(unittest.TestCase):
         self.assertEqual(ua["status"], "approved")
         self.assertEqual(updated["stages"][0]["status"], "done")
         self.assertEqual(updated["status"], "completed")
+
+    def test_user_approval_asked_changes_requested_rejects(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        task = _make_task(self.sd, "36", stages, formation="solo")
+        orchestrator.advance(
+            self.sd, "36", task, result="changes-requested", dry_run=True
+        )
+        updated = state.load_task(self.sd, "36")
+        ua = updated["stages"][0]["user_approval"]
+        self.assertEqual(ua["status"], "pending")
+        self.assertEqual(updated["stages"][0]["status"], "running")
+        self.assertEqual(updated["status"], "running")
 
     def test_user_approval_writes_questions_md(self) -> None:
         stages = [

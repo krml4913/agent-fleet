@@ -115,7 +115,13 @@ def advance(
 
     else:
         # No peer_review: legacy changes-requested records result and stops.
-        if result == "changes-requested":
+        ua = stage.get("user_approval")
+        waiting_for_user = (
+            isinstance(ua, dict)
+            and ua.get("required")
+            and ua.get("status") == "asked"
+        )
+        if result == "changes-requested" and not waiting_for_user:
             stages[current_idx]["result"] = "changes-requested"
             task["stages"] = stages
             state_mod.save_task(state_dir, task_id, task)
@@ -137,7 +143,7 @@ def advance(
             _request_user_approval(state_dir, task_id, task, stage)
             return
 
-        if ua_status == "asked":
+        if ua_status == "asked" and result == "approved":
             # Backward compatibility: older leaders used a second
             # ``done --result=approved`` as the user approval relay. New
             # callers should use ``fleet-agent approve``.
@@ -148,6 +154,12 @@ def advance(
             _mark_stage_done_and_advance(
                 state_dir, task_id, task, current_idx, dry_run=dry_run
             )
+            return
+
+        if ua_status == "asked" and result == "changes-requested":
+            # Backward compatibility for the old user rejection relay. New
+            # callers should use ``fleet-agent reject``.
+            reject_user_approval(state_dir, task_id, task, dry_run=dry_run)
             return
 
     # ── mark stage done and advance ───────────────────────────────────────
@@ -162,10 +174,17 @@ def approve_user_approval(
     dry_run: bool = False,
 ) -> None:
     """Relay explicit user approval for the current stage's approval gate."""
-    stages, current_idx, stage, ua = _require_asked_user_approval(task)
+    stages, current_idx, stage, ua, is_escalation = _require_user_relay_target(task)
 
-    ua["status"] = "approved"
-    stage["user_approval"] = ua
+    if is_escalation:
+        pr = stage.get("peer_review")
+        if isinstance(pr, dict):
+            pr["phase"] = "approved"
+            stage["peer_review"] = pr
+
+    if ua is not None:
+        ua["status"] = "approved"
+        stage["user_approval"] = ua
     stages[current_idx] = stage
     task["stages"] = stages
 
@@ -180,10 +199,11 @@ def reject_user_approval(
     dry_run: bool = False,
 ) -> None:
     """Relay explicit user rejection and return the stage to implementation."""
-    stages, current_idx, stage, ua = _require_asked_user_approval(task)
+    stages, current_idx, stage, ua, _is_escalation = _require_user_relay_target(task)
 
-    ua["status"] = "pending"
-    stage["user_approval"] = ua
+    if ua is not None:
+        ua["status"] = "pending"
+        stage["user_approval"] = ua
 
     pr = stage.get("peer_review")
     if isinstance(pr, dict) and pr.get("role"):
@@ -202,7 +222,9 @@ def reject_user_approval(
         _launch_driver_for_stage(state_dir, task_id, task, current_idx, stage)
 
 
-def _require_asked_user_approval(task: dict) -> tuple[list[dict], int, dict, dict]:
+def _require_user_relay_target(
+    task: dict,
+) -> tuple[list[dict], int, dict, dict | None, bool]:
     stages = task.get("stages") or []
     if not stages:
         raise UserApprovalError("task has no stages")
@@ -213,12 +235,22 @@ def _require_asked_user_approval(task: dict) -> tuple[list[dict], int, dict, dic
 
     stage = stages[current_idx]
     ua = stage.get("user_approval")
+    if isinstance(ua, dict) and ua.get("required") and ua.get("status") == "asked":
+        return stages, current_idx, stage, ua, False
+
+    pr = stage.get("peer_review")
+    is_escalation = (
+        task.get("status") == "needs_input"
+        and isinstance(pr, dict)
+        and pr.get("phase") == "reviewing"
+        and int(pr.get("iteration", 1) or 1) >= 3
+    )
+    if is_escalation:
+        return stages, current_idx, stage, ua if isinstance(ua, dict) else None, True
+
     if not (isinstance(ua, dict) and ua.get("required")):
         raise UserApprovalError("current stage does not require user approval")
-    if ua.get("status") != "asked":
-        raise UserApprovalError("current stage is not waiting for user approval")
-
-    return stages, current_idx, stage, ua
+    raise UserApprovalError("current stage is not waiting for user approval")
 
 
 def _mark_stage_done_and_advance(

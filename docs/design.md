@@ -344,7 +344,7 @@ implement → peer_review (AI 査読ループ, max 3 回) → user_approval → 
 - `user_approval.status == asked` のゲートは leader が user の判断を受けて `fleet-agent approve <id>` / `fleet-agent reject <id>` で中継する
   - approve: `user_approval.status` を `approved` にし、stage 完了処理へ進む
   - reject: `user_approval.status` を `pending` に戻し、該当 stage を implementation に戻す
-- 後方互換として `done --result approved` による asked gate の承認は当面残すが、新しい導線では使わない
+- 後方互換として `done --result approved|changes-requested` による asked gate の承認/差し戻し中継は当面残すが、新しい導線では使わない
 
 ### 6.4 formation YAML schema
 
