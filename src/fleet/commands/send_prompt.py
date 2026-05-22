@@ -1,8 +1,8 @@
-"""``fleet-agent send-prompt <task-id>`` — paste the driver-prompt into a task pane.
+"""``fleet-agent send-prompt <task-id>`` — paste a driver-prompt pointer.
 
 Useful when `fleet-agent start` was run without `--auto-paste` (the safer
-default) and the user wants to inject the prompt after attaching to the
-window and confirming the agent CLI is ready.
+default) and the user wants to inject the prompt pointer after attaching
+to the window and confirming the agent CLI is ready.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import prompt_pointer
 from .. import state as state_mod
 from .. import tmux as tmux_mod
 
@@ -17,10 +18,10 @@ from .. import tmux as tmux_mod
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "send-prompt",
-        help="Paste driver-prompt.md into the task pane",
+        help="Paste a driver-prompt.md pointer into the task pane",
         description=(
-            "Re-loads <state>/tasks/task-<id>/driver-prompt.md into the "
-            "named tmux buffer and pastes it into the task's tmux window."
+            "Loads a small pointer to <state>/tasks/task-<id>/driver-prompt.md "
+            "into the named tmux buffer and pastes it into the task's tmux window."
         ),
     )
     p.add_argument("task_id", help="Task id")
@@ -78,8 +79,13 @@ def run(args: argparse.Namespace) -> int:
     window = matches[0]
 
     try:
-        tmux_mod.load_buffer(buffer_name, str(prompt_path))
-        tmux_mod.paste_buffer(session, window, buffer_name)
+        prompt_pointer.paste_pointer_buffer(
+            tmux_mod,
+            session=session,
+            window=window,
+            buffer_name=buffer_name,
+            prompt_path=prompt_path,
+        )
         # Some CLIs accept Enter to submit, others need a second one; we
         # send one explicitly so the paste is committed.
         tmux_mod.send_keys(session, window, "", enter=True)
@@ -87,5 +93,5 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    print(f"pasted prompt → {session}:{window}")
+    print(f"pasted prompt pointer → {session}:{window}")
     return 0

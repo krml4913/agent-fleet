@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import state  # noqa: E402
+from fleet import prompt_pointer, state  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
 
 
@@ -363,6 +363,14 @@ class StartAutopasteEnterTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         mock_tmux.paste_buffer.assert_called_once()
+        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
+        self.assertEqual(loaded_path.name, ".driver-prompt.md.paste-pointer")
+        pointer = loaded_path.read_text(encoding="utf-8")
+        prompt_path = self.state_dir / "tasks" / "task-200" / "driver-prompt.md"
+        self.assertIn("Read the prompt file at this path", pointer)
+        self.assertTrue(pointer.endswith(str(prompt_path.resolve())))
+        self.assertEqual(pointer.count("\n"), 0)
+        self.assertNotIn("auto-paste enter integration test", pointer)
         enter_calls = [
             c for c in mock_tmux.send_keys.call_args_list
             if c.kwargs.get("enter", True)
@@ -392,6 +400,11 @@ class StartAutopasteEnterTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         mock_tmux.paste_buffer.assert_not_called()
+        mock_tmux.load_buffer.assert_called_once()
+        prompt_path = self.state_dir / "tasks" / "task-201" / "driver-prompt.md"
+        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
+        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
+        self.assertIn(str(prompt_path.resolve()), loaded_path.read_text(encoding="utf-8"))
 
 
 class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
@@ -447,6 +460,11 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             call_order.index("new"),
             "kill_task_windows must be called before new_window",
         )
+        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
+        self.assertEqual(loaded_path, prompt_pointer.pointer_path(task_dir / "driver-prompt.md"))
+        pointer = loaded_path.read_text(encoding="utf-8")
+        self.assertIn(str((task_dir / "driver-prompt.md").resolve()), pointer)
+        self.assertNotIn("prompt content", pointer)
 
     def test_launch_uses_task_id_and_role_window_name(self) -> None:
         """new_window uses <task-id>·<role> and cleanup targets the task id."""

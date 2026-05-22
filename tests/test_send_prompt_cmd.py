@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import state, tmux  # noqa: E402
+from fleet import prompt_pointer, state, tmux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
 
 
@@ -91,6 +91,12 @@ class SendPromptTests(unittest.TestCase):
             "1·implementer",
             "fleet-task-1",
         )
+        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
+        prompt_path = td / "driver-prompt.md"
+        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
+        pointer = loaded_path.read_text(encoding="utf-8")
+        self.assertIn(str(prompt_path.resolve()), pointer)
+        self.assertNotIn("hello", pointer)
 
 
 if __name__ == "__main__":

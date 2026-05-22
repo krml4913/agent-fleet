@@ -14,6 +14,7 @@ from pathlib import Path
 from .. import agents as agents_mod
 from .. import driver_prompt as dp
 from .. import plugins as plugins_mod
+from .. import prompt_pointer
 from .. import state as state_mod
 from .. import formation as formation_mod
 from .. import tmux as tmux_mod
@@ -106,7 +107,7 @@ def launch_stage_driver(
         }
         tmux_mod.kill_task_windows(session, task_id)
         tmux_mod.new_window(session, window, cwd=str(effective_cwd), env=driver_env)
-        tmux_mod.load_buffer(buffer_name, str(prompt_path))
+        prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
 
         cli = agents_mod.cli_command(agent_spec)
         cli_quoted = " ".join(shlex.quote(p) for p in cli)
@@ -126,7 +127,7 @@ def launch_stage_driver(
     print(f"tmux: session={session} window={window}")
     print(f"attach:        tmux attach -t {session}:{window}")
     if not auto_paste:
-        print(f"paste prompt:  inside the pane press C-b ]")
+        print(f"paste pointer: inside the pane press C-b ], then Enter")
         print(f"           or: fleet-agent send-prompt {task_id}")
     return 0
 
@@ -182,9 +183,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action="store_false",
         dest="auto_paste",
         help=(
-            "Disable the default auto-paste of driver-prompt.md into the pane. "
-            "The prompt is still preloaded into a tmux buffer for manual paste "
-            "(C-b ] or fleet-agent send-prompt)."
+            "Disable the default auto-paste of the driver-prompt pointer into the pane. "
+            "The pointer is still preloaded into a tmux buffer for manual paste "
+            "(C-b ] then Enter, or fleet-agent send-prompt)."
         ),
     )
     p.set_defaults(auto_paste=True)

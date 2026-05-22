@@ -20,6 +20,7 @@ from pathlib import Path
 
 from .. import agents as agents_mod
 from .. import leader_prompt as lp
+from .. import prompt_pointer
 from .. import state as state_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
@@ -130,7 +131,7 @@ def run(args: argparse.Namespace) -> int:
         prompt_path.write_text(prompt_text, encoding="utf-8")
         buffer_name = f"fleet-leader-{name}"
         try:
-            tmux_mod.load_buffer(buffer_name, str(prompt_path))
+            prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
             time.sleep(max(0.0, args.prompt_delay))
             tmux_mod.paste_buffer(session, "leader", buffer_name)
             time.sleep(0.8)
