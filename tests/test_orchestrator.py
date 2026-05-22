@@ -527,6 +527,35 @@ class UserApprovalGateTests(unittest.TestCase):
         self.assertEqual(task["stages"][0]["peer_review"]["phase"], "implementing")
         self.assertEqual(task["stages"][0]["peer_review"]["iteration"], 2)
 
+    def test_user_reject_wakes_existing_implementer_without_relaunch(self) -> None:
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "peer_review": {"role": "code-reviewer", "phase": "approved", "iteration": 1},
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        task = _make_task(self.sd, "35a", stages)
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch(
+                "fleet.tmux.task_window_names",
+                return_value=["35a·implementer", "35a·code-reviewer"],
+            ),
+            unittest.mock.patch("fleet.tmux.send_keys") as mock_send,
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator.reject_user_approval(self.sd, "35a", task)
+
+        mock_launch.assert_not_called()
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.args[1], "35a·implementer")
+        inbox = state.task_dir(self.sd, "35a") / "inbox.md"
+        self.assertIn("role=implementer", inbox.read_text(encoding="utf-8"))
+
     # ── user_approval.status yaml fields updated correctly ────────────────
 
     def test_user_approval_status_field_in_yaml(self) -> None:

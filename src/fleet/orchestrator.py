@@ -31,14 +31,14 @@ def advance(
     """Advance the task state machine after the current stage driver calls done.
 
     result="approved":
-        peer_review.phase="implementing" → launch reviewer.
+        peer_review.phase="implementing" → hand off to reviewer.
         peer_review.phase="reviewing"    → peer_review passed; check user_approval.
         user_approval.status="asked"     → deprecated compatibility approval;
                                            mark stage done; launch next.
         (no peer_review, no user_approval) → mark stage done; launch next.
 
     result="changes-requested":
-        peer_review.phase="reviewing" → re-launch implementer (iteration++) or
+        peer_review.phase="reviewing" → return to the live implementer (iteration++) or
                                         escalate to user if max iterations exceeded.
         (no peer_review on stage)     → record result, leave stage in place (legacy).
     """
