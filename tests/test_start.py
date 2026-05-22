@@ -54,7 +54,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(str(task_data["id"]), "7")
         self.assertIn("agent: claude:sonnet", text)
         self.assertIn("status: spawning", text)
-        self.assertIn("topology: solo", text)
+        self.assertIn("formation: solo", text)
         self.assertIn("stages:", text)
         self.assertIn("current_stage:", text)
         self.assertIsInstance(task_data.get("stages"), list)
@@ -155,7 +155,7 @@ class StartTests(unittest.TestCase):
             project="demo",
             task_id="git-prompt",
             description="Git workflow here",
-            topology="solo",
+            formation="solo",
             agent=None,
             title=None,
             dry_run=True,
@@ -197,7 +197,7 @@ class StartTests(unittest.TestCase):
             project="demo",
             task_id="codex-untrusted",
             description="Do the codex thing",
-            topology="solo",
+            formation="solo",
             agent="codex:o4-mini",
             title=None,
             dry_run=True,
@@ -221,14 +221,14 @@ class StartTests(unittest.TestCase):
         )
         run_hook.assert_not_called()
 
-    def test_topology_pair_review_starts_first_stage(self) -> None:
+    def test_formation_pair_review_starts_first_stage(self) -> None:
         from fleet.commands import start
 
         args = argparse.Namespace(
             project="demo",
             task_id="3",
             description="Pair flow",
-            topology="pair_review",
+            formation="pair_review",
             agent=None,
             title=None,
             dry_run=True,
@@ -255,7 +255,7 @@ class StartTests(unittest.TestCase):
     def test_role_flag_is_not_accepted(self) -> None:
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
-            "--topology", "pair_review", "--role", "reviewer",
+            "--formation", "pair_review", "--role", "reviewer",
             "4", "Should fail",
             fleet_home=self.fleet_home,
         )
@@ -347,7 +347,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
             project="demo",
             task_id="200",
             description="auto-paste enter integration test",
-            topology="solo",
+            formation="solo",
             agent=None,
             title=None,
             dry_run=False,
@@ -376,7 +376,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
             project="demo",
             task_id="201",
             description="no auto-paste test",
-            topology="solo",
+            formation="solo",
             agent=None,
             title=None,
             dry_run=False,

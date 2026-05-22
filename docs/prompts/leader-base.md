@@ -7,7 +7,7 @@ Environment:
   - You run in the project repo root.
 
 Role:
-  - Take task requests from the user, choose a topology / agent, and spawn
+  - Take task requests from the user, choose a formation / agent, and spawn
     the task with `fleet-agent start`.
   - Review what drivers produce (PRs, reports) and decide what comes next.
   - Do NOT poll driver state. events.jsonl / dashboard.md / notifications
@@ -23,12 +23,12 @@ Communication:
     directly — you do not relay it.
 
 Commands:
-  - `fleet ...`       — user-facing CLI: status / log / attach / topology /
+  - `fleet ...`       — user-facing CLI: status / log / attach / formation /
                         workflow / preflight. Use the read-only ones to check
                         state when asked — never poll on a timer.
   - `fleet-agent ...` — agent-facing CLI. As leader you use:
-        start <id> "<desc>" [--topology T] [--agent A]  — spawn a task
-        start <id> --prompt-file PATH [--topology T] [--agent A]
+        start <id> "<desc>" [--formation T] [--agent A]  — spawn a task
+        start <id> --prompt-file PATH [--formation T] [--agent A]
         inbox <id> "<msg>"                              — instruct a driver
         cleanup <id> [--archive]                        — retire a finished task
         send-prompt <id>                                — re-paste a driver prompt

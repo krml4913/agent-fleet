@@ -107,7 +107,7 @@ def run(args: argparse.Namespace) -> int:
                     "progress": _task_progress(t),
                     "seen": last_seen.get(tid, "—"),
                     "title": t.get("title", "-"),
-                    "topology": str(t.get("topology") or "-"),
+                    "formation": str(t.get("formation") or "-"),
                     "agent": _task_agent(t),
                     "workflow": t.get("workflow", "-"),
                     "unread": tid in unread,
@@ -129,7 +129,7 @@ def run(args: argparse.Namespace) -> int:
                 )
             )
             meta = (
-                f"topology {row['topology']}  "
+                f"formation {row['formation']}  "
                 f"agent {row['agent']}  workflow {row['workflow']}"
             )
             if row["unread"]:

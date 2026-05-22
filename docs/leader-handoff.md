@@ -18,7 +18,7 @@ dogfooding フェーズに入った段階で起動された。
 リーダーとしての責務:
 
 1. ユーザーからのタスク依頼を受ける (会話の主軸)
-2. 適切な topology と agent を選んで `fleet-agent start` で task を起動する
+2. 適切な formation と agent を選んで `fleet-agent start` で task を起動する
 3. driver の進捗は **polling しない** —— `events.jsonl` / `dashboard.md` /
    通知の構造がユーザーに直接届く設計
 4. 必要時にユーザーへ高レベルの進捗報告
@@ -54,7 +54,7 @@ dogfooding フェーズに入った段階で起動された。
    後回しにしているだけの **一時的な運用判断**。codex 専用に切ったわけでも、
    claude 専用にしたわけでもない。codex の CLI / parse は残してあり `--agent` で
    指定可能。安定確認が済めば preset にも codex を戻す
-3. **team topology** — project ごとに team 編成を YAML で選択
+3. **team formation** — project ごとに team 編成を YAML で選択
 
 ### 思想
 
@@ -86,7 +86,7 @@ dogfooding フェーズに入った段階で起動された。
 | dna / personality | 効果検証薄い、廃止候補 |
 | tamagotchi mode | idle-watchdog 等に降格、再検討 |
 | museum / vault / corpus / dna / memory の 5 重 knowledge layer | 1 つに統合する余地、まだ未着手 |
-| swarm / wars / mesh / relay の 4 並列モード | topology に吸収 |
+| swarm / wars / mesh / relay の 4 並列モード | formation に吸収 |
 | lifecycle 6 features daemon | root cause で半分消える想定、core hook 化 |
 | state.yaml + dashboard.md + task.yaml の 3 重 SOT | task ごと 1 file の YAML、dashboard は自動生成 view |
 | dynamic prompt injection 全部 | base prompt は短く保つ |
@@ -104,7 +104,7 @@ dogfooding フェーズに入った段階で起動された。
 fleet status [--events N]              # 全体状態 + 直近 events
 fleet attach <id>                      # driver pane に attach (ユーザーに案内)
 fleet log [<id>] [-n N] [--type T]     # events.jsonl を tail
-fleet topology list | show <name>      # topology 一覧 / 詳細
+fleet formation list | show <name>      # formation 一覧 / 詳細
 fleet workflow list | show | set       # workflow plugin 操作
 fleet preflight                        # 環境チェック
 ```
@@ -112,7 +112,7 @@ fleet preflight                        # 環境チェック
 ### leader が agent として使う (`fleet-agent` — agent 向け CLI)
 
 ```bash
-fleet-agent start <id> "<desc>" [--topology T] [--agent A]
+fleet-agent start <id> "<desc>" [--formation T] [--agent A]
                                        # task を起動 (orchestrator が stage を順に進行)
 fleet-agent inbox <id> "<message>"     # driver に指示を投げる
 fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける

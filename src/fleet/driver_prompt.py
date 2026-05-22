@@ -31,7 +31,7 @@ def render(
     *,
     task_id: str,
     description: str,
-    topology_name: str,
+    formation_name: str,
     role: str,
     agent: str,
     workflow_fragment: str = "",
@@ -50,7 +50,7 @@ def render(
         body
         + "\n---\n"
         + f"task id:   task-{task_id}\n"
-        + f"topology:  {topology_name}\n"
+        + f"formation:  {formation_name}\n"
         + f"role:      {role}\n"
         + f"agent:     {agent}\n"
         + "---\n\n"

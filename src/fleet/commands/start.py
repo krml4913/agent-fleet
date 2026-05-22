@@ -15,7 +15,7 @@ from .. import agents as agents_mod
 from .. import driver_prompt as dp
 from .. import plugins as plugins_mod
 from .. import state as state_mod
-from .. import topology as topology_mod
+from .. import formation as formation_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
 
@@ -158,14 +158,14 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Project name (default: resolved from cwd via registry)",
     )
     p.add_argument(
-        "--topology",
+        "--formation",
         default="solo",
-        help="Topology name (preset or custom). Default: solo.",
+        help="Formation name (preset or custom). Default: solo.",
     )
     p.add_argument(
         "--agent",
         default=None,
-        help="Override the topology's agent for the first stage (e.g. claude:sonnet)",
+        help="Override the formation's agent for the first stage (e.g. claude:sonnet)",
     )
     p.add_argument(
         "--title",
@@ -240,18 +240,18 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: task-{args.task_id} already exists at {task_dir_path}", file=sys.stderr)
         return 1
 
-    # Load and validate topology
+    # Load and validate formation
     try:
-        topo = topology_mod.load(args.topology, state_dir=state_dir)
-        topology_mod.validate(topo)
+        formation_data = formation_mod.load(args.formation, state_dir=state_dir)
+        formation_mod.validate(formation_data)
     except (FileNotFoundError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    # Expand topology stages into task.yaml format (all status: pending initially)
-    expanded_stages = topology_mod.expand_stages(topo)
+    # Expand formation stages into task.yaml format (all status: pending initially)
+    expanded_stages = formation_mod.expand_stages(formation_data)
     if not expanded_stages:
-        print("error: topology has no stages to start", file=sys.stderr)
+        print("error: formation has no stages to start", file=sys.stderr)
         return 1
 
     # Always start the first stage; --role is not supported
@@ -267,7 +267,7 @@ def run(args: argparse.Namespace) -> int:
 
     if not agent_spec:
         print(
-            f"error: no agent for role {role_name!r}; pass --agent or set one in the topology",
+            f"error: no agent for role {role_name!r}; pass --agent or set one in the formation",
             file=sys.stderr,
         )
         return 1
@@ -300,7 +300,7 @@ def run(args: argparse.Namespace) -> int:
     ctx: dict = {
         "state_dir": state_dir,
         "task_id": args.task_id,
-        "topology": args.topology,
+        "formation": args.formation,
         "role": role_name,
         "agent": agent_spec,
         "description": description,
@@ -319,7 +319,7 @@ def run(args: argparse.Namespace) -> int:
         "title": title,
         "description": description,
         "status": "spawning",
-        "topology": args.topology,
+        "formation": args.formation,
         "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
         "current_stage": current_stage_idx,
         "stages": expanded_stages,
@@ -333,7 +333,7 @@ def run(args: argparse.Namespace) -> int:
     prompt = dp.render(
         task_id=args.task_id,
         description=description,
-        topology_name=args.topology,
+        formation_name=args.formation,
         role=role_name,
         agent=agent_spec,
         workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),
@@ -345,7 +345,7 @@ def run(args: argparse.Namespace) -> int:
         state_dir / "events.jsonl",
         "start",
         task_id=args.task_id,
-        topology=args.topology,
+        formation=args.formation,
         role=role_name,
         agent=agent_spec,
         description=description,
@@ -357,7 +357,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"  driver-prompt:  {task_dir_path / 'driver-prompt.md'}")
     print(f"  agent:          {agent_spec}")
     print(f"  role:           {role_name}")
-    print(f"  topology:       {args.topology}")
+    print(f"  formation:       {args.formation}")
 
     if args.dry_run:
         print("dry-run: tmux step skipped.")

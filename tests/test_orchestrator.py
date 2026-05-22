@@ -20,14 +20,14 @@ def _make_task(
     stages: list[dict],
     *,
     current_stage: int = 0,
-    topology: str = "pair_review",
+    formation: str = "pair_review",
 ) -> dict:
     task_data = {
         "id": task_id,
         "title": "test task",
         "description": "test description",
         "status": "running",
-        "topology": topology,
+        "formation": formation,
         "workflow": "bare",
         "current_stage": current_stage,
         "stages": stages,
@@ -59,7 +59,7 @@ class AdvanceApprovedTests(unittest.TestCase):
             self.sd,
             "1",
             [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
-            topology="solo",
+            formation="solo",
         )
         orchestrator.advance(self.sd, "1", task, result="approved", dry_run=True)
         updated = state.load_task(self.sd, "1")
@@ -104,7 +104,7 @@ class AdvanceApprovedTests(unittest.TestCase):
             {"role": "implementer", "agent": "claude:sonnet", "status": "pending"},
             {"role": "reviewer", "agent": "claude:opus", "status": "pending"},
         ]
-        task = _make_task(self.sd, "4", stages, topology="multi_stage")
+        task = _make_task(self.sd, "4", stages, formation="multi_stage")
 
         # Stage 0 → done, stage 1 → running
         orchestrator.advance(self.sd, "4", task, result="approved", dry_run=True)
@@ -129,7 +129,7 @@ class AdvanceApprovedTests(unittest.TestCase):
             "id": "5",
             "title": "legacy",
             "status": "running",
-            "topology": "solo",
+            "formation": "solo",
             "workflow": "bare",
         }
         state.save_task(self.sd, "5", task_data)
@@ -174,7 +174,7 @@ class AdvanceChangesRequestedTests(unittest.TestCase):
             self.sd,
             "11",
             [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
-            topology="solo",
+            formation="solo",
         )
         orchestrator.advance(self.sd, "11", task, result="changes-requested", dry_run=True)
         updated = state.load_task(self.sd, "11")
@@ -341,7 +341,7 @@ class UserApprovalGateTests(unittest.TestCase):
                 "user_approval": {"required": True, "status": "pending"},
             }
         ]
-        task = _make_task(self.sd, "30", stages, topology="solo")
+        task = _make_task(self.sd, "30", stages, formation="solo")
         orchestrator.advance(self.sd, "30", task, result="approved", dry_run=True)
         updated = state.load_task(self.sd, "30")
         ua = updated["stages"][0]["user_approval"]
@@ -359,7 +359,7 @@ class UserApprovalGateTests(unittest.TestCase):
                 "user_approval": {"required": True, "status": "asked"},
             }
         ]
-        task = _make_task(self.sd, "31", stages, topology="solo")
+        task = _make_task(self.sd, "31", stages, formation="solo")
         orchestrator.advance(self.sd, "31", task, result="approved", dry_run=True)
         updated = state.load_task(self.sd, "31")
         ua = updated["stages"][0]["user_approval"]
@@ -376,7 +376,7 @@ class UserApprovalGateTests(unittest.TestCase):
                 "user_approval": {"required": True, "status": "pending"},
             }
         ]
-        task = _make_task(self.sd, "32", stages, topology="solo")
+        task = _make_task(self.sd, "32", stages, formation="solo")
         orchestrator.advance(self.sd, "32", task, result="approved", dry_run=True)
         qpath = state.task_dir(self.sd, "32") / "questions.md"
         self.assertTrue(qpath.exists())
@@ -427,7 +427,7 @@ class UserApprovalGateTests(unittest.TestCase):
                 "user_approval": {"required": True, "status": "pending"},
             }
         ]
-        task = _make_task(self.sd, "34", stages, topology="solo")
+        task = _make_task(self.sd, "34", stages, formation="solo")
         # pending → asked
         orchestrator.advance(self.sd, "34", task, result="approved", dry_run=True)
         task = state.load_task(self.sd, "34")
@@ -457,7 +457,7 @@ class WindowCwdTests(unittest.TestCase):
             "title": "test task",
             "description": "test description",
             "status": "running",
-            "topology": "pair_review",
+            "formation": "pair_review",
             "workflow": "git_worktree" if worktree else "bare",
             "current_stage": 0,
             "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],

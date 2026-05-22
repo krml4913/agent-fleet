@@ -64,7 +64,7 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("TASKS  1", result.stdout)
         self.assertIn("● task-1  pending  seen —", result.stdout)
         self.assertIn(
-            "      do thing  (topology -  agent claude:sonnet  workflow -)",
+            "      do thing  (formation -  agent claude:sonnet  workflow -)",
             result.stdout,
         )
 
@@ -75,16 +75,16 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "      legacy thing  (topology -  agent -  workflow -)",
+            "      legacy thing  (formation -  agent -  workflow -)",
             result.stdout,
         )
 
-    def test_status_shows_topology_and_stage_progress(self) -> None:
+    def test_status_shows_formation_and_stage_progress(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
         state.save_task(sd, "1", {
             "title": "multi thing",
             "status": "running",
-            "topology": "multi_stage",
+            "formation": "multi_stage",
             "workflow": "git_worktree",
             "current_stage": 1,
             "stages": [
@@ -98,7 +98,7 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("● task-1  running  stage 2/3  seen —", result.stdout)
         self.assertIn(
-            "      multi thing  (topology multi_stage  agent codex:gpt-5.5  workflow git_worktree)",
+            "      multi thing  (formation multi_stage  agent codex:gpt-5.5  workflow git_worktree)",
             result.stdout,
         )
 
@@ -107,7 +107,7 @@ class StatusCommandTests(unittest.TestCase):
         state.save_task(sd, "1", {
             "title": "review thing",
             "status": "running",
-            "topology": "pair_review",
+            "formation": "pair_review",
             "current_stage": 0,
             "stages": [{
                 "role": "driver",
@@ -130,7 +130,7 @@ class StatusCommandTests(unittest.TestCase):
         state.save_task(sd, "1", {
             "title": "solo thing",
             "status": "running",
-            "topology": "solo",
+            "formation": "solo",
             "current_stage": 0,
             "stages": [{"role": "driver", "agent": "codex:gpt-5.5", "status": "running"}],
         })

@@ -22,7 +22,7 @@
 |---|---|
 | **1. 階層対話 UI** | タスク依頼は leader、 タスク内の要件詰めは driver と直接 (両方 tmux 上) |
 | **2. multi-vendor agent** | claude / codex を組み合わせて使える (MVP は 2 vendor、 OpenAI / Gemini は後段) |
-| **3. team topology 定義** | project ごとに team 編成 (driver 1 人 / driver + reviewer / 多段) を YAML で選択 |
+| **3. team formation 定義** | project ごとに team 編成 (driver 1 人 / driver + reviewer / 多段) を YAML で選択 |
 
 ### 1.3 既存 claude-forge との位置づけ
 
@@ -118,7 +118,7 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
 ### 4.1 leader の責務
 
 - ユーザーとのタスク依頼会話
-- `fleet-agent start` でタスク開始 (どの agent vendor / model / topology で起動するか決める)
+- `fleet-agent start` でタスク開始 (どの agent vendor / model / formation で起動するか決める)
   - 長い task description は `fleet-agent start <id> --prompt-file PATH` でファイルから渡せる
 - 必要に応じてユーザーへの高レベル進捗報告
 
@@ -138,7 +138,7 @@ codex driver は初回起動時に directory trust prompt を出すため、 `fl
 - leader に対してタスクを依頼する (tmux 上)
 - 通知 / dashboard で driver の状態を把握する
 - 必要に応じて driver pane に直接 attach して対話する
-- driver の質問に答える、 マージ判断をする (topology による)
+- driver の質問に答える、 マージ判断をする (formation による)
 
 ---
 
@@ -277,25 +277,25 @@ fleet は multi-vendor (claude / codex / その他) が柱。 claude driver は 
 
 ---
 
-## 6. team topology
+## 6. team formation
 
 ### 6.1 設計方針
 
 - **YAML** で定義 (シンプルに始める)
-- **preset** (同梱の標準 topology 数種) + **custom** (project ごとに自作可能)
+- **preset** (同梱の標準 formation 数種) + **custom** (project ごとに自作可能)
 - **count なし** (必要に応じて leader が動的に並列起動を判断する)
 - **user_approval** を表現できる (人間の承認ポイントを stage 属性で明示)
 
-### 6.2 topology の例
+### 6.2 formation の例
 
 ```yaml
-# Topology A: solo driver (一人で PR まで完結)
+# Formation A: solo driver (一人で PR まで完結)
 name: solo
 stages:
   - role: driver
     agent: claude:sonnet
 
-# Topology B: pair review (実装者 + AI 査読 + user 承認)
+# Formation B: pair review (実装者 + AI 査読 + user 承認)
 name: pair_review
 stages:
   - role: implementer
@@ -305,7 +305,7 @@ stages:
       agent: claude:opus
     user_approval: required
 
-# Topology C: 多段 (設計 → 実装 + AI 査読 + user 承認)
+# Formation C: 多段 (設計 → 実装 + AI 査読 + user 承認)
 name: multi_stage
 stages:
   - role: designer
@@ -331,15 +331,15 @@ implement → peer_review (AI 査読ループ, max 3 回) → user_approval → 
 - changes-requested: peer_review の phase に応じてループを回す
 - peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
 
-### 6.4 topology YAML schema
+### 6.4 formation YAML schema
 
-topology YAML の必須・任意フィールドを以下に明記する。形式言語 (JSON Schema 等) は使わない (§1.4 原則 1)。
+formation YAML の必須・任意フィールドを以下に明記する。形式言語 (JSON Schema 等) は使わない (§1.4 原則 1)。
 
 **トップレベル**
 
 | フィールド | 必須 | 説明 |
 |---|---|---|
-| `name` | 必須 | topology の識別名。ファイル名 (stem) と一致すること |
+| `name` | 必須 | formation の識別名。ファイル名 (stem) と一致すること |
 | `description` | 任意 | 人間向けの説明文 |
 | `stages` | 必須 | stage オブジェクトのリスト。1 件以上必要 |
 
@@ -358,12 +358,12 @@ topology YAML の必須・任意フィールドを以下に明記する。形式
 ### 6.5 preset / custom
 
 - fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` の 3 つ
-- 各 project は `.fleet-state/topologies/` に自前 topology を定義可能 (preset を shadow)
-- タスク開始時に `fleet-agent start --topology <name> ...` で選択
+- 各 project は `.fleet-state/formations/` に自前 formation を定義可能 (preset を shadow)
+- タスク開始時に `fleet-agent start --formation <name> ...` で選択
 
 **preset は template である。** 同梱 preset は「こう書けば動く」という推奨デフォルト値を示すだけであり、
-プロジェクト固有の制約には合わない場合がある。実プロジェクトは `.fleet-state/topologies/` に同名ファイルを
-置くことで preset を上書きできるし、新しい名前で独自 topology を追加してもよい。
+プロジェクト固有の制約には合わない場合がある。実プロジェクトは `.fleet-state/formations/` に同名ファイルを
+置くことで preset を上書きできるし、新しい名前で独自 formation を追加してもよい。
 `agent:` 既定値の変更、`user_approval` の追加・削除など、フィールドの自由な変更を推奨する。
 
 ---
@@ -433,7 +433,7 @@ git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / 
 | worktree 作成 / 削除 | **plugin** | ライフサイクル境界の git |
 | commit / push / PR 作成 | **driver (AI)** | 作業の git; core は関与しない |
 | changelog 更新 | **driver (AI)** | 開発フローの一部; 作業の git と同様 |
-| review-request | **driver (AI)** | topology と workflow に応じて role が判断 |
+| review-request | **driver (AI)** | formation と workflow に応じて role が判断 |
 
 ### 8.4 想定 workflow plugin
 
@@ -486,7 +486,7 @@ plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ね�
 | personality | 効果検証後判断、 当面は廃止候補 |
 | tamagotchi mode | 機能名に降格 (idle-watchdog 等)、 機能自体は再検討 |
 | museum / vault / corpus / dna / memory の 5 重 knowledge layer | **1 つの knowledge store に統合**、 query は 1 本化 |
-| swarm / wars / mesh / relay の 4 並列モード | topology の概念に吸収、 個別 mode は廃止 |
+| swarm / wars / mesh / relay の 4 並列モード | formation の概念に吸収、 個別 mode は廃止 |
 | lifecycle 6 features (heartbeat / liveness / tamagotchi / janitor / custodian / leader_context) | root cause 修正で半分消える想定、 残りは core hook 化 |
 | state.yaml + dashboard.md + task.yaml の 3 重 SOT | task ごとに 1 file の YAML に整理、 dashboard は自動生成 view、 race は Python の flock + atomic rename で防ぐ (§5.3-5.5 で確定) |
 | dynamic prompt injection (Ghost + Vault + DNA + lint-rules + personality) | 大幅削減、 base prompt を 300 行以下に |
@@ -501,7 +501,7 @@ plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ね�
 1. **2026-05-19**: claude-forge は機能膨らみすぎ + 技術的負債 (bash monolith / 多重 SOT / dynamic prompt 肥大化) で作り直し決定
 2. **2026-05-19**: 命名 `forge` → `fleet` (multi-vendor 前提、 `agent-fleet` repo / `./fleet` CLI)
 3. **2026-05-19**: 用語、 driver は維持 (agent だと leader と区別不能)
-4. **2026-05-19**: mission を 「ユーザーは leader と話す + multi-vendor + team topology」 で確定
+4. **2026-05-19**: mission を 「ユーザーは leader と話す + multi-vendor + team formation」 で確定
 5. **2026-05-19**: 開発フローは plugin 化、 fleet core は orchestrator に徹する
 6. **2026-05-19**: multi-project 同時起動可能、 state は repo 内に閉じる、 global metadata なし
 7. **2026-05-19**: leader は会話 + spawn 専念、 driver の状態通知は構造的に user 直行
@@ -509,7 +509,7 @@ plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ね�
 9. **2026-05-19**: state は file-based 継承 (forge 流)、 SQLite 不採用、 race は Python flock + atomic rename + 1 task 1 file で構造的に防ぐ
 10. **2026-05-19**: dashboard.md は state 書き込みごとに自動 rebuild、 read-only view に厳格化
 11. **2026-05-20**: dogfooding 開始。 CLI 整理 (fleet / fleet-agent 2 バイナリ化) の方針合意、 実装着手
-12. **2026-05-20**: dogfooding で 6 つの穴が露呈 (completed の定義 / topology orchestration / driver の commit 責務 / role 構造化 / dialogue trace / inbox ack)。 §11 を再構成、 「足元固め」を機能追加より先行させる方針に転換
+12. **2026-05-20**: dogfooding で 6 つの穴が露呈 (completed の定義 / formation orchestration / driver の commit 責務 / role 構造化 / dialogue trace / inbox ack)。 §11 を再構成、 「足元固め」を機能追加より先行させる方針に転換
 13. **2026-05-20**: preset の codex agent を一時的に全部 claude に置換。 codex は動作未検証で、 まず claude スタックで安定化に集中する判断。 codex CLI / parse 自体は残し、 explicit に指定可能
 14. **2026-05-20**: dogfooding auto-pilot で §11 priority 4〜8 の方針提案ドラフトを作成 (role-structure / dialogue-trace / inbox-ack / prompt-structure / pr-workflow + archive-retention)。 `docs/proposals-summary.md` が入り口
 15. **2026-05-20**: §11 priority 4 「role の構造化」 を **却下**。 driver-prompt は task.yaml から render される揮発的派生物であり SOT は task.yaml 一本、 「二重管理」 という proposal の問題設定が誤り。 role は task description と同格の本質的変数で prompt に出て当然 (forge 的 dynamic injection 肥大化とは別物)。 解くべき実害が無いと判断。 proposal の前提を鵜呑みにせず実害ベースで却下した例
@@ -550,15 +550,15 @@ agent-fleet/
 
 ### 13.4 設定 format
 
-- **YAML** (topology / project config)
+- **YAML** (formation / project config)
 - 依存ゼロ路線との両立のため、 PyYAML 6.0.2 の pure Python 部分のみを vendored で同梱
-- YAML を選んだ理由: ユーザーが書く topology の表現力 (深いネスト + コメント + 配列) で TOML より優位
+- YAML を選んだ理由: ユーザーが書く formation の表現力 (深いネスト + コメント + 配列) で TOML より優位
 
 ### 13.5 CLI entrypoint
 
 - 2 entrypoint script (どちらも shebang `#!/usr/bin/env python3`):
   - `./fleet`       — 人間 (user) が打つ: `init` / `preflight` / `leader` / `attach` /
-                      `status` / `log` / `topology` / `workflow`
+                      `status` / `log` / `formation` / `workflow`
   - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
                       `start` / `inbox` / `inbox-read` / `send-prompt` / `cleanup` /
                       `ask` / `event` / `done`
