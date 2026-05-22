@@ -89,10 +89,10 @@ Leader-side (run by the leader agent):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent start <id> "<desc>" [--formation T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes prompt by default) |
+| `fleet-agent start <id> "<desc>" [--formation T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; auto-pastes a prompt-file pointer by default) |
 | `fleet-agent start <id> --prompt-file PATH [--formation T] [--agent A]` | Start a new task using the description read from a file |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
-| `fleet-agent send-prompt <id>` | Re-paste `driver-prompt.md` into the task pane |
+| `fleet-agent send-prompt <id>` | Re-paste a pointer to `driver-prompt.md` into the task pane |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
 
 Driver-side (run inside a driver pane — `FLEET_TASK_ID` / `FLEET_STATE_DIR` are
@@ -139,7 +139,7 @@ agent-fleet/
         inbox.md            # leader → driver
         outbox.md           # driver → leader
         questions.md        # `fleet-agent ask` records here
-        driver-prompt.md    # initial prompt sent to the agent
+        driver-prompt.md    # initial prompt file the agent is told to read
       _archive/             # cleanup --archive lands here
 ```
 

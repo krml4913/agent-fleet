@@ -31,7 +31,7 @@ Commands:
         start <id> --prompt-file PATH [--formation T] [--agent A]
         inbox <id> "<msg>"                              — instruct a driver
         cleanup <id> [--archive]                        — retire a finished task
-        send-prompt <id>                                — re-paste a driver prompt
+        send-prompt <id>                                — re-paste a driver prompt pointer
     `ask` / `event emit` / `done` are driver-only — you never call them.
 
 Never:

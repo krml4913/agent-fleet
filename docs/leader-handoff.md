@@ -116,7 +116,7 @@ fleet-agent start <id> "<desc>" [--formation T] [--agent A]
                                        # task を起動 (orchestrator が stage を順に進行)
 fleet-agent inbox <id> "<message>"     # driver に指示を投げる
 fleet-agent cleanup <id> [--archive]   # 終わった task を片付ける
-fleet-agent send-prompt <id>           # driver-prompt.md を手動で再 paste
+fleet-agent send-prompt <id>           # driver-prompt.md への pointer を手動で再 paste
 ```
 
 ### driver 側が使うコマンド (お前は使わない)

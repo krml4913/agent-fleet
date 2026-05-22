@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import tmux  # noqa: E402
+from fleet import prompt_pointer, tmux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet, make_project  # noqa: E402
 
 
@@ -83,6 +84,30 @@ class LeaderCmdTests(unittest.TestCase):
                   fleet_home=self.fleet_home)
         prompt_path = self.state_dir / "leader-prompt.md"
         self.assertFalse(prompt_path.exists(), "leader-prompt.md should not be written with --no-auto-paste")
+
+    def test_auto_paste_loads_leader_prompt_pointer(self) -> None:
+        from fleet.commands import leader
+
+        args = unittest.mock.MagicMock()
+        args.project = self.project_name
+        args.agent = "claude:opus"
+        args.attach = False
+        args.auto_paste = True
+        args.prompt_delay = 0.0
+
+        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = False
+            mock_tmux.TmuxError = Exception
+            result = leader.run(args)
+
+        self.assertEqual(result, 0)
+        prompt_path = self.state_dir / "leader-prompt.md"
+        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
+        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
+        pointer = loaded_path.read_text(encoding="utf-8")
+        self.assertIn(str(prompt_path.resolve()), pointer)
+        self.assertNotIn("You are the leader of a fleet project", pointer)
 
 
 if __name__ == "__main__":
