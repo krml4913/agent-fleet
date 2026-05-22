@@ -1,8 +1,8 @@
-"""``fleet-agent send-prompt <task-id>`` — paste a driver-prompt pointer.
+"""``fleet-agent send-prompt <task-id>`` — deliver a driver-prompt pointer.
 
-Useful when `fleet-agent start` was run without `--auto-paste` (the safer
-default) and the user wants to inject the prompt pointer after attaching
-to the window and confirming the agent CLI is ready.
+Starts a detached prompt deliverer that waits for the agent CLI to be
+ready, then pastes a small pointer to ``driver-prompt.md`` (not the prompt
+body) into the task pane.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .. import prompt_pointer
+from .. import prompt_deliverer
 from .. import state as state_mod
 from .. import tmux as tmux_mod
 
@@ -18,14 +18,22 @@ from .. import tmux as tmux_mod
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "send-prompt",
-        help="Paste a driver-prompt.md pointer into the task pane",
+        help="Deliver a driver-prompt.md pointer into the task pane",
         description=(
-            "Loads a small pointer to <state>/tasks/task-<id>/driver-prompt.md "
-            "into the named tmux buffer and pastes it into the task's tmux window."
+            "Starts a detached deliverer that pastes a small pointer to "
+            "<state>/tasks/task-<id>/driver-prompt.md into the task's tmux "
+            "window once the agent CLI is ready."
         ),
     )
     p.add_argument("task_id", help="Task id")
     p.add_argument("--project", default=".", help="Project name (default: resolved from cwd)")
+    p.add_argument(
+        "--prompt-timeout",
+        type=float,
+        default=prompt_deliverer.DEFAULT_TIMEOUT_SECONDS,
+        metavar="SEC",
+        help="Hard timeout for detached prompt delivery (default: 600)",
+    )
     p.set_defaults(func=run)
 
 
@@ -79,19 +87,41 @@ def run(args: argparse.Namespace) -> int:
     window = matches[0]
 
     try:
-        prompt_pointer.paste_pointer_buffer(
-            tmux_mod,
+        task = state_mod.load_task(state_dir, args.task_id)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    agent_spec = _current_agent(task)
+    if agent_spec is None:
+        print(f"error: no current agent in task-{args.task_id}", file=sys.stderr)
+        return 1
+
+    try:
+        log_path = prompt_deliverer.start_detached(
+            state_dir=state_dir,
+            task_id=args.task_id,
             session=session,
             window=window,
-            buffer_name=buffer_name,
             prompt_path=prompt_path,
+            buffer_name=buffer_name,
+            agent_spec=agent_spec,
+            timeout=args.prompt_timeout,
         )
-        # Some CLIs accept Enter to submit, others need a second one; we
-        # send one explicitly so the paste is committed.
-        tmux_mod.send_keys(session, window, "", enter=True)
     except tmux_mod.TmuxError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    print(f"pasted prompt pointer → {session}:{window}")
+    print(f"prompt deliverer detached → {session}:{window} (log: {log_path})")
     return 0
+
+
+def _current_agent(task: dict) -> str | None:
+    stages = task.get("stages") or []
+    idx = task.get("current_stage", 0)
+    if not isinstance(idx, int) or idx < 0 or idx >= len(stages):
+        return None
+    stage = stages[idx]
+    if not isinstance(stage, dict):
+        return None
+    agent = stage.get("agent")
+    return agent if isinstance(agent, str) and agent else None

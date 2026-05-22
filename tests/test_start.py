@@ -340,7 +340,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
             os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
-    def test_auto_paste_sends_enter_after_paste(self) -> None:
+    def test_auto_paste_starts_detached_deliverer(self) -> None:
         from fleet.commands import start
 
         args = argparse.Namespace(
@@ -355,14 +355,23 @@ class StartAutopasteEnterTests(unittest.TestCase):
             prompt_delay=0.0,
         )
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+        with (
+            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            unittest.mock.patch(
+                "fleet.commands.start.prompt_deliverer.start_detached",
+                return_value=self.state_dir / "tasks" / "task-200" / "prompt-deliverer.log",
+            ) as mock_deliverer,
+        ):
             mock_tmux.available.return_value = True
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception
             result = start.run(args)
 
         self.assertEqual(result, 0)
-        mock_tmux.paste_buffer.assert_called_once()
+        # start itself does not paste; the detached deliverer does, once the
+        # pane is ready. start only pre-loads the pointer (not the prompt
+        # body) into the tmux buffer for the no-auto-paste manual-paste path.
+        mock_tmux.paste_buffer.assert_not_called()
         loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
         self.assertEqual(loaded_path.name, ".driver-prompt.md.paste-pointer")
         pointer = loaded_path.read_text(encoding="utf-8")
@@ -371,11 +380,9 @@ class StartAutopasteEnterTests(unittest.TestCase):
         self.assertTrue(pointer.endswith(str(prompt_path.resolve())))
         self.assertEqual(pointer.count("\n"), 0)
         self.assertNotIn("auto-paste enter integration test", pointer)
-        enter_calls = [
-            c for c in mock_tmux.send_keys.call_args_list
-            if c.kwargs.get("enter", True)
-        ]
-        self.assertTrue(enter_calls, "send_keys with enter=True not called after paste")
+        mock_deliverer.assert_called_once()
+        self.assertEqual(mock_deliverer.call_args.kwargs["task_id"], "200")
+        self.assertEqual(mock_deliverer.call_args.kwargs["agent_spec"], "claude:sonnet")
 
     def test_no_auto_paste_skips_paste_and_enter(self) -> None:
         from fleet.commands import start

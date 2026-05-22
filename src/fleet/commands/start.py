@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .. import agents as agents_mod
 from .. import driver_prompt as dp
+from .. import prompt_deliverer
 from .. import plugins as plugins_mod
 from .. import prompt_pointer
 from .. import state as state_mod
@@ -77,6 +78,7 @@ def launch_stage_driver(
     project_name: str,
     auto_paste: bool = True,
     prompt_delay: float = 3.0,
+    prompt_timeout: float = prompt_deliverer.DEFAULT_TIMEOUT_SECONDS,
     window_cwd: Path | None = None,
 ) -> int:
     """Open a tmux window for a specific stage driver.
@@ -114,18 +116,25 @@ def launch_stage_driver(
         tmux_mod.send_keys(session, window, cli_quoted)
 
         if auto_paste:
-            import time
-
-            time.sleep(max(0.0, prompt_delay))
-            tmux_mod.paste_buffer(session, window, buffer_name)
-            time.sleep(0.8)
-            tmux_mod.send_keys(session, window, "", enter=True)
+            log_path = prompt_deliverer.start_detached(
+                state_dir=state_dir,
+                task_id=task_id,
+                session=session,
+                window=window,
+                prompt_path=prompt_path,
+                buffer_name=buffer_name,
+                agent_spec=agent_spec,
+                timeout=prompt_timeout,
+                initial_delay=max(0.0, prompt_delay),
+            )
     except tmux_mod.TmuxError as e:
         print(f"warn: tmux setup partially failed: {e}", file=sys.stderr)
         return 0
 
     print(f"tmux: session={session} window={window}")
     print(f"attach:        tmux attach -t {session}:{window}")
+    if auto_paste:
+        print(f"prompt:        deliverer detached (log: {log_path})")
     if not auto_paste:
         print(f"paste pointer: inside the pane press C-b ], then Enter")
         print(f"           or: fleet-agent send-prompt {task_id}")
@@ -194,7 +203,14 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         type=float,
         default=3.0,
         metavar="SEC",
-        help="Seconds to wait before auto-paste (default: 3)",
+        help="Seconds the detached prompt deliverer waits before polling (default: 3)",
+    )
+    p.add_argument(
+        "--prompt-timeout",
+        type=float,
+        default=prompt_deliverer.DEFAULT_TIMEOUT_SECONDS,
+        metavar="SEC",
+        help="Hard timeout for detached prompt delivery (default: 600)",
     )
     p.set_defaults(func=run)
 
@@ -381,5 +397,6 @@ def run(args: argparse.Namespace) -> int:
         project_name=project_name,
         auto_paste=args.auto_paste,
         prompt_delay=args.prompt_delay,
+        prompt_timeout=getattr(args, "prompt_timeout", prompt_deliverer.DEFAULT_TIMEOUT_SECONDS),
         window_cwd=ctx.get("cwd"),
     )
