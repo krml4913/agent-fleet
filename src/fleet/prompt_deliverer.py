@@ -16,12 +16,17 @@ from .events import append_event, utcnow_iso
 
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
+PASTE_SETTLE_SECONDS = 0.25
+SUBMIT_RETRY_ATTEMPTS = 3
+SUBMIT_RETRY_INTERVAL_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
 class PromptAdapter:
     ready: re.Pattern[str]
     gate: re.Pattern[str]
+    active_prompt: re.Pattern[str]
+    working: re.Pattern[str]
 
 
 ADAPTERS: dict[str, PromptAdapter] = {
@@ -34,6 +39,14 @@ ADAPTERS: dict[str, PromptAdapter] = {
             r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
             r"trust (?:this )?(?:folder|directory|workspace)|do you trust|continue\?)"
         ),
+        active_prompt=re.compile(r"(?m)^\s*❯(?!\s*\d+\.)\s*(?P<input>.*)$"),
+        working=re.compile(
+            r"(?im)(?:"
+            r"^\s*(?:✻|✽|✢|✶|⏺|●|•).*(?:thinking|working|running)|"
+            r"\b(?:thinking|working|running)\b|"
+            r"\b(?:esc|ctrl-c)\s+to\s+interrupt\b"
+            r")"
+        ),
     ),
     "codex": PromptAdapter(
         ready=re.compile(r"(?m)^\s*›(?!\s*\d+\.)"),
@@ -43,6 +56,14 @@ ADAPTERS: dict[str, PromptAdapter] = {
             r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
             r"do you trust the contents of this directory|yes,\s*continue|"
             r"sign in|login|log in|authentication|authenticate|api key)"
+        ),
+        active_prompt=re.compile(r"(?m)^\s*›(?!\s*\d+\.)\s*(?P<input>.*)$"),
+        working=re.compile(
+            r"(?im)(?:"
+            r"^\s*(?:⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|●|•).*(?:working|thinking|running)|"
+            r"\b(?:working|thinking|running)\b|"
+            r"\b(?:esc|ctrl-c)\s+to\s+interrupt\b"
+            r")"
         ),
     ),
 }
@@ -154,9 +175,22 @@ def deliver(
                 # (mixed-character corruption, see Issue #90).
                 prompt_pointer.load_pointer_buffer(tmux, buffer_name, prompt_path)
                 tmux.paste_buffer(session, window, buffer_name)
-                tmux.send_keys(session, window, "", enter=True)
+                submitted = _submit_after_paste(
+                    session=session,
+                    window=window,
+                    prompt_path=prompt_path,
+                    adapter=adapter,
+                )
             except tmux.TmuxError as e:
                 _fail(state_dir, task_id, f"prompt deliverer cannot paste prompt: {e}", window)
+                return 1
+            if not submitted:
+                _fail(
+                    state_dir,
+                    task_id,
+                    "prompt deliverer pasted prompt but could not confirm submit",
+                    window,
+                )
                 return 1
             _mark_running_if_needed(state_dir, task_id)
             append_event(
@@ -242,6 +276,50 @@ def _mark_running_if_needed(state_dir: Path, task_id: str) -> None:
     if task.get("status") == "needs_input":
         task["status"] = state_mod.derive_task_status(task.get("stages") or [])
         state_mod.save_task(state_dir, task_id, task)
+
+
+def _submit_after_paste(
+    *,
+    session: str,
+    window: str,
+    prompt_path: Path,
+    adapter: PromptAdapter,
+) -> bool:
+    """Press Enter after paste settles, retrying only while the pointer is still input."""
+    pointer = prompt_pointer.pointer_text(prompt_path)
+    time.sleep(PASTE_SETTLE_SECONDS)
+
+    for attempt in range(SUBMIT_RETRY_ATTEMPTS):
+        tmux.send_keys(session, window, "", enter=True)
+        time.sleep(SUBMIT_RETRY_INTERVAL_SECONDS)
+        pane = tmux.capture_pane(session, window)
+        if _pane_shows_submitted(pane, adapter, pointer):
+            return True
+        if not _pane_shows_unsubmitted_prompt(pane, adapter, pointer):
+            return True
+
+    return False
+
+
+def _pane_shows_submitted(pane: str, adapter: PromptAdapter, pointer: str) -> bool:
+    """Return true when the agent appears to have accepted the pasted prompt."""
+    return bool(adapter.working.search(pane)) or not _pane_shows_unsubmitted_prompt(
+        pane, adapter, pointer
+    )
+
+
+def _pane_shows_unsubmitted_prompt(
+    pane: str,
+    adapter: PromptAdapter,
+    pointer: str,
+) -> bool:
+    pointer_start = pointer[: min(48, len(pointer))]
+    prompt_path_text = pointer.rsplit(": ", 1)[-1]
+    for match in adapter.active_prompt.finditer(pane):
+        prompt_input = match.group("input")
+        if pointer_start in prompt_input or prompt_path_text in prompt_input:
+            return True
+    return False
 
 
 def _fleet_clone_root() -> Path:

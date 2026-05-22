@@ -124,7 +124,9 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
   標準 library だけの小さな detached prompt deliverer を切り離して `start` は即 return する。
   deliverer は tmux `capture-pane` を短い間隔で polling し、agent adapter ごとの ready 正規表現
   (claude / codex 各 1 本) に一致したら `driver-prompt.md` を指す pointer を tmux buffer 経由で
-  paste して終了する (paste するのは prompt 全文ではなく pointer 1 行)。
+  paste し、paste settle 後に Enter を送って submit してから終了する (paste するのは prompt 全文ではなく pointer 1 行)。
+  submit 後は agent adapter ごとの working marker、または active prompt に pointer が残っていないことを
+  `capture-pane` で確認し、pointer が未送信のまま残っていれば bounded retry で Enter を再送する。
   interactive boot gate (update / trust / login など) を検出した場合は `needs_input` event と通知を一度出すが、
   polling は hard timeout まで続ける。人間が pane で gate を片付ければ次の ready 検出で自動 paste される。
   timeout では `error` event を出し task を `failed` にする。これは起動時の一回きりの handshake であり、
@@ -438,7 +440,7 @@ git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / 
 - driver-prompt は `docs/prompts/driver-base.md` の fleet 共通プロトコルに、workflow plugin が任意で提供する `DRIVER_PROMPT_FRAGMENT`、`docs/prompts/roles/<role>.md` の role 断片、task description を合成して生成する。 `git_worktree` は作業完了後の `commit → push → gh pr create → fleet-agent done` 手順を断片として持ち、`bare` は持たない。
 - `git_worktree` の `on_pre_start` は、worktree を切る現在 branch が既知の upstream より遅れている場合だけ警告する。`start` の latency と offline 起動を守るため fetch は行わず、警告して続行する。`bare` workflow には適用しない。
 - tmux pane へ paste するのは prompt 全文ではなく、prompt ファイルを指す短い pointer のみ。 `start` / `send-prompt` / `leader` は共通ヘルパで `.driver-prompt.md.paste-pointer` または `.leader-prompt.md.paste-pointer` を生成し、`Read the prompt file at this path before doing anything else, then follow its instructions: <絶対パス>` を1行で paste する。 prompt 本体は agent が起動直後に `Read` / file-reading tool で読む。
-- driver-prompt の pointer は `fleet-agent start` / `fleet-agent send-prompt` が直接 paste せず、detached prompt deliverer が agent CLI の ready marker を見てから注入する (§4.1 参照)。 deliverer が paste するのも prompt 全文ではなく pointer 1 行。
+- driver-prompt の pointer は `fleet-agent start` / `fleet-agent send-prompt` が直接 paste せず、detached prompt deliverer が agent CLI の ready marker を見てから注入し、submit 確認まで行う (§4.1 参照)。 deliverer が paste するのも prompt 全文ではなく pointer 1 行。
 - leader-prompt は `docs/prompts/leader-base.md` の fleet 汎用 leader プロトコル (不変・project 非依存) を土台に、project 名・state dir・memory 入口を `---` footer として合成して生成する。 `fleet leader` が pane 起動時に pointer を注入する (driver-prompt の paste 機構と同様)。 project 固有・揮発なコンテキスト (現在の方針 / handoff) は leader-base.md には入れず、project memory と `leader-handoff.md` 側が持つ。 leader は fleet memory の主要な維持者でもある。
 - fleet core の Python コードは作業の git (commit / push / PR) を一切叩かない。
 - PR のマージは driver が行わない。 leader / user の判断に委ねる。
