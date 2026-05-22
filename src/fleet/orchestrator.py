@@ -15,6 +15,10 @@ from pathlib import Path
 from . import state as state_mod
 
 
+class UserApprovalError(ValueError):
+    """Raised when approve/reject is not valid for the current task state."""
+
+
 def advance(
     state_dir: Path,
     task_id: str,
@@ -28,7 +32,8 @@ def advance(
     result="approved":
         peer_review.phase="implementing" → launch reviewer.
         peer_review.phase="reviewing"    → peer_review passed; check user_approval.
-        user_approval.status="asked"     → approve; mark stage done; launch next.
+        user_approval.status="asked"     → deprecated compatibility approval;
+                                           mark stage done; launch next.
         (no peer_review, no user_approval) → mark stage done; launch next.
 
     result="changes-requested":
@@ -110,7 +115,13 @@ def advance(
 
     else:
         # No peer_review: legacy changes-requested records result and stops.
-        if result == "changes-requested":
+        ua = stage.get("user_approval")
+        waiting_for_user = (
+            isinstance(ua, dict)
+            and ua.get("required")
+            and ua.get("status") == "asked"
+        )
+        if result == "changes-requested" and not waiting_for_user:
             stages[current_idx]["result"] = "changes-requested"
             task["stages"] = stages
             state_mod.save_task(state_dir, task_id, task)
@@ -132,16 +143,125 @@ def advance(
             _request_user_approval(state_dir, task_id, task, stage)
             return
 
-        if ua_status == "asked":
-            # User is approving this call.
+        if ua_status == "asked" and result == "approved":
+            # Backward compatibility: older leaders used a second
+            # ``done --result=approved`` as the user approval relay. New
+            # callers should use ``fleet-agent approve``.
             ua["status"] = "approved"
             stage["user_approval"] = ua
             stages[current_idx] = stage
             task["stages"] = stages
-            state_mod.save_task(state_dir, task_id, task)
-            # Fall through to mark stage done.
+            _mark_stage_done_and_advance(
+                state_dir, task_id, task, current_idx, dry_run=dry_run
+            )
+            return
+
+        if ua_status == "asked" and result == "changes-requested":
+            # Backward compatibility for the old user rejection relay. New
+            # callers should use ``fleet-agent reject``.
+            reject_user_approval(state_dir, task_id, task, dry_run=dry_run)
+            return
 
     # ── mark stage done and advance ───────────────────────────────────────
+    _mark_stage_done_and_advance(state_dir, task_id, task, current_idx, dry_run=dry_run)
+
+
+def approve_user_approval(
+    state_dir: Path,
+    task_id: str,
+    task: dict,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Relay explicit user approval for the current stage's approval gate."""
+    stages, current_idx, stage, ua, is_escalation = _require_user_relay_target(task)
+
+    if is_escalation:
+        pr = stage.get("peer_review")
+        if isinstance(pr, dict):
+            pr["phase"] = "approved"
+            stage["peer_review"] = pr
+
+    if ua is not None:
+        ua["status"] = "approved"
+        stage["user_approval"] = ua
+    stages[current_idx] = stage
+    task["stages"] = stages
+
+    _mark_stage_done_and_advance(state_dir, task_id, task, current_idx, dry_run=dry_run)
+
+
+def reject_user_approval(
+    state_dir: Path,
+    task_id: str,
+    task: dict,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Relay explicit user rejection and return the stage to implementation."""
+    stages, current_idx, stage, ua, _is_escalation = _require_user_relay_target(task)
+
+    if ua is not None:
+        ua["status"] = "pending"
+        stage["user_approval"] = ua
+
+    pr = stage.get("peer_review")
+    if isinstance(pr, dict) and pr.get("role"):
+        pr["phase"] = "implementing"
+        pr["iteration"] = int(pr.get("iteration", 1) or 1) + 1
+        stage["peer_review"] = pr
+
+    stage["status"] = "running"
+    stages[current_idx] = stage
+    task["stages"] = stages
+    task["current_stage"] = current_idx
+    task["status"] = "running"
+    state_mod.save_task(state_dir, task_id, task)
+
+    if not dry_run:
+        _launch_driver_for_stage(state_dir, task_id, task, current_idx, stage)
+
+
+def _require_user_relay_target(
+    task: dict,
+) -> tuple[list[dict], int, dict, dict | None, bool]:
+    stages = task.get("stages") or []
+    if not stages:
+        raise UserApprovalError("task has no stages")
+
+    current_idx = task.get("current_stage", 0)
+    if not isinstance(current_idx, int) or not (0 <= current_idx < len(stages)):
+        raise UserApprovalError("task has no current stage")
+
+    stage = stages[current_idx]
+    ua = stage.get("user_approval")
+    if isinstance(ua, dict) and ua.get("required") and ua.get("status") == "asked":
+        return stages, current_idx, stage, ua, False
+
+    pr = stage.get("peer_review")
+    is_escalation = (
+        task.get("status") == "needs_input"
+        and isinstance(pr, dict)
+        and pr.get("phase") == "reviewing"
+        and int(pr.get("iteration", 1) or 1) >= 3
+    )
+    if is_escalation:
+        return stages, current_idx, stage, ua if isinstance(ua, dict) else None, True
+
+    if not (isinstance(ua, dict) and ua.get("required")):
+        raise UserApprovalError("current stage does not require user approval")
+    raise UserApprovalError("current stage is not waiting for user approval")
+
+
+def _mark_stage_done_and_advance(
+    state_dir: Path,
+    task_id: str,
+    task: dict,
+    current_idx: int,
+    *,
+    dry_run: bool = False,
+) -> None:
+    stages = task.get("stages") or []
     stages[current_idx]["status"] = "done"
 
     next_idx: int | None = None
@@ -238,7 +358,7 @@ def _notify_escalation(
     role = stage.get("role", "?")
     question = (
         f"peer_review for stage '{role}' exceeded the maximum 3 iterations. "
-        f"Please review manually and run: fleet-agent done {task_id} --result=approved"
+        "Please review manually and tell the leader whether to approve or reject."
     )
     _write_question(state_dir, task_id, question)
     events_mod.append_event(
@@ -268,7 +388,7 @@ def _request_user_approval(
     role = stage.get("role", "?")
     question = (
         f"Stage '{role}' is ready for your approval. "
-        f"Run: fleet-agent done {task_id} --result=approved"
+        "Tell the leader whether to approve or reject it."
     )
     _write_question(state_dir, task_id, question)
     events_mod.append_event(

@@ -7,7 +7,7 @@ Two entrypoints:
   fleet        — user-facing (init / preflight / leader / attach / status /
                  log / formation / workflow)
   fleet-agent  — agent-facing (start / inbox / inbox-read / send-prompt /
-                 cleanup / ask / event / done)
+                 cleanup / ask / event / approve / reject / done)
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import sys
 from typing import Sequence
 
 from . import __version__
+from .commands import approval as approval_cmd
 from .commands import ask as ask_cmd
 from .commands import attach as attach_cmd
 from .commands import cleanup as cleanup_cmd
@@ -79,6 +80,8 @@ def build_parser_agent() -> argparse.ArgumentParser:
     cleanup_cmd.add_parser(sub)
     ask_cmd.add_parser(sub)
     event_cmd.add_parser(sub)
+    approval_cmd.add_approve_parser(sub)
+    approval_cmd.add_reject_parser(sub)
     done_cmd.add_parser(sub)
     return parser
 

@@ -95,6 +95,8 @@ Leader-side (run by the leader agent):
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
 | `fleet-agent send-prompt <id>` | Start a detached deliverer to paste a `driver-prompt.md` pointer when the task pane is ready |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
+| `fleet-agent approve <id>` | Relay explicit user approval for a `user_approval` gate |
+| `fleet-agent reject <id>` | Relay explicit user rejection for a `user_approval` gate |
 
 Driver-side (run inside a driver pane — `FLEET_TASK_ID` / `FLEET_STATE_DIR` are
 pre-set, so no `--task-id` is needed):
