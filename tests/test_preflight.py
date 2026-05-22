@@ -32,6 +32,7 @@ class PreflightLibraryTests(unittest.TestCase):
         self.assertFalse(results["git"].required)
         self.assertFalse(results["claude"].required)
         self.assertFalse(results["codex"].required)
+        self.assertFalse(results["codex-update"].required)
         self.assertFalse(results["codex-trust"].required)
 
     def test_git_required_for_git_worktree_workflow(self) -> None:
@@ -88,6 +89,68 @@ class PreflightLibraryTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertIn("skipped", result.detail)
+
+    def test_codex_update_warns_when_latest_is_newer(self) -> None:
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which",
+                side_effect=lambda name: f"/bin/{name}",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._codex_version",
+                return_value="0.132.0",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._npm_latest_codex_version",
+                return_value="0.133.0",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._npm_global_codex_version",
+                return_value="0.133.0",
+            ),
+        ):
+            result = preflight._check_codex_update()
+
+        self.assertEqual(result.name, "codex-update")
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("update prompt may appear", result.detail)
+        self.assertIn("npm global @openai/codex is 0.133.0", result.detail)
+
+    def test_codex_update_ok_when_current(self) -> None:
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which",
+                side_effect=lambda name: f"/bin/{name}",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._codex_version",
+                return_value="0.133.0",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._npm_latest_codex_version",
+                return_value="0.133.0",
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight._npm_global_codex_version",
+                return_value="0.133.0",
+            ),
+        ):
+            result = preflight._check_codex_update()
+
+        self.assertTrue(result.ok)
+        self.assertIn("is current", result.detail)
+
+    def test_codex_update_skips_without_codex(self) -> None:
+        with unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=None):
+            result = preflight._check_codex_update()
+
+        self.assertTrue(result.ok)
+        self.assertIn("skipped", result.detail)
+
+    def test_extract_version_from_codex_output(self) -> None:
+        self.assertEqual(preflight._extract_version("codex-cli 0.132.0"), "0.132.0")
+        self.assertIsNone(preflight._extract_version("codex-cli dev"))
 
 
 class PreflightCmdSmokeTest(unittest.TestCase):

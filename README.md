@@ -76,7 +76,7 @@ is vendored under `vendor/`.
 | Command | Purpose |
 |---|---|
 | `fleet init --name <name> [path]` | Create `.fleet-state/` in `path` |
-| `fleet preflight` | Verify Python / tmux / git / agent CLIs |
+| `fleet preflight` | Verify Python / tmux / git / agent CLIs, including Codex trust/update warnings |
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane |
 | `fleet attach [<target>]` | Attach to leader or a task pane |
 | `fleet status [path] [--events N]` | Print project info + tasks + recent events |
@@ -109,6 +109,12 @@ When the active workflow is `git_worktree`, `fleet-agent start` checks the
 current branch against its locally known upstream before creating the task
 worktree. If the branch is behind, it prints a warning with the commit count and
 continues; it does not fetch and it does not block offline starts.
+
+Codex drivers are launched with a per-invocation config override
+(`check_for_update_on_startup=false`) so Codex's interactive update prompt
+does not consume the driver prompt. `fleet preflight` still warns when the
+local Codex CLI is older than npm's latest `@openai/codex`, or when npm's global
+install and the `codex` currently on `PATH` disagree.
 
 ---
 

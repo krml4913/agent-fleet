@@ -45,7 +45,14 @@ class CliCommandTests(unittest.TestCase):
     def test_codex_cmd(self) -> None:
         self.assertEqual(
             agents.cli_command("codex:o4-mini"),
-            ["codex", "--dangerously-bypass-approvals-and-sandbox", "-m", "o4-mini"],
+            [
+                "codex",
+                "-c",
+                "check_for_update_on_startup=false",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-m",
+                "o4-mini",
+            ],
         )
 
 
