@@ -37,6 +37,79 @@ Git workflow (作業の git は driver が担う):
 """
 
 
+def _git(
+    target: Path,
+    *args: str,
+    timeout: float = 5,
+) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(target), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+
+def _warn_if_base_branch_behind_upstream(target: Path) -> None:
+    """Warn when the branch used for the new worktree is behind its upstream.
+
+    This intentionally does not fetch. ``fleet-agent start`` should remain fast
+    and should continue to work offline; the comparison uses refs git already
+    knows locally.
+    """
+    branch_r = _git(target, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch_r is None or branch_r.returncode != 0:
+        return
+    branch = branch_r.stdout.strip()
+    if not branch or branch == "HEAD":
+        return
+
+    upstream_r = _git(
+        target,
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{upstream}",
+    )
+    if upstream_r is None or upstream_r.returncode != 0:
+        return
+    upstream = upstream_r.stdout.strip()
+    if not upstream:
+        return
+
+    counts_r = _git(
+        target,
+        "rev-list",
+        "--left-right",
+        "--count",
+        f"HEAD...{upstream}",
+    )
+    if counts_r is None or counts_r.returncode != 0:
+        return
+    parts = counts_r.stdout.strip().split()
+    if len(parts) != 2:
+        return
+    try:
+        _ahead = int(parts[0])
+        behind = int(parts[1])
+    except ValueError:
+        return
+    if behind <= 0:
+        return
+
+    plural = "" if behind == 1 else "s"
+    print(
+        "warn: git_worktree base branch "
+        f"{branch!r} is {behind} commit{plural} behind {upstream!r}; "
+        "run `git pull --ff-only` before `fleet-agent start` to spawn "
+        "from the latest code. Continuing anyway.",
+        file=sys.stderr,
+    )
+
+
 def on_pre_start(ctx: dict[str, Any]) -> None:
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
@@ -51,6 +124,8 @@ def on_pre_start(ctx: dict[str, Any]) -> None:
         raise RuntimeError(
             f"git_worktree: worktree already exists: {worktree}"
         )
+
+    _warn_if_base_branch_behind_upstream(target)
 
     r = subprocess.run(
         ["git", "-C", str(target), "worktree", "add", str(worktree), "-b", branch],

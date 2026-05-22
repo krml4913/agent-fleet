@@ -29,6 +29,7 @@ git init -b main && echo hi > README.md && git add -A && git -c user.email=t@x -
 
 # Optional: pick the git-worktree workflow so each task gets its own branch
 /path/to/agent-fleet/fleet workflow set git_worktree
+# If the current branch is behind its upstream, start warns but still continues.
 
 # Launch the leader pane (claude by default)
 /path/to/agent-fleet/fleet leader --attach
@@ -103,6 +104,11 @@ pre-set, so no `--task-id` is needed):
 | `fleet-agent ask "<question>"` | Record `needs_input`, append `questions.md`, notify the user |
 | `fleet-agent event emit <type> [--field K=V ...]` | Append an audit event |
 | `fleet-agent done [--result approved\|changes-requested]` | Signal role completion; orchestrator advances the task |
+
+When the active workflow is `git_worktree`, `fleet-agent start` checks the
+current branch against its locally known upstream before creating the task
+worktree. If the branch is behind, it prints a warning with the commit count and
+continues; it does not fetch and it does not block offline starts.
 
 ---
 

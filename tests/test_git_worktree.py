@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -23,28 +25,18 @@ class GitWorktreeTests(unittest.TestCase):
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
 
-        env_extra = {
+        self.git_env = os.environ.copy()
+        self.git_env.update({
             "GIT_AUTHOR_NAME": "Test",
             "GIT_AUTHOR_EMAIL": "t@example.com",
             "GIT_COMMITTER_NAME": "Test",
             "GIT_COMMITTER_EMAIL": "t@example.com",
-        }
-        import os as _os
-        env = _os.environ.copy()
-        env.update(env_extra)
+        })
 
-        def git(*args: str) -> None:
-            subprocess.run(
-                ["git", "-C", str(self.project), *args],
-                check=True,
-                capture_output=True,
-                env=env,
-            )
-
-        git("init", "-q", "-b", "main")
+        self.git("init", "-q", "-b", "main")
         (self.project / "README.md").write_text("hello\n")
-        git("add", "README.md")
-        git("commit", "-q", "-m", "initial")
+        self.git("add", "README.md")
+        self.git("commit", "-q", "-m", "initial")
 
         # state_dir is now stored in fleet-state/projects/<name>/,
         # but the plugin only cares that state_dir.is_dir() and
@@ -58,6 +50,18 @@ class GitWorktreeTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    def git(
+        self,
+        *args: str,
+        cwd: Path | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            ["git", "-C", str(cwd or self.project), *args],
+            check=True,
+            capture_output=True,
+            env=self.git_env,
+        )
+
     def test_pre_start_creates_worktree(self) -> None:
         ctx: dict = {
             "state_dir": self.state_dir,
@@ -70,6 +74,59 @@ class GitWorktreeTests(unittest.TestCase):
         self.assertEqual(ctx["task_extra"]["worktree"], str(worktree))
         self.assertEqual(ctx["task_extra"]["branch"], "testproj/task/7")
         self.assertEqual(ctx["cwd"], worktree)
+
+    def test_pre_start_warns_when_base_branch_is_behind_upstream(self) -> None:
+        remote = Path(self._tmp.name) / "remote.git"
+        upstream_clone = Path(self._tmp.name) / "upstream"
+        # `-b main` pins the bare repo's HEAD; without it the default branch
+        # depends on the host `init.defaultBranch` (CI defaults to `master`),
+        # which makes `git clone` skip the checkout and the fixture stops
+        # reproducing the behind state.
+        subprocess.run(
+            ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
+            check=True,
+        )
+        self.git("remote", "add", "origin", str(remote))
+        self.git("push", "-u", "origin", "main")
+        subprocess.run(
+            ["git", "clone", "-q", str(remote), str(upstream_clone)],
+            check=True,
+            env=self.git_env,
+        )
+        (upstream_clone / "README.md").write_text("hello\nremote update\n")
+        self.git("add", "README.md", cwd=upstream_clone)
+        self.git("commit", "-q", "-m", "remote update", cwd=upstream_clone)
+        self.git("push", cwd=upstream_clone)
+        self.git("fetch", "origin")
+
+        ctx: dict = {
+            "state_dir": self.state_dir,
+            "task_id": "behind",
+            "project_root": self.project,
+        }
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            git_worktree.on_pre_start(ctx)
+
+        self.assertIn(
+            "warn: git_worktree base branch 'main' is 1 commit behind 'origin/main'",
+            stderr.getvalue(),
+        )
+        self.assertIn("git pull --ff-only", stderr.getvalue())
+        self.assertTrue((self.state_dir / "worktrees" / "task-behind").is_dir())
+
+    def test_pre_start_does_not_warn_without_upstream(self) -> None:
+        ctx: dict = {
+            "state_dir": self.state_dir,
+            "task_id": "no-upstream",
+            "project_root": self.project,
+        }
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            git_worktree.on_pre_start(ctx)
+
+        self.assertNotIn("base branch", stderr.getvalue())
+        self.assertTrue((self.state_dir / "worktrees" / "task-no-upstream").is_dir())
 
     def test_branch_name_is_project_scoped(self) -> None:
         """Branch name must be <project-name>/task/<id> to avoid cross-project conflicts."""
