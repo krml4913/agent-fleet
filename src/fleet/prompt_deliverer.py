@@ -26,19 +26,19 @@ class PromptAdapter:
 
 ADAPTERS: dict[str, PromptAdapter] = {
     "claude": PromptAdapter(
-        ready=re.compile(r"(?im)(?:^|\n)\s*(?:Human:|>)\s*$"),
+        ready=re.compile(r"(?m)^\s*❯(?:\s|$)"),
         gate=re.compile(
             r"(?im)"
             r"(?:login|log in|sign in|authentication|authenticate|"
-            r"update available|install update|trust (?:this )?(?:folder|directory|workspace)|"
+            r"^\s*1\.\s*Update now\b|trust (?:this )?(?:folder|directory|workspace)|"
             r"do you trust|continue\?)"
         ),
     ),
     "codex": PromptAdapter(
-        ready=re.compile(r"(?im)(?:^|\n)\s*(?:›|>)\s*$|ask codex|what can i help"),
+        ready=re.compile(r"(?im)^\s*›(?:\s|$)|ask codex|what can i help"),
         gate=re.compile(
             r"(?im)"
-            r"(?:update available|install update|"
+            r"(?:^\s*1\.\s*Update now\b|"
             r"do you trust the contents of this directory|yes,\s*continue|"
             r"sign in|login|log in|authentication|authenticate|api key)"
         ),

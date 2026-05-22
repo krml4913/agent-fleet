@@ -86,6 +86,66 @@ class PromptDelivererTests(unittest.TestCase):
         send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
+    def test_codex_ready_with_update_banner_is_not_a_gate(self) -> None:
+        pane = """
+╭─────────────────────────────────────────────────╮
+│ ✨ Update available! 0.132.0 -> 0.133.0         │
+│ Run npm install -g @openai/codex to update.     │
+╰─────────────────────────────────────────────────╯
+
+╭─────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.132.0)                          │
+╰─────────────────────────────────────────────────────╯
+
+›\u00a0
+"""
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value=pane),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys"),
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual([e["type"] for e in self._events()], ["prompt_delivered"])
+
+    def test_codex_blocking_update_menu_emits_needs_input(self) -> None:
+        panes = iter(
+            [
+                "Update available\n1. Update now\n2. Skip this version\n3. Skip for now\n",
+                "›\n",
+            ]
+        )
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys"),
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            [e["type"] for e in self._events()],
+            ["needs_input", "prompt_delivered"],
+        )
+
+    def test_claude_ready_marker_matches_current_tui_prompt(self) -> None:
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys"),
+        ):
+            result = self._deliver(agent="claude:opus")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
     def test_gate_emits_needs_input_but_keeps_polling_until_ready(self) -> None:
         panes = iter(
             [
