@@ -78,7 +78,14 @@ class GitWorktreeTests(unittest.TestCase):
     def test_pre_start_warns_when_base_branch_is_behind_upstream(self) -> None:
         remote = Path(self._tmp.name) / "remote.git"
         upstream_clone = Path(self._tmp.name) / "upstream"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        # `-b main` pins the bare repo's HEAD; without it the default branch
+        # depends on the host `init.defaultBranch` (CI defaults to `master`),
+        # which makes `git clone` skip the checkout and the fixture stops
+        # reproducing the behind state.
+        subprocess.run(
+            ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
+            check=True,
+        )
         self.git("remote", "add", "origin", str(remote))
         self.git("push", "-u", "origin", "main")
         subprocess.run(
