@@ -12,7 +12,10 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet.cli import build_parser_agent, build_parser_user  # noqa: E402
 
 USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "log", "formation", "workflow", "rm"}
-AGENT_COMMANDS = {"start", "inbox", "inbox-read", "send-prompt", "cleanup", "ask", "event", "done"}
+AGENT_COMMANDS = {
+    "start", "inbox", "inbox-read", "send-prompt", "cleanup", "ask", "event",
+    "approve", "reject", "done",
+}
 
 
 def _subcommand_names(parser) -> set[str]:
@@ -51,9 +54,9 @@ class TestBuildParserAgent(unittest.TestCase):
     def test_prog_name(self) -> None:
         self.assertEqual(self.parser.prog, "fleet-agent")
 
-    def test_exposes_exactly_8_commands(self) -> None:
+    def test_exposes_exactly_10_commands(self) -> None:
         names = _subcommand_names(self.parser)
-        self.assertEqual(len(names), 8, f"expected 8 agent commands, got {sorted(names)}")
+        self.assertEqual(len(names), 10, f"expected 10 agent commands, got {sorted(names)}")
 
     def test_exposes_all_agent_commands(self) -> None:
         names = _subcommand_names(self.parser)

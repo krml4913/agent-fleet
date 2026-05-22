@@ -338,9 +338,13 @@ implement → peer_review (AI 査読ループ, max 3 回) → user_approval → 
 ### 6.3 state machine (orchestrator)
 
 - `fleet-agent done --result approved|changes-requested` が呼ばれると `orchestrator.advance()` が次を判断する
-- approved: 現 stage を done にして次 stage を launch (次がなければ task completed)
+- approved: driver / reviewer の作業完了を受け、peer_review / user_approval の次状態を判断する。user_approval が無ければ現 stage を done にして次 stage を launch (次がなければ task completed)
 - changes-requested: peer_review の phase に応じてループを回す
 - peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
+- `user_approval.status == asked` のゲートは leader が user の判断を受けて `fleet-agent approve <id>` / `fleet-agent reject <id>` で中継する
+  - approve: `user_approval.status` を `approved` にし、stage 完了処理へ進む
+  - reject: `user_approval.status` を `pending` に戻し、該当 stage を implementation に戻す
+- 後方互換として `done --result approved` による asked gate の承認は当面残すが、新しい導線では使わない
 
 ### 6.4 formation YAML schema
 
@@ -575,7 +579,7 @@ agent-fleet/
                       `status` / `log` / `formation` / `workflow`
   - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
                       `start` / `inbox` / `inbox-read` / `send-prompt` / `cleanup` /
-                      `ask` / `event` / `done`
+                      `ask` / `event` / `approve` / `reject` / `done`
 - 2 つは同じ `src/fleet/` module を import する shebang script。
   「人間が打つもの」 と 「システムが自動で叩くもの」 を物理的に分離する設計。
 - pyproject.toml / setuptools entry_points は **MVP では使わない** (`pip install` 想定しない)
