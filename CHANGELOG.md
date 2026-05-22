@@ -5,6 +5,11 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### Codex update prompt 抑止 (Issue #93)
+
+- Codex driver 起動時に `-c check_for_update_on_startup=false` を渡し、update prompt が driver prompt を吸い込む事故を発生源で抑止。
+- `fleet preflight` に `codex-update` optional check を追加。`codex --version` と npm latest、npm global install の version を比較し、古い CLI や PATH ズレを警告する。
+
 ### topology → formation 改称 (Issue #88)
 
 - 概念名 `topology` を `formation` に全面改称

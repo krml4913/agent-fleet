@@ -7,6 +7,7 @@ missing → exit 1; optional tools missing → warn but continue.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,7 @@ def check_all() -> list[CheckResult]:
         _check_command("git", ["git", "--version"], required=git_required),
         _check_command("claude", ["claude", "--version"], required=False),
         _check_command("codex", ["codex", "--version"], required=False),
+        _check_codex_update(),
         _check_codex_trust(),
     ]
 
@@ -144,3 +146,132 @@ def _check_codex_trust() -> CheckResult:
         f"not trusted: {repo_root} (run `codex` here and approve)",
         required=False,
     )
+
+
+def _check_codex_update() -> CheckResult:
+    codex_path = shutil.which("codex")
+    if not codex_path:
+        return CheckResult(
+            "codex-update",
+            True,
+            "skipped (codex not on PATH)",
+            required=False,
+        )
+
+    current = _codex_version()
+    if current is None:
+        return CheckResult(
+            "codex-update",
+            False,
+            "could not parse `codex --version`",
+            required=False,
+        )
+
+    latest = _npm_latest_codex_version()
+    npm_global = _npm_global_codex_version()
+
+    details: list[str] = []
+    ok = True
+    if latest and _version_lt(current, latest):
+        ok = False
+        details.append(
+            f"{current} < latest {latest}; update prompt may appear"
+        )
+    elif latest:
+        details.append(f"{current} is current")
+    else:
+        details.append(f"{current}; latest unavailable")
+
+    if npm_global and npm_global != current:
+        ok = False
+        details.append(
+            f"npm global @openai/codex is {npm_global} but PATH runs {codex_path}"
+        )
+
+    if not ok:
+        details.append("fleet launches codex with update checks disabled")
+    return CheckResult("codex-update", ok, "; ".join(details), required=False)
+
+
+def _codex_version() -> str | None:
+    try:
+        r = subprocess.run(
+            ["codex", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    text = (r.stdout or r.stderr).strip().splitlines()
+    if not text:
+        return None
+    return _extract_version(text[0])
+
+
+def _npm_latest_codex_version() -> str | None:
+    if not shutil.which("npm"):
+        return None
+    try:
+        r = subprocess.run(
+            ["npm", "view", "@openai/codex", "version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    return _extract_version(r.stdout.strip())
+
+
+def _npm_global_codex_version() -> str | None:
+    if not shutil.which("npm"):
+        return None
+    try:
+        r = subprocess.run(
+            ["npm", "root", "-g"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    root = r.stdout.strip()
+    if not root:
+        return None
+    package_json = Path(root) / "@openai" / "codex" / "package.json"
+    try:
+        data = json.loads(package_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    version = data.get("version")
+    return _extract_version(version) if isinstance(version, str) else None
+
+
+def _extract_version(text: str) -> str | None:
+    for part in text.replace(",", " ").split():
+        candidate = part.strip()
+        if _version_tuple(candidate) is not None:
+            return candidate
+    return None
+
+
+def _version_lt(left: str, right: str) -> bool:
+    left_tuple = _version_tuple(left)
+    right_tuple = _version_tuple(right)
+    if left_tuple is None or right_tuple is None:
+        return False
+    return left_tuple < right_tuple
+
+
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    parts = version.split(".")
+    if not parts or any(not part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)

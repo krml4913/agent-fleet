@@ -135,6 +135,8 @@ leader は driver の状態を polling したり、 needs_input を検知した�
 
 codex driver は初回起動時に directory trust prompt を出すため、 `fleet-agent start` は codex の初段 driver を起動する前に git repo root が `~/.codex/config.toml` 上で trusted かを read-only に確認する。 未信頼なら worktree / task state / prompt を作らず中断し、 user にその repo で一度 `codex` を起動して承認してから再実行するよう誘導する。 `fleet preflight` も同じ trust 状態を optional check として表示する。
 
+codex の起動時 update prompt は、Codex CLI の per-invocation config override `-c check_for_update_on_startup=false` を付けて発生源で抑止する。 fleet は `~/.codex/config.toml` には書き込まない。 `fleet preflight` は `codex --version` と npm registry の `@openai/codex` latest を比較し、さらに npm global install の package version と PATH 上の `codex` がずれていれば optional warning として表示する。
+
 ### 4.2 driver の責務
 
 - 与えられたタスクの実装 (member subagent への委譲含む)
