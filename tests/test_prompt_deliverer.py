@@ -37,8 +37,11 @@ class PromptDelivererTests(unittest.TestCase):
         )
         self._old_no_notify = os.environ.get("FLEET_NO_NOTIFY")
         os.environ["FLEET_NO_NOTIFY"] = "1"
+        self._sleep_patch = patch("fleet.prompt_deliverer.time.sleep", return_value=None)
+        self._sleep_patch.start()
 
     def tearDown(self) -> None:
+        self._sleep_patch.stop()
         if self._old_no_notify is None:
             os.environ.pop("FLEET_NO_NOTIFY", None)
         else:
@@ -86,6 +89,63 @@ class PromptDelivererTests(unittest.TestCase):
         send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
+    def test_codex_retries_enter_when_pointer_remains_at_prompt(self) -> None:
+        pointer = prompt_pointer.pointer_text(self.prompt_path)
+        panes = iter(["ready\n›\n", f"› {pointer}\n", "Working\n"])
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(send_keys.call_count, 2)
+        send_keys.assert_called_with("fleet-demo", "1·driver", "", enter=True)
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    def test_claude_retries_enter_when_pointer_remains_at_prompt(self) -> None:
+        pointer = prompt_pointer.pointer_text(self.prompt_path)
+        panes = iter(['status\n❯ Try "help"\n', f"❯ {pointer}\n", "✻ Thinking…\n"])
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+        ):
+            result = self._deliver(agent="claude:opus")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(send_keys.call_count, 2)
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    def test_unsubmitted_pointer_after_retries_marks_failed(self) -> None:
+        pointer = prompt_pointer.pointer_text(self.prompt_path)
+        panes = iter(["ready\n›\n"] + [f"› {pointer}\n"] * prompt_deliverer.SUBMIT_RETRY_ATTEMPTS)
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 1)
+        self.assertEqual(send_keys.call_count, prompt_deliverer.SUBMIT_RETRY_ATTEMPTS)
+        self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
+        self.assertEqual(self._events()[-1]["type"], "error")
+        self.assertIn("could not confirm submit", self._events()[-1]["message"])
+
     def test_codex_ready_with_update_banner_is_not_a_gate(self) -> None:
         pane = """
 ╭─────────────────────────────────────────────────╮
@@ -115,6 +175,7 @@ class PromptDelivererTests(unittest.TestCase):
             [
                 "Update available\n› 1. Update now\n  2. Skip this version\n  3. Skip for now\n",
                 "›\n",
+                "Working\n",
             ]
         )
         with (
@@ -142,7 +203,7 @@ class PromptDelivererTests(unittest.TestCase):
   2. No, quit
   Press enter to continue
 """
-        panes = iter([pane, "› Run /review on my current changes\n"])
+        panes = iter([pane, "› Run /review on my current changes\n", "Working\n"])
         with (
             patch(
                 "fleet.prompt_deliverer.tmux.capture_pane",
@@ -177,6 +238,7 @@ class PromptDelivererTests(unittest.TestCase):
             [
                 "Do you trust this workspace?\n❯ 1. Yes, proceed\n  2. No\n",
                 'status\n❯ Try "help"\n',
+                "✻ Thinking…\n",
             ]
         )
         with (
@@ -201,6 +263,7 @@ class PromptDelivererTests(unittest.TestCase):
             [
                 "Do you trust the contents of this directory?\n› 1. Yes, continue\n",
                 "all set\n›\n",
+                "Working\n",
             ]
         )
         with (

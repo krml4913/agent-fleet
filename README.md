@@ -90,10 +90,10 @@ Leader-side (run by the leader agent):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent start <id> "<desc>" [--formation T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; a detached deliverer pastes a prompt-file pointer once the pane is ready) |
+| `fleet-agent start <id> "<desc>" [--formation T] [--agent A] [--no-auto-paste]` | Start a new task (creates state + launches first stage driver; a detached deliverer pastes and submits a prompt-file pointer once the pane is ready) |
 | `fleet-agent start <id> --prompt-file PATH [--formation T] [--agent A]` | Start a new task using the description read from a file |
 | `fleet-agent inbox <id> "<message>"` | Append a message to the driver's `inbox.md` |
-| `fleet-agent send-prompt <id>` | Start a detached deliverer to paste a `driver-prompt.md` pointer when the task pane is ready |
+| `fleet-agent send-prompt <id>` | Start a detached deliverer to paste and submit a `driver-prompt.md` pointer when the task pane is ready |
 | `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task (workflow + tmux + optional archive) |
 | `fleet-agent approve <id>` | Relay explicit user approval for a `user_approval` gate |
 | `fleet-agent reject <id>` | Relay explicit user rejection for a `user_approval` gate |

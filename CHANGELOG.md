@@ -5,6 +5,11 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### prompt deliverer submit retry (Issue #98)
+
+- Detached prompt deliverer now waits briefly after paste, sends Enter, and verifies submit via adapter-specific working markers or by checking that the prompt pointer no longer remains in the active input line.
+- If the pointer is still sitting at the Codex/Claude prompt, the deliverer retries Enter a bounded number of times before failing the task with an error event.
+
 ### Codex update prompt 抑止 (Issue #93)
 
 - Codex driver 起動時に `-c check_for_update_on_startup=false` を渡し、update prompt が driver prompt を吸い込む事故を発生源で抑止。
