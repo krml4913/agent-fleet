@@ -112,6 +112,19 @@ def paste_buffer(session: str, window: str, buffer_name: str) -> None:
     _run(["tmux", "paste-buffer", "-t", target, "-b", buffer_name])
 
 
+def capture_pane(session: str, window: str, *, start: int = -200) -> str:
+    """Return recent visible/history text from a pane."""
+    target = f"{session}:{window}"
+    r = subprocess.run(
+        ["tmux", "capture-pane", "-p", "-J", "-S", str(start), "-t", target],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        raise TmuxError(r.stderr.strip())
+    return r.stdout
+
+
 def delete_buffer(buffer_name: str) -> None:
     """Best-effort buffer cleanup. Missing buffer is not an error."""
     subprocess.run(

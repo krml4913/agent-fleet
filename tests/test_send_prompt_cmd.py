@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import prompt_pointer, state, tmux  # noqa: E402
+from fleet import state, tmux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
 
 
@@ -70,6 +70,16 @@ class SendPromptTests(unittest.TestCase):
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)
         (td / "driver-prompt.md").write_text("hello\n")
+        state.save_task(
+            self.state_dir,
+            "1",
+            {
+                "id": "1",
+                "status": "spawning",
+                "current_stage": 0,
+                "stages": [{"role": "implementer", "agent": "claude:sonnet", "status": "running"}],
+            },
+        )
         mock_resolve.return_value = self.state_dir
         mock_tmux.available.return_value = True
         mock_tmux.session_exists.return_value = True
@@ -78,25 +88,48 @@ class SendPromptTests(unittest.TestCase):
         args = MagicMock()
         args.task_id = "1"
         args.project = self.project_name
+        args.prompt_timeout = 600.0
 
-        result = run(args)
+        with patch(
+            "fleet.commands.send_prompt.prompt_deliverer.start_detached",
+            return_value=td / "prompt-deliverer.log",
+        ) as mock_deliverer:
+            result = run(args)
 
         self.assertEqual(result, 0)
         mock_tmux.task_window_names.assert_called_once_with(
             f"fleet-{self.project_name}",
             "1",
         )
-        mock_tmux.paste_buffer.assert_called_once_with(
-            f"fleet-{self.project_name}",
-            "1·implementer",
-            "fleet-task-1",
-        )
-        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
-        prompt_path = td / "driver-prompt.md"
-        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
-        pointer = loaded_path.read_text(encoding="utf-8")
-        self.assertIn(str(prompt_path.resolve()), pointer)
-        self.assertNotIn("hello", pointer)
+        mock_deliverer.assert_called_once()
+        self.assertEqual(mock_deliverer.call_args.kwargs["window"], "1·implementer")
+        self.assertEqual(mock_deliverer.call_args.kwargs["agent_spec"], "claude:sonnet")
+
+    @patch("fleet.commands.send_prompt.tmux_mod")
+    @patch("fleet.commands.send_prompt.state_mod.resolve_state_dir")
+    def test_missing_task_yaml_errors_after_window_lookup(
+        self,
+        mock_resolve,
+        mock_tmux: MagicMock,
+    ) -> None:
+        from fleet.commands.send_prompt import run
+
+        td = state.task_dir(self.state_dir, "missing-yaml")
+        td.mkdir(parents=True)
+        (td / "driver-prompt.md").write_text("hello\n")
+        mock_resolve.return_value = self.state_dir
+        mock_tmux.available.return_value = True
+        mock_tmux.session_exists.return_value = True
+        mock_tmux.task_window_names.return_value = ["missing-yaml·driver"]
+        mock_tmux.TmuxError = Exception
+        args = MagicMock()
+        args.task_id = "missing-yaml"
+        args.project = self.project_name
+        args.prompt_timeout = 600.0
+
+        result = run(args)
+
+        self.assertEqual(result, 1)
 
 
 if __name__ == "__main__":

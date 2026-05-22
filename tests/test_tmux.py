@@ -184,5 +184,20 @@ class SendKeysMockTests(unittest.TestCase):
         mock_run.assert_not_called()
 
 
+class CapturePaneMockTests(unittest.TestCase):
+    """Mock-based tests for capture_pane — no live tmux session required."""
+
+    @unittest.mock.patch("fleet.tmux.subprocess.run")
+    def test_capture_pane_uses_recent_history(self, mock_run) -> None:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "pane text"
+        self.assertEqual(tmux.capture_pane("sess", "win"), "pane text")
+        mock_run.assert_called_once_with(
+            ["tmux", "capture-pane", "-p", "-J", "-S", "-200", "-t", "sess:win"],
+            capture_output=True,
+            text=True,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
