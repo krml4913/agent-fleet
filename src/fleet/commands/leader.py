@@ -55,6 +55,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="After starting, exec `tmux attach -t <session>` (foreground).",
     )
     p.add_argument(
+        "--prompt-file",
+        metavar="PATH",
+        help="Read the leader prompt from PATH instead of rendering the default prompt.",
+    )
+    p.add_argument(
         "--no-auto-paste",
         dest="auto_paste",
         action="store_false",
@@ -67,6 +72,23 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Seconds to wait for the agent CLI to start before pasting (default: 3.0).",
     )
     p.set_defaults(func=run, auto_paste=True)
+
+
+def _resolve_prompt_text(args: argparse.Namespace, *, project_name: str, state_dir: Path) -> str | None:
+    prompt_file = getattr(args, "prompt_file", None)
+    if prompt_file is not None and not args.auto_paste:
+        print("error: --prompt-file requires auto-paste", file=sys.stderr)
+        return None
+    if not args.auto_paste:
+        return ""
+    if prompt_file is not None:
+        path = Path(prompt_file)
+        try:
+            return path.read_text()
+        except OSError as e:
+            print(f"error: cannot read --prompt-file {path}: {e}", file=sys.stderr)
+            return None
+    return lp.render(project_name=project_name, state_dir=state_dir)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -86,6 +108,10 @@ def run(args: argparse.Namespace) -> int:
 
     name = project.get("name") or "fleet"
     session = f"fleet-{name}"
+
+    prompt_text = _resolve_prompt_text(args, project_name=name, state_dir=state_dir)
+    if prompt_text is None:
+        return 1
 
     if not tmux_mod.available():
         print("error: tmux not on PATH", file=sys.stderr)
@@ -125,7 +151,6 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     if args.auto_paste:
-        prompt_text = lp.render(project_name=name, state_dir=state_dir)
         prompt_path = state_dir / "leader-prompt.md"
         prompt_path.write_text(prompt_text, encoding="utf-8")
         buffer_name = f"fleet-leader-{name}"

@@ -176,6 +176,7 @@ fleet status --all                       # 全 project 横断サマリ
 #   fleet-image-gallery: 1 windows
 #   fleet-api: 1 windows
 fleet leader --project image-gallery     # 特定 project の leader へ
+fleet leader --project api --prompt-file docs/leader-handoff.md  # file を leader prompt として注入
 ```
 
 不要になった project は `fleet rm <name>` で registry から削除し state ツリーも一括削除する。
@@ -415,7 +416,7 @@ git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / 
 | **ライフサイクル境界の git** | `worktree add` / `worktree remove` | **plugin (仕組み側)** | 定型操作で例外がほぼ無い; driver が自分の作業場所を自分で作れない (鶏と卵) |
 
 - driver-prompt は `docs/prompts/driver-base.md` の fleet 共通プロトコルに、workflow plugin が任意で提供する `DRIVER_PROMPT_FRAGMENT`、`docs/prompts/roles/<role>.md` の role 断片、task description を合成して生成する。 `git_worktree` は作業完了後の `commit → push → gh pr create → fleet-agent done` 手順を断片として持ち、`bare` は持たない。
-- leader-prompt は `docs/prompts/leader-base.md` の fleet 汎用 leader プロトコル (不変・project 非依存) を土台に、project 名・state dir・memory 入口を `---` footer として合成して生成する。 `fleet leader` が pane 起動時に注入する (driver-prompt の paste 機構と同様)。 project 固有・揮発なコンテキスト (現在の方針 / handoff) は leader-base.md には入れず、project memory と `leader-handoff.md` 側が持つ。 leader は fleet memory の主要な維持者でもある。
+- leader-prompt は `docs/prompts/leader-base.md` の fleet 汎用 leader プロトコル (不変・project 非依存) を土台に、project 名・state dir・memory 入口を `---` footer として合成して生成する。 `fleet leader` が pane 起動時に注入する (driver-prompt の paste 機構と同様)。 `fleet leader --prompt-file PATH` では合成 prompt の代わりに PATH の内容を `leader-prompt.md` へ書き出し、そのまま leader pane へ paste する。 project 固有・揮発なコンテキスト (現在の方針 / handoff) は leader-base.md には入れず、project memory と `leader-handoff.md` 側が持つ。 leader は fleet memory の主要な維持者でもある。
 - fleet core の Python コードは作業の git (commit / push / PR) を一切叩かない。
 - PR のマージは driver が行わない。 leader / user の判断に委ねる。
 

@@ -76,7 +76,7 @@ is vendored under `vendor/`.
 |---|---|
 | `fleet init --name <name> [path]` | Create `.fleet-state/` in `path` |
 | `fleet preflight` | Verify Python / tmux / git / agent CLIs |
-| `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane |
+| `fleet leader [--project P] [--agent SPEC] [--prompt-file PATH] [--attach]` | Launch / attach the leader pane; optionally paste a prompt read from a file |
 | `fleet attach [<target>]` | Attach to leader or a task pane |
 | `fleet status [path] [--events N]` | Print project info + tasks + recent events |
 | `fleet log [<id>] [-n N] [--type T]` | Tail `events.jsonl` |

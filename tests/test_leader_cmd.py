@@ -84,6 +84,46 @@ class LeaderCmdTests(unittest.TestCase):
         prompt_path = self.state_dir / "leader-prompt.md"
         self.assertFalse(prompt_path.exists(), "leader-prompt.md should not be written with --no-auto-paste")
 
+    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    def test_prompt_file_writes_leader_prompt(self) -> None:
+        prompt_file = self.project / "leader-prompt-source.md"
+        prompt_text = "Custom leader prompt\nUse this exact text.\n"
+        prompt_file.write_text(prompt_text)
+
+        r = run_fleet("leader", "--project", self.project_name,
+                      "--prompt-delay", "0",
+                      "--prompt-file", str(prompt_file),
+                      fleet_home=self.fleet_home)
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        prompt_path = self.state_dir / "leader-prompt.md"
+        self.assertEqual(prompt_path.read_text(), prompt_text)
+
+    def test_missing_prompt_file_is_error(self) -> None:
+        missing = self.project / "does-not-exist.md"
+
+        r = run_fleet("leader", "--project", self.project_name,
+                      "--prompt-file", str(missing),
+                      fleet_home=self.fleet_home)
+
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot read --prompt-file", r.stderr)
+        self.assertIn(str(missing), r.stderr)
+        self.assertFalse((self.state_dir / "leader-prompt.md").exists())
+
+    def test_prompt_file_with_no_auto_paste_is_error(self) -> None:
+        prompt_file = self.project / "leader-prompt-source.md"
+        prompt_file.write_text("Custom leader prompt\n")
+
+        r = run_fleet("leader", "--project", self.project_name,
+                      "--prompt-file", str(prompt_file),
+                      "--no-auto-paste",
+                      fleet_home=self.fleet_home)
+
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--prompt-file requires auto-paste", r.stderr)
+        self.assertFalse((self.state_dir / "leader-prompt.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
