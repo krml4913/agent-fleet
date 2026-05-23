@@ -1,135 +1,142 @@
-# formation guide
+# Formation Guide
 
-> formation を **読む / 編集する leader 向け** の実用ガイド。
-> 設計の背景・確定済み判断は `docs/design.md` §6 に書く。 ここはその使い方。
+> A practical guide for **reading and editing formations**, aimed at leaders
+> (claude / codex). For design rationale and finalized decisions, see
+> `docs/design.md` §6 — this doc is about how to *use* them.
 >
-> 想定読者: leader (claude / codex 両 vendor)。 user は formation を直接編集せず、
-> leader に依頼するのが標準フロー (`user-types-prompts-not-commands` memory)。
+> Audience: leaders only. Users do not edit formations directly; they ask the
+> leader to do it. The leader (claude or codex) reads this doc and applies
+> the edit.
 
 ---
 
-## 1. formation とは
+## 1. What is a formation?
 
-formation は **「1 タスクを誰がどう進めるか」 の YAML 定義** 。
+A formation is a **YAML definition of "who works a task and how"**.
 
-`fleet-agent start <task-id> --formation <name>` で task を起動すると、
-formation の `stages` に従って driver が順次起動される。
-人間の承認ポイント (`user_approval`) や AI 査読 (`peer_review`) も formation で表現する。
+When you run `fleet-agent start <task-id> --formation <name>`, the orchestrator
+walks the formation's `stages` and launches drivers in order. Human approval
+points (`user_approval`) and AI peer review (`peer_review`) are expressed in
+the same file.
 
-### template と formation の二項対立 (Issue #105 で確定)
+### Template vs. formation (finalized in Issue #105)
 
-| 区分 | 配置 | 役割 |
+| Kind | Path | Role |
 |---|---|---|
-| **formation template** | `src/fleet/templates/<name>.yaml` (fleet 同梱) | 雛形。直接実行できない。 `fleet formation init --from` でコピーする source |
-| **formation** | `<state>/formations/<name>.yaml` (project ごと) | 実体。runtime はこれだけを解決対象にする |
+| **formation template** | `src/fleet/templates/<name>.yaml` (shipped with fleet) | Starter file. Not directly executable. Used as the source for `fleet formation init --from`. |
+| **formation** | `<state>/formations/<name>.yaml` (per project) | The runtime source of truth. The orchestrator only resolves these. |
 
-- template は fleet 同梱で 3 つ (`solo` / `pair_review` / `multi_stage`)。 編集禁止。
-- コピーした瞬間に template と formation は独立する (追従なし)。
-- project の formation は自由に編集してよい — agent 差し替え、stage 追加、gate 削除など。
-- 大規模に作り直したいなら `rm <state>/formations/<name>.yaml && fleet formation init --from <template>` で再生成。
+- Fleet ships three templates: `solo`, `pair_review`, `multi_stage`. Do not edit them in place.
+- Once copied, a template and the resulting formation are **independent** — there is no inheritance or follow-up.
+- A project's formations can be edited freely: swap agents, add stages, drop gates, etc.
+- To rebuild from scratch: `rm <state>/formations/<name>.yaml && fleet formation init --from <template>`.
 
 ---
 
-## 2. YAML スキーマ
+## 2. YAML schema
 
-### 2.1 トップレベル
+### 2.1 Top level
 
-| field | 必須 | 型 | 説明 |
+| field | required | type | description |
 |---|---|---|---|
-| `name` | ✅ | string | formation 識別名。ファイル名 (stem) と一致させる |
-| `description` | optional | string | 人間向け説明 |
-| `stages` | ✅ | list (1 件以上) | stage オブジェクトのリスト |
+| `name` | yes | string | Formation identifier. Must match the file's stem. |
+| `description` | optional | string | Human-readable summary. |
+| `stages` | yes | list (≥ 1) | List of stage objects. |
 
-### 2.2 `stages[]` (各 stage)
+### 2.2 `stages[]` (per stage)
 
-| field | 必須 | 型 | 説明 |
+| field | required | type | description |
 |---|---|---|---|
-| `role` | ✅ | string | driver の役割名 (例: `driver` / `implementer` / `designer` / `code-reviewer`) |
-| `agent` | optional | string | 起動 agent (例: `claude:sonnet`)。省略時は `--agent` で渡された値が使われる |
-| `peer_review` | optional | mapping | AI 査読を挟む場合の入れ子定義 (§2.4) |
-| `user_approval` | optional | string \| mapping | 人間承認ゲート (§2.5) |
+| `role` | yes | string | The driver's role name (e.g. `driver`, `implementer`, `designer`, `code-reviewer`). |
+| `agent` | optional | string | Agent to launch (e.g. `claude:sonnet`). Falls back to the value passed via `--agent`. |
+| `peer_review` | optional | mapping | Nested AI review block (§2.5). |
+| `user_approval` | optional | string \| mapping | Human approval gate (§2.6). |
 
-### 2.3 `role` の値
+### 2.3 `role` values
 
-`role` は **driver の役割名** に過ぎず、 fleet core が enum で縛っていない。
-任意の文字列を書ける。 慣習的に使われている値:
+`role` is just the **driver's role name**. Fleet core does not enforce an enum
+— any string is valid. Conventional values:
 
-- `driver` — solo formation の汎用役。`docs/prompts/roles/driver.md` の役割断片が読まれる
-- `implementer` — 実装担当
-- `designer` — 設計担当
-- `code-reviewer` — `peer_review.role` でよく使う
+- `driver` — generic role for solo formations. Picks up `docs/prompts/roles/driver.md` as a role fragment.
+- `implementer` — does the implementation work.
+- `designer` — does the design work.
+- `code-reviewer` — typical value for `peer_review.role`.
 
-`role` 文字列は driver-prompt の合成に使われる:
-`docs/prompts/roles/<role>.md` があれば role 断片として混ぜる (なければ無視)。
-新 role を増やしたい時は同名の `docs/prompts/roles/<role>.md` を用意するのが推奨。
+The role name participates in driver-prompt composition: if
+`docs/prompts/roles/<role>.md` exists, it is included as a role fragment
+(silently ignored if it does not). When introducing a new role, drop in a
+matching `<role>.md` fragment so the driver knows what is expected.
 
 ### 2.4 `agent` spec
 
-書式は `vendor:model`。 MVP は **claude / codex の 2 vendor のみ** (`design.md` §13.2)。
+Format: `vendor:model`. MVP supports **claude and codex only** (see
+`design.md` §13.2).
 
-| 例 | 解釈 |
+| example | meaning |
 |---|---|
-| `claude:opus` | claude vendor の opus モデル |
-| `claude:sonnet` | claude vendor の sonnet モデル |
-| `codex:gpt-5.5` | codex vendor の gpt-5.5 モデル |
+| `claude:opus` | claude vendor, opus model |
+| `claude:sonnet` | claude vendor, sonnet model |
+| `codex:gpt-5.5` | codex vendor, gpt-5.5 model |
 
-解決規則 (`fleet-agent start`):
+Resolution order (`fleet-agent start`):
 
-1. stage の `agent:` が指定されていればそれを使う
-2. なければ `--agent` 引数の値を使う
-3. それもなければエラー (`no agent for role <role>; pass --agent or set one in the formation`)
+1. If the stage's `agent:` is set, use it.
+2. Otherwise use the value from `--agent`.
+3. Otherwise error: `no agent for role <role>; pass --agent or set one in the formation`.
 
-`peer_review.agent` の解決は別ルール (§2.4):
-**peer_review.agent → 同 stage の agent → `claude:sonnet`** の順でフォールバック。
+`peer_review.agent` follows a different fallback chain (§2.5):
+**`peer_review.agent` → the stage's `agent` → `claude:sonnet`**.
 
-### 2.5 `peer_review` (入れ子の AI 査読)
+### 2.5 `peer_review` (nested AI review)
 
 ```yaml
 peer_review:
-  role: code-reviewer    # 必須。査読者の役割名
-  agent: claude:opus     # optional。省略時は同 stage の agent → claude:sonnet
+  role: code-reviewer    # required: reviewer's role name
+  agent: claude:opus     # optional: defaults to the stage agent, then claude:sonnet
 ```
 
-stage の実行順序:
+Execution order inside a stage:
 
 ```
-implement → peer_review loop (max 3 iter) → user_approval gate (あれば) → stage done
+implement → peer_review loop (max 3 iter) → user_approval gate (if any) → stage done
 ```
 
-- 実装者が `fleet-agent done --result approved` を呼ぶと reviewer pane が立ち上がる。
-- reviewer が `done --result approved` なら次へ進む。
-- reviewer が `done --result changes-requested` なら実装者 pane に inbox handoff が飛んで iteration が +1。
-- iteration 3 回を超えたら task は `awaiting_orders` になって user に escalate される。
+- When the implementer calls `fleet-agent done --result approved`, the reviewer pane is launched (or woken via inbox handoff).
+- Reviewer `--result approved` → fall through to the next gate / next stage.
+- Reviewer `--result changes-requested` → inbox handoff to the implementer, iteration counter +1.
+- After 3 iterations the task transitions to `awaiting_orders` and the user is escalated.
 
-stage 内では実装者 / reviewer の agent CLI pane は閉じずに **保持** される (`design.md` §6.2)。
-これにより agent context が iteration をまたいで残る。
+Within a stage, both the implementer and reviewer agent panes are **kept
+alive** across iterations (`design.md` §6.2). This preserves the agent's
+context between rounds.
 
-### 2.6 `user_approval` (人間承認ゲート)
+### 2.6 `user_approval` (human approval gate)
 
-2 つの書き方:
+Two equivalent forms:
 
 ```yaml
-# 短縮形 (string)
+# shorthand (string)
 user_approval: required    # or "optional"
 
-# 完全形 (mapping)
+# full form (mapping)
 user_approval:
   required: true           # or false
 ```
 
-挙動:
+Behavior:
 
-- `required: true` の stage が完了した時点で task の status が `awaiting_orders` に遷移。
-- user が leader に承認 / 却下を伝え、 leader が `fleet-agent approve <id>` / `fleet-agent reject <id>` を中継する。
-- reject されると stage が implementation に戻る (peer_review がある場合は実装者 pane を起こす)。
+- When a stage with `required: true` finishes, the task transitions to `awaiting_orders`.
+- The user tells the leader whether to approve or reject, and the leader relays this via `fleet-agent approve <id>` / `fleet-agent reject <id>`.
+- On reject, the stage returns to implementation (if there is a `peer_review`, the implementer pane is woken).
 
-ゲートの判断は **user に届く** — leader は自己承認しない (`user-approval-gate` memory)。
+The approval call belongs to the user — **the leader does not self-approve**
+(see the `user-approval-gate` memory).
 
 ---
 
-## 3. 同梱 template の解説
+## 3. Shipped templates
 
-### 3.1 `solo` — 一人で完結
+### 3.1 `solo` — one driver, end to end
 
 ```yaml
 name: solo
@@ -139,11 +146,11 @@ stages:
     agent: claude:sonnet
 ```
 
-- 1 stage / 1 driver。 承認ゲートも査読もなし。
-- 試作 / 軽量タスク / leader からの即座委譲向け。
-- `fleet-agent done --result approved` で task 完了。
+- One stage, one driver. No review, no approval gates.
+- Suitable for prototypes, lightweight tasks, or immediate delegations from the leader.
+- `fleet-agent done --result approved` completes the task.
 
-### 3.2 `pair_review` — 実装 + AI 査読 + user 承認
+### 3.2 `pair_review` — implementer + AI review + user sign-off
 
 ```yaml
 name: pair_review
@@ -157,11 +164,11 @@ stages:
     user_approval: required
 ```
 
-- 実装者 (codex) → 査読者 (claude opus) → user 承認 で 1 stage を完結。
-- multi-vendor の中核 formation (`multivendor-is-core` memory)。
-- 査読 iteration max 3、 超過時は user escalate。
+- Implementer (codex) → reviewer (claude opus) → user approval, all in one stage.
+- This is the showcase multi-vendor formation (`multi-vendor-is-core` memory).
+- Reviewer iterations cap at 3; the user is escalated if exceeded.
 
-### 3.3 `multi_stage` — 設計 → 実装 + 査読、各段で user 承認
+### 3.3 `multi_stage` — design → implement, with gates at every step
 
 ```yaml
 name: multi_stage
@@ -178,36 +185,36 @@ stages:
     user_approval: required
 ```
 
-- 設計段 (claude opus) → user 承認 → 実装段 (claude sonnet + 査読 + user 承認)。
-- 大きめのタスクで設計と実装を分離したい時に使う。
+- Design stage (claude opus) → user approval → implementation stage (claude sonnet + review + user approval).
+- Use this when you want a clear separation between design and implementation for a larger task.
 
 ---
 
-## 4. 編集の典型ケース (leader 向け cookbook)
+## 4. Common edits (leader cookbook)
 
-> 編集前に必ず `fleet formation show <name>` で現状を読む。
-> 編集後も同じコマンドで validate を回す。
+> Before any edit, run `fleet formation show <name>` to see the current
+> contents. After editing, run it again to validate.
 
-### 4.1 agent を入れ替える (例: rate limit で claude → codex)
+### 4.1 Swap an agent (e.g. claude → codex on a rate limit)
 
 ```yaml
-# Before
+# before
 - role: driver
   agent: claude:sonnet
 
-# After
+# after
 - role: driver
   agent: codex:gpt-5.5
 ```
 
-`agent:` 行だけ書き換える。 stage 構造は変えない。
+Change only the `agent:` line; keep the stage structure intact.
 
-### 4.2 solo に code-reviewer を足す
+### 4.2 Add a code reviewer to a solo formation
 
-`solo` を `peer_review` 付きに格上げ:
+Promote `solo` by adding a `peer_review`:
 
 ```yaml
-name: solo            # 名前は維持してよい。 別名にしたいなら別ファイルに分ける
+name: solo
 stages:
   - role: driver
     agent: claude:sonnet
@@ -216,33 +223,35 @@ stages:
       agent: claude:opus
 ```
 
-### 4.3 user_approval gate を抜く / 付ける
+(Keep the same `name`, or save under a different file if you want a parallel formation.)
+
+### 4.3 Drop or add a `user_approval` gate
 
 ```yaml
-# 抜く: field ごと削除する (空文字列にはしない)
+# drop: remove the whole field (do not set an empty string)
 - role: implementer
   agent: claude:sonnet
   peer_review:
     role: code-reviewer
     agent: claude:opus
-  # user_approval: required  ← この 1 行を削除
+  # user_approval: required    ← delete this line
 
-# 付ける: string 短縮形が読みやすい
+# add: the string shorthand is the most readable
 - role: driver
   agent: claude:sonnet
   user_approval: required
 ```
 
-### 4.4 stage を 1 段増やす (実装の前に設計段を挟む)
+### 4.4 Insert an extra stage (e.g. a design stage before implementation)
 
 ```yaml
 stages:
-  # 追加
+  # new
   - role: designer
     agent: claude:opus
     user_approval: required
 
-  # 既存
+  # existing
   - role: implementer
     agent: claude:sonnet
     peer_review:
@@ -251,84 +260,85 @@ stages:
     user_approval: required
 ```
 
-順序は YAML の上から下。 設計段が approved されてから実装段が起動する。
+Stages run top to bottom. The designer must be approved before the implementer is launched.
 
-### 4.5 peer_review の agent だけ替える
+### 4.5 Change only the `peer_review` agent
 
 ```yaml
 peer_review:
   role: code-reviewer
-  agent: codex:gpt-5.5    # claude:opus から差し替え
+  agent: codex:gpt-5.5    # was claude:opus
 ```
 
-`peer_review.agent` 省略時は同 stage の `agent` → `claude:sonnet` にフォールバックするので、
-明示しないと意図しない agent で査読される可能性がある。 vendor を分けたい時は明示する。
+If `peer_review.agent` is omitted, it falls back to the stage's `agent`, then
+to `claude:sonnet` — which may not match the vendor you want for review. When
+the vendors should differ, set it explicitly.
 
 ---
 
-## 5. validation と挙動
+## 5. Validation and behavior
 
-### 5.1 `fleet formation show <name>` の挙動
+### 5.1 `fleet formation show <name>`
 
-- `<state>/formations/<name>.yaml` を読んで `formation.validate()` を回す。
-- スキーマエラーがあれば stderr に `warn: formation validation failed: <reason>` を出すが、
-  本体 YAML は stdout に出す (確認のため)。
+- Loads `<state>/formations/<name>.yaml` and runs `formation.validate()`.
+- Schema errors are printed to stderr as `warn: formation validation failed: <reason>`, but the YAML body is still emitted to stdout for inspection.
 
-### 5.2 validate() が見るもの (`src/fleet/formation.py`)
+### 5.2 What `validate()` checks (`src/fleet/formation.py`)
 
-- top-level に `name` が必要 (空文字列もエラー)
-- top-level に `stages` が必要、 1 件以上のリストでないとエラー
-- 各 stage は mapping、 `role` が必要
+- Top level has a non-empty `name`.
+- Top level has `stages`, a list with at least one entry.
+- Each stage is a mapping and has a `role` field.
 
-これより細かい構造検証 (`peer_review` の中身 / `agent` spec の解析 / `user_approval` の形) は
-**orchestrator が runtime で見る** (`design.md` §6.4)。 静的にチェックしない。
+Stricter checks — `peer_review` structure, `agent` parseability,
+`user_approval` shape — are deferred to **runtime in the orchestrator**
+(`design.md` §6.4). They are not done statically.
 
-### 5.3 起こり得るエラー
+### 5.3 Possible errors
 
-| 状況 | エラー / 挙動 |
+| situation | error / behavior |
 |---|---|
-| `formations/<name>.yaml` が無い | `fleet-agent start --formation <name>` が `ResolutionError`。 template fallback はしない |
-| `formations/` が空 + `--formation` 省略 | leader-session.json の agent で `_leader_solo` を即興合成 (1-stage solo) |
-| `formations/` に 2 件以上 + `--formation` 省略 | 曖昧エラー (`--formation <name>` を渡すよう案内) |
-| YAML 解析失敗 | `formation file must be a YAML mapping: <path>` |
-| `name` 欠落 | `formation missing required field: name` |
-| `stages` 欠落 / 空 | `formation 'stages' must be a non-empty list` |
-| stage に `role` 無し | `formation stages[i] missing required field: role` |
-| `agent` 解析失敗 | runtime で `unsupported vendor` / `agent spec must be 'vendor:model'` |
-| 未対応 vendor (例: `openai:gpt-4`) | `unsupported vendor 'openai'; supported: ['claude', 'codex']` |
+| `formations/<name>.yaml` missing | `fleet-agent start --formation <name>` raises `ResolutionError`. No template fallback. |
+| `formations/` empty + no `--formation` | A synthetic `_leader_solo` 1-stage formation is built from the leader-session agent. |
+| `formations/` has 2+ entries + no `--formation` | Ambiguity error; tells you to pass `--formation <name>`. |
+| YAML parse failure | `formation file must be a YAML mapping: <path>` |
+| missing `name` | `formation missing required field: name` |
+| missing / empty `stages` | `formation 'stages' must be a non-empty list` |
+| stage missing `role` | `formation stages[i] missing required field: role` |
+| bad `agent` spec | At runtime: `unsupported vendor` or `agent spec must be 'vendor:model'`. |
+| unsupported vendor (e.g. `openai:gpt-4`) | `unsupported vendor 'openai'; supported: ['claude', 'codex']` |
 
 ---
 
-## 6. ベストプラクティス
+## 6. Best practices
 
-- **編集前に `fleet formation show` で現状を読む** — 前任者が手を入れている可能性がある。
-- **編集後も `fleet formation show` を回す** — top-level validate は最低限通しておく。
-- **大規模に作り直す時は再生成** — `rm <state>/formations/<name>.yaml` してから `fleet formation init --from <template>` で雛形をやり直す方が早い。
-- **`agent` 省略を多用しない** — `--agent` 引数で上書きできるのは便利だが、 stage ごとに明示した方が事故が少ない。 特に `peer_review.agent` は明示推奨。
-- **vendor 固有の話は role 名や description に書かない** — formation は claude / codex 両 vendor の leader が読む前提。 vendor に依存する記述は driver-prompt 側 (role 断片) に追い出す。
-- **stage の `role` 名は `docs/prompts/roles/<role>.md` と整合させる** — role 断片が読まれないと driver が役割を理解しないまま起動する。
+- **Read the current file first.** Run `fleet formation show <name>` before editing — someone may have customized it already.
+- **Validate after editing.** Run `fleet formation show <name>` again. It is a cheap top-level check.
+- **For big rewrites, regenerate.** `rm <state>/formations/<name>.yaml && fleet formation init --from <template>` is faster than reshaping a heavily edited file.
+- **Avoid relying on `agent:` omission.** The `--agent` fallback is convenient but easy to forget. Be explicit per stage, especially for `peer_review.agent`.
+- **Do not put vendor-specific notes in `role` or `description`.** Formations are read by both claude and codex leaders; keep vendor-specific guidance in the driver prompt (role fragment).
+- **Keep `role` names aligned with `docs/prompts/roles/<role>.md`.** If the role fragment is missing, the driver starts without a clear sense of its role.
 
 ---
 
-## 7. CLI リファレンス (簡潔)
+## 7. CLI reference (short form)
 
-| コマンド | 説明 |
+| command | description |
 |---|---|
-| `fleet formation list` | template + custom formations を一覧表示 |
-| `fleet formation show <name>` | custom formation の YAML を表示 + validate |
-| `fleet formation init --from <template> [--name <name>]` | template をコピーして `<state>/formations/<name>.yaml` を作成 (`--name` 省略時は template 名と同じ) |
-| `fleet-agent start <task-id> --formation <name>` | formation を解決して task を起動 |
-| `fleet-agent approve <task-id>` | `user_approval` gate の承認を中継 |
-| `fleet-agent reject <task-id>` | `user_approval` gate を却下、 stage を implementation に戻す |
+| `fleet formation list` | List both templates and custom formations. |
+| `fleet formation show <name>` | Print a custom formation's YAML and run validate. |
+| `fleet formation init --from <template> [--name <name>]` | Copy a template into `<state>/formations/<name>.yaml` (defaults to the template name). |
+| `fleet-agent start <task-id> --formation <name>` | Resolve the formation and launch the task. |
+| `fleet-agent approve <task-id>` | Relay user approval for the current `user_approval` gate. |
+| `fleet-agent reject <task-id>` | Relay user rejection; the stage returns to implementation. |
 
-詳細フラグは `fleet formation --help` / `fleet-agent start --help` を参照。
+For full flags, see `fleet formation --help` and `fleet-agent start --help`.
 
 ---
 
-## 8. スコープ外
+## 8. Out of scope
 
-以下は本 doc では扱わない:
+This guide intentionally does not cover:
 
-- skill / CLI 補助コマンド (`fleet formation edit` 等) — 別議論。 skill は Claude Code 固有機能で codex で使えず、 multi-vendor の柱と相容れない。
-- formation の partial overlay / inherit — Issue #105 で見送り済み、 現状仕様に無い。
-- count フィールドや動的並列起動 — `design.md` §6.1 で **count なし** が確定済み。
+- Skills or CLI helpers like `fleet formation edit`. Skills are a Claude Code-specific feature, which conflicts with the multi-vendor pillar.
+- Partial overlay or inheritance between formations. Declined in Issue #105 and not part of the current spec.
+- A `count` field or dynamic parallel launching. `design.md` §6.1 finalized **no count**.
