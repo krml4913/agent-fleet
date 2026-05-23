@@ -141,13 +141,13 @@ class StatusCommandTests(unittest.TestCase):
         self.assertNotIn("stage 1/1", result.stdout)
         self.assertNotIn("review ×", result.stdout)
 
-    def test_status_shows_needs_input_section(self) -> None:
+    def test_status_shows_awaiting_orders_section(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
-        state.save_task(sd, "1", {"title": "answer question", "status": "needs_input", "agent": "codex"})
+        state.save_task(sd, "1", {"title": "answer question", "status": "awaiting_orders", "agent": "codex"})
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("⚠ needs your input  1", result.stdout)
+        self.assertIn("⚠ awaiting orders  1", result.stdout)
         self.assertIn("  task-1  answer question", result.stdout)
 
     def test_status_formats_recent_events(self) -> None:

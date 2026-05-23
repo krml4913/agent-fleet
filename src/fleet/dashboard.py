@@ -50,12 +50,12 @@ def render(state_dir: Path) -> str:
     lines.append(f"- workflow: `{workflow}`")
     lines.append("")
 
-    # Highlight tasks awaiting user input.
-    needs_input = [t for t in tasks if t.get("status") == "needs_input"]
-    if needs_input:
-        lines.append("## ⚠ Needs your input")
+    # Highlight tasks awaiting orders.
+    awaiting_orders = [t for t in tasks if t.get("status") == "awaiting_orders"]
+    if awaiting_orders:
+        lines.append("## ⚠ Awaiting orders")
         lines.append("")
-        for t in needs_input:
+        for t in awaiting_orders:
             tid = t.get("id", "?")
             lines.append(
                 f"- **task-{tid}** — {t.get('title', '-')} "

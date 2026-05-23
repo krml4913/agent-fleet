@@ -1,6 +1,6 @@
 """``fleet-agent ask "<question>"`` — driver-side: ask the user a question.
 
-Records a ``needs_input`` event, flips the task status to ``needs_input``,
+Records an ``awaiting_orders`` event, flips the task status to ``awaiting_orders``,
 appends to ``questions.md``, and fires a notification. **Does not block.**
 The driver re-checks ``inbox.md`` on its own schedule for the answer.
 """
@@ -20,7 +20,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "ask",
         help="Driver-side: ask the user a question",
         description=(
-            "Record a needs_input event for the current task, flip its "
+            "Record an awaiting_orders event for the current task, flip its "
             "status, and fire a notification. Pane output alone never "
             "reaches anyone — drivers MUST use this CLI."
         ),
@@ -47,7 +47,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    task["status"] = "needs_input"
+    task["status"] = "awaiting_orders"
     state_mod.save_task(state_dir, task_id, task)
 
     qpath = state_mod.task_dir(state_dir, task_id) / "questions.md"
@@ -57,7 +57,7 @@ def run(args: argparse.Namespace) -> int:
 
     append_event(
         state_dir / "events.jsonl",
-        "needs_input",
+        "awaiting_orders",
         task_id=task_id,
         question=args.question,
     )
@@ -65,9 +65,9 @@ def run(args: argparse.Namespace) -> int:
     project = state_mod.load_project(state_dir)
     notify.send(
         state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} needs input",
+        title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
         message=args.question,
     )
 
-    print(f"recorded needs_input for task-{task_id}")
+    print(f"recorded awaiting_orders for task-{task_id}")
     return 0

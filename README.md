@@ -103,7 +103,7 @@ pre-set, so no `--task-id` is needed):
 
 | Command | Purpose |
 |---|---|
-| `fleet-agent ask "<question>"` | Record `needs_input`, append `questions.md`, notify the user |
+| `fleet-agent ask "<question>"` | Record `awaiting_orders`, append `questions.md`, notify the user |
 | `fleet-agent event emit <type> [--field K=V ...]` | Append an audit event |
 | `fleet-agent done [--result approved\|changes-requested]` | Signal role completion; orchestrator advances the task |
 

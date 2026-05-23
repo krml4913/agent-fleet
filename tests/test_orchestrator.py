@@ -270,7 +270,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         updated = state.load_task(self.sd, "24")
         # Must not advance to next stage
         self.assertNotEqual(updated["status"], "completed")
-        self.assertEqual(updated["status"], "needs_input")
+        self.assertEqual(updated["status"], "awaiting_orders")
         # Stage still running
         self.assertEqual(updated["stages"][0]["status"], "running")
         # questions.md should exist
@@ -282,7 +282,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         stages = self._make_pr_stage(with_user_approval=True)
         stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 3}
         task = _make_task(self.sd, "27", stages)
-        task["status"] = "needs_input"
+        task["status"] = "awaiting_orders"
         state.save_task(self.sd, "27", task)
 
         orchestrator.approve_user_approval(self.sd, "27", task, dry_run=True)
@@ -297,7 +297,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         stages = self._make_pr_stage(with_user_approval=True)
         stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 3}
         task = _make_task(self.sd, "28", stages)
-        task["status"] = "needs_input"
+        task["status"] = "awaiting_orders"
         state.save_task(self.sd, "28", task)
 
         orchestrator.reject_user_approval(self.sd, "28", task, dry_run=True)
@@ -417,7 +417,7 @@ class UserApprovalGateTests(unittest.TestCase):
         updated = state.load_task(self.sd, "30")
         ua = updated["stages"][0]["user_approval"]
         self.assertEqual(ua["status"], "asked")
-        self.assertEqual(updated["status"], "needs_input")
+        self.assertEqual(updated["status"], "awaiting_orders")
         # Stage should NOT be done yet
         self.assertNotEqual(updated["stages"][0]["status"], "done")
 
@@ -498,7 +498,7 @@ class UserApprovalGateTests(unittest.TestCase):
         task = state.load_task(self.sd, "33")
         self.assertEqual(task["stages"][0]["peer_review"]["phase"], "approved")
         self.assertEqual(task["stages"][0]["user_approval"]["status"], "asked")
-        self.assertEqual(task["status"], "needs_input")
+        self.assertEqual(task["status"], "awaiting_orders")
         self.assertNotEqual(task["stages"][0]["status"], "done")
 
         # Step 3: user approves → stage done → task completed

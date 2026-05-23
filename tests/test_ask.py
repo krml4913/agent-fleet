@@ -45,7 +45,7 @@ class AskTests(unittest.TestCase):
             os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
-    def test_records_needs_input(self) -> None:
+    def test_records_awaiting_orders(self) -> None:
         env = os.environ.copy()
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
@@ -58,15 +58,15 @@ class AskTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
         task = state.load_task(self.state_dir, "1")
-        self.assertEqual(task["status"], "needs_input")
+        self.assertEqual(task["status"], "awaiting_orders")
         questions = (self.state_dir / "tasks" / "task-1" / "questions.md").read_text()
         self.assertIn("approach A or B", questions)
         events = [
             json.loads(l) for l in (self.state_dir / "events.jsonl").read_text().splitlines() if l
         ]
-        needs_input_events = [e for e in events if e["type"] == "needs_input"]
-        self.assertEqual(len(needs_input_events), 1)
-        self.assertEqual(needs_input_events[0]["task_id"], "1")
+        awaiting_orders_events = [e for e in events if e["type"] == "awaiting_orders"]
+        self.assertEqual(len(awaiting_orders_events), 1)
+        self.assertEqual(awaiting_orders_events[0]["task_id"], "1")
 
     def test_resolves_from_cwd(self) -> None:
         task_cwd = self.state_dir / "tasks" / "task-1"

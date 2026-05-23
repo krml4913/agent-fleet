@@ -204,7 +204,7 @@ def deliver(
 
         if not gate_notified and adapter.gate.search(pane):
             gate_notified = True
-            _needs_input(state_dir, task_id, window, vendor)
+            _awaiting_orders(state_dir, task_id, window, vendor)
 
         time.sleep(max(0.1, poll_interval))
 
@@ -217,7 +217,7 @@ def deliver(
     return 1
 
 
-def _needs_input(state_dir: Path, task_id: str, window: str, vendor: str) -> None:
+def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) -> None:
     question = (
         f"{vendor} boot gate detected in task-{task_id} ({window}). "
         "Attach to the pane, clear the prompt/login/update gate, and the prompt "
@@ -225,7 +225,7 @@ def _needs_input(state_dir: Path, task_id: str, window: str, vendor: str) -> Non
     )
     try:
         task = state_mod.load_task(state_dir, task_id)
-        task["status"] = "needs_input"
+        task["status"] = "awaiting_orders"
         state_mod.save_task(state_dir, task_id, task)
     except FileNotFoundError:
         pass
@@ -234,7 +234,7 @@ def _needs_input(state_dir: Path, task_id: str, window: str, vendor: str) -> Non
     qpath.write_text(existing + f"### {utcnow_iso()}\n\n{question}\n\n", encoding="utf-8")
     append_event(
         state_dir / "events.jsonl",
-        "needs_input",
+        "awaiting_orders",
         task_id=task_id,
         question=question,
         source="prompt_deliverer",
@@ -273,7 +273,7 @@ def _mark_running_if_needed(state_dir: Path, task_id: str) -> None:
         task = state_mod.load_task(state_dir, task_id)
     except FileNotFoundError:
         return
-    if task.get("status") == "needs_input":
+    if task.get("status") == "awaiting_orders":
         task["status"] = state_mod.derive_task_status(task.get("stages") or [])
         state_mod.save_task(state_dir, task_id, task)
 

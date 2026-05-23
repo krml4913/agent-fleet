@@ -99,7 +99,7 @@ def advance(
                 if iteration >= 3:
                     # Max iterations exceeded; escalate to user.
                     task["stages"] = stages
-                    task["status"] = "needs_input"
+                    task["status"] = "awaiting_orders"
                     state_mod.save_task(state_dir, task_id, task)
                     _notify_escalation(state_dir, task_id, task, stage)
                     return
@@ -157,7 +157,7 @@ def advance(
             stage["user_approval"] = ua
             stages[current_idx] = stage
             task["stages"] = stages
-            task["status"] = "needs_input"
+            task["status"] = "awaiting_orders"
             state_mod.save_task(state_dir, task_id, task)
             _request_user_approval(state_dir, task_id, task, stage)
             return
@@ -274,7 +274,7 @@ def _require_user_relay_target(
 
     pr = stage.get("peer_review")
     is_escalation = (
-        task.get("status") == "needs_input"
+        task.get("status") == "awaiting_orders"
         and isinstance(pr, dict)
         and pr.get("phase") == "reviewing"
         and int(pr.get("iteration", 1) or 1) >= 3
@@ -494,14 +494,14 @@ def _notify_escalation(
     _write_question(state_dir, task_id, question)
     events_mod.append_event(
         state_dir / "events.jsonl",
-        "needs_input",
+        "awaiting_orders",
         task_id=task_id,
         question=question,
     )
     project = state_mod.load_project(state_dir)
     notify.send(
         state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} needs input",
+        title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
         message=question,
     )
 
@@ -524,7 +524,7 @@ def _request_user_approval(
     _write_question(state_dir, task_id, question)
     events_mod.append_event(
         state_dir / "events.jsonl",
-        "needs_input",
+        "awaiting_orders",
         task_id=task_id,
         question=question,
     )

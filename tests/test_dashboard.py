@@ -32,13 +32,13 @@ class DashboardRenderTests(unittest.TestCase):
         self.assertIn("(no tasks yet)", text)
         self.assertIn("## Recent events", text)
 
-    def test_needs_input_highlight(self) -> None:
+    def test_awaiting_orders_highlight(self) -> None:
         state.save_task(self.sd, "1", {
-            "id": "1", "title": "T", "status": "needs_input",
+            "id": "1", "title": "T", "status": "awaiting_orders",
             "agent": "claude:sonnet",
         })
         text = dashboard.render(self.sd)
-        self.assertIn("## ⚠ Needs your input", text)
+        self.assertIn("## ⚠ Awaiting orders", text)
         self.assertIn("task-1", text)
         # Body has both the highlight block AND the standard table.
         self.assertIn("| 1 |", text)

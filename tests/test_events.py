@@ -22,12 +22,12 @@ class EventsTests(unittest.TestCase):
 
     def test_append_and_read(self) -> None:
         append_event(self.events_path, "spawn", task_id="1", agent="claude:sonnet")
-        append_event(self.events_path, "needs_input", task_id="1", question="ok?")
+        append_event(self.events_path, "awaiting_orders", task_id="1", question="ok?")
         events = read_events(self.events_path)
         self.assertEqual(len(events), 2)
         self.assertEqual(events[0]["type"], "spawn")
         self.assertEqual(events[0]["task_id"], "1")
-        self.assertEqual(events[1]["type"], "needs_input")
+        self.assertEqual(events[1]["type"], "awaiting_orders")
         self.assertIn("ts", events[0])
 
     def test_read_missing_file(self) -> None:
