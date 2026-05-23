@@ -57,6 +57,18 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertTrue(any(e["type"] == "leader_start" for e in events))
 
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    def test_launch_writes_leader_session_json(self) -> None:
+        r = run_fleet("leader", "--project", self.project_name,
+                      "--agent", "claude:opus",
+                      fleet_home=self.fleet_home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        session_path = self.state_dir / "leader-session.json"
+        self.assertTrue(session_path.exists(), "leader-session.json was not written")
+        data = json.loads(session_path.read_text())
+        self.assertEqual(data["agent"], "claude:opus")
+        self.assertIn("started_at", data)
+
+    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
     def test_existing_session_is_idempotent(self) -> None:
         r1 = run_fleet("leader", "--project", self.project_name,
                        fleet_home=self.fleet_home)

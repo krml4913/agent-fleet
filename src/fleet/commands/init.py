@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
 from ..state import fleet_home, init_state, project_state_dir, register_project
+from .. import formation as formation_mod
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -29,7 +31,127 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         default=".",
         help="Project root path (default: current directory)",
     )
+    p.add_argument(
+        "--formation",
+        action="append",
+        dest="formations",
+        metavar="NAME",
+        help=(
+            "Formation template(s) to copy into <state>/formations/. "
+            "Repeat or use comma-separated names. "
+            "Available: solo, pair_review, multi_stage."
+        ),
+    )
+    p.add_argument(
+        "--no-formation",
+        action="store_true",
+        help="Create an empty formations/ directory (skip all template copying).",
+    )
+    p.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Suppress the interactive template picker even when running on a TTY.",
+    )
     p.set_defaults(func=run)
+
+
+def _flatten_formations(raw: list[str]) -> list[str]:
+    """Flatten comma-separated formation names and deduplicate."""
+    seen: list[str] = []
+    for item in raw:
+        for name in item.split(","):
+            name = name.strip()
+            if name and name not in seen:
+                seen.append(name)
+    return seen
+
+
+def _interactive_pick(state_dir: Path) -> list[str] | None:
+    """Run the interactive formation template picker.
+
+    Returns a list of selected template names, or None if aborted.
+    """
+    templates = formation_mod.list_templates()
+    descriptions: dict[str, str] = {}
+    for name in templates:
+        try:
+            data = formation_mod.load_template(name)
+            descriptions[name] = data.get("description", "")
+        except Exception:
+            descriptions[name] = ""
+
+    print()
+    print("Available formation templates (fleet ships these as starting points):")
+    for i, name in enumerate(templates, 1):
+        desc = descriptions.get(name, "")
+        print(f"  {i}) {name:<14} - {desc}")
+    print()
+    print(f"Which to copy into <state>/formations/?")
+    print(f"  Enter numbers (1,2,3), names (solo,pair_review), 'all', or 'none'.")
+    print(f"  Default: all")
+    print()
+
+    for attempt in range(3):
+        try:
+            raw = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nerror: aborted by user", file=sys.stderr)
+            return None
+
+        if not raw:
+            raw = "all"
+
+        if raw.lower() in ("none", "no", "0"):
+            return []
+
+        if raw.lower() == "all":
+            return list(templates)
+
+        # Parse numbers / names
+        parts = [p.strip() for p in raw.replace(",", " ").split()]
+        selected: list[str] = []
+        unknown: list[str] = []
+        for part in parts:
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(templates):
+                    name = templates[idx]
+                    if name not in selected:
+                        selected.append(name)
+                else:
+                    unknown.append(part)
+            elif part in templates:
+                if part not in selected:
+                    selected.append(part)
+            else:
+                unknown.append(part)
+
+        if unknown:
+            print(f"  unknown: {', '.join(unknown)}. Try again ({2 - attempt} left).")
+            continue
+
+        break
+    else:
+        print("error: too many invalid attempts, aborting", file=sys.stderr)
+        return None
+
+    if not selected:
+        return []
+
+    names_str = ", ".join(selected)
+    print()
+    print(f"Selected: {names_str}")
+    try:
+        ans = input(f"Copy these to <state>/formations/? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\nerror: aborted by user", file=sys.stderr)
+        return None
+
+    if ans in ("n", "no"):
+        print("error: aborted by user", file=sys.stderr)
+        return None
+
+    return selected
 
 
 def run(args: argparse.Namespace) -> int:
@@ -38,12 +160,45 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: not a directory: {repo}", file=sys.stderr)
         return 1
 
+    # Validate --formation / --no-formation
+    if args.no_formation and args.formations:
+        print("error: --formation and --no-formation are mutually exclusive", file=sys.stderr)
+        return 1
+
     name = args.name if args.name else repo.name
     state_dir = project_state_dir(name)
 
     if state_dir.exists():
         print(f"error: already registered: {name}", file=sys.stderr)
         return 1
+
+    # Resolve formation selection before doing any state changes
+    if args.no_formation:
+        selected_formations: list[str] = []
+        interactive = False
+    elif args.formations:
+        # Validate template names upfront
+        flat = _flatten_formations(args.formations)
+        available = formation_mod.list_templates()
+        unknown = [f for f in flat if f not in available]
+        if unknown:
+            print(
+                f"error: unknown formation template(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(available)}",
+                file=sys.stderr,
+            )
+            return 1
+        selected_formations = flat
+        interactive = False
+    else:
+        # Decide: interactive or silent-no-formation
+        is_tty = sys.stdin.isatty()
+        non_interactive = getattr(args, "non_interactive", False)
+        if is_tty and not non_interactive:
+            interactive = True
+        else:
+            selected_formations = []
+            interactive = False
 
     try:
         register_project(name, repo)
@@ -54,7 +209,6 @@ def run(args: argparse.Namespace) -> int:
     try:
         init_state(state_dir, name=name, repo=repo)
     except Exception as e:
-        # Roll back registry entry if state creation fails.
         try:
             from ..state import unregister_project
             unregister_project(name)
@@ -63,9 +217,52 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: failed to create state directory: {e}", file=sys.stderr)
         return 1
 
+    # Ensure formations/ exists
+    formations_dir = state_dir / "formations"
+    formations_dir.mkdir(parents=True, exist_ok=True)
+
+    # Interactive mode: run after state is created
+    if interactive:
+        print(f"Initializing project '{name}' at {repo} ...")
+        print(f"Registered. State dir: {state_dir}")
+        picked = _interactive_pick(state_dir)
+        if picked is None:
+            # Aborted — project is already registered; keep it but warn
+            return 1
+        selected_formations = picked
+        # Copy selected formations
+        copied: list[str] = []
+        for tname in selected_formations:
+            src = formation_mod.TEMPLATES_DIR / f"{tname}.yaml"
+            dst = formations_dir / f"{tname}.yaml"
+            shutil.copyfile(src, dst)
+            copied.append(f"  formations/{tname}.yaml")
+        if copied:
+            print()
+            print("Copied:")
+            for line in copied:
+                print(line)
+            print()
+            print("Done. Edit them to customize agents/stages.")
+        else:
+            print()
+            print("Done. formations/ is empty.")
+        return 0
+
+    # Non-interactive path: copy formations, print summary
+    copied_names: list[str] = []
+    for tname in selected_formations:
+        src = formation_mod.TEMPLATES_DIR / f"{tname}.yaml"
+        dst = formations_dir / f"{tname}.yaml"
+        shutil.copyfile(src, dst)
+        copied_names.append(tname)
+
+    formations_summary = ", ".join(copied_names) if copied_names else "(none)"
+
     print(f"Initialized fleet state:")
     print(f"  project name: {name}")
     print(f"  repo:         {repo}")
     print(f"  state dir:    {state_dir}")
     print(f"  tmux session: fleet-{name}")
+    print(f"  formations copied: {formations_summary}")
     return 0

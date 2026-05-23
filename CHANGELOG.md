@@ -5,6 +5,15 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### formation template + `fleet init` UX (Issue #105)
+
+- formation: `src/fleet/presets/` → `src/fleet/templates/` に移動。"preset formation" の用語を廃止し、fleet 同梱の雛形は "formation template"、project が持つ実体は "formation" と呼び分ける。
+- formation: `fleet init` に `--formation` / `--no-formation` / `--non-interactive` オプションを追加。TTY では番号・名前入力の対話ピッカーを表示し、選択した formation template を `<state>/formations/` にコピーする。非 TTY (CI / pipe) では `--formation` 未指定時は formations/ 空で完了。
+- formation: `fleet formation init --from <template> [--name <name>]` サブコマンドを新設。既存 project に後から formation template をコピーできる。
+- formation: `fleet formation list` の見出しを "preset formations:" → "template formations:" に更新。
+- formation: `fleet-agent start --formation` のデフォルトを `solo` から `None` に変更。解決ルール: 明示指定 → `<state>/formations/` から strict ロード (template fallback なし)。未指定 + 1 件のみ → 自動採用。未指定 + 空 → `leader-session.json` の agent で即興 `_leader_solo` 合成。未指定 + 複数 → 曖昧エラー。
+- leader: `fleet leader` が起動時に `<state>/leader-session.json` を書くようになった。start の formation fallback がこれを読んで leader の agent で solo formation を合成する。
+
 ### prompt deliverer submit retry (Issue #98)
 
 - Detached prompt deliverer now waits briefly after paste, sends Enter, and verifies submit via adapter-specific working markers or by checking that the prompt pointer no longer remains in the active input line.

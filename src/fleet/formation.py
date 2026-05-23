@@ -1,12 +1,16 @@
 """Load and inspect team formation YAML files (design doc §6).
 
-A *formation* describes which agent(s) handle a task and how they
-hand off — solo, pair-review, multi-stage, or a project-defined
-custom shape. Presets ship in ``src/fleet/presets/``; project-specific
-custom ones live in ``<state>/formations/<name>.yaml``.
+A *formation template* (``src/fleet/templates/*.yaml``) is a fleet-shipped
+starter; it can be copied into a project via ``fleet init`` or
+``fleet formation init --from``.  Direct execution is not supported.
+
+A *formation* lives in ``<state>/formations/<name>.yaml`` — that is the
+runtime source of truth.  Templates and formations are distinct: templates
+are read-only starters; once copied, a formation is fully independent.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -17,8 +21,17 @@ if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
 
 import yaml
 
-PRESETS_DIR = Path(__file__).resolve().parent / "presets"
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 CUSTOM_SUBDIR = "formations"
+
+
+# ---------------------------------------------------------------------------
+# Custom exceptions
+# ---------------------------------------------------------------------------
+
+
+class ResolutionError(ValueError):
+    """Raised when a formation cannot be resolved for start."""
 
 
 # ---------------------------------------------------------------------------
@@ -26,10 +39,10 @@ CUSTOM_SUBDIR = "formations"
 # ---------------------------------------------------------------------------
 
 
-def list_presets() -> list[str]:
-    if not PRESETS_DIR.is_dir():
+def list_templates() -> list[str]:
+    if not TEMPLATES_DIR.is_dir():
         return []
-    return sorted(p.stem for p in PRESETS_DIR.glob("*.yaml"))
+    return sorted(p.stem for p in TEMPLATES_DIR.glob("*.yaml"))
 
 
 def list_custom(state_dir: Path) -> list[str]:
@@ -44,10 +57,10 @@ def list_custom(state_dir: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def load_preset(name: str) -> dict[str, Any]:
-    path = PRESETS_DIR / f"{name}.yaml"
+def load_template(name: str) -> dict[str, Any]:
+    path = TEMPLATES_DIR / f"{name}.yaml"
     if not path.is_file():
-        raise FileNotFoundError(f"no preset formation: {name}")
+        raise FileNotFoundError(f"no formation template: {name}")
     return _load_yaml(path)
 
 
@@ -58,13 +71,102 @@ def load_custom(state_dir: Path, name: str) -> dict[str, Any]:
     return _load_yaml(path)
 
 
-def load(name: str, state_dir: Path | None = None) -> dict[str, Any]:
-    """Resolve a formation by name. Custom (under ``state_dir``) wins over preset."""
-    if state_dir is not None:
-        custom_path = state_dir / CUSTOM_SUBDIR / f"{name}.yaml"
-        if custom_path.is_file():
-            return _load_yaml(custom_path)
-    return load_preset(name)
+def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
+    """Load a formation strictly from ``<state>/formations/<name>.yaml``.
+
+    No template fallback — templates are not directly executable.
+    Raises FileNotFoundError when the formation is missing.
+    """
+    path = state_dir / CUSTOM_SUBDIR / f"{name}.yaml"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"no formation named {name!r} in {state_dir / CUSTOM_SUBDIR}.\n"
+            f"  Run: fleet formation init --from <template>"
+        )
+    return _load_yaml(path)
+
+
+# ---------------------------------------------------------------------------
+# Formation resolution for ``fleet-agent start``
+# ---------------------------------------------------------------------------
+
+
+def resolve_formation(
+    state_dir: Path,
+    requested: str | None,
+) -> tuple[str, dict[str, Any]]:
+    """Return ``(effective_name, formation_dict)`` for start.
+
+    Rules:
+    - ``requested`` given: load strictly from formations/; missing → error.
+    - ``requested`` is None + 0 customs: synthesise leader-solo.
+    - ``requested`` is None + 1 custom: use that one (unambiguous).
+    - ``requested`` is None + 2+ customs: ambiguous → error.
+    """
+    if requested is not None:
+        try:
+            data = load_formation(requested, state_dir)
+        except FileNotFoundError as e:
+            raise ResolutionError(str(e)) from e
+        return (requested, data)
+
+    customs = list_custom(state_dir)
+    if len(customs) == 0:
+        return synth_leader_solo(state_dir)
+    if len(customs) == 1:
+        return (customs[0], load_formation(customs[0], state_dir))
+    raise ResolutionError(
+        f"multiple formations in {state_dir / CUSTOM_SUBDIR}: "
+        f"{', '.join(customs)}. Pass --formation <name> to choose."
+    )
+
+
+def synth_leader_solo(state_dir: Path) -> tuple[str, dict[str, Any]]:
+    """Synthesise a single-stage solo formation from the leader's agent."""
+    session = read_leader_session(state_dir)
+    if session is None:
+        raise ResolutionError(
+            "no formations defined and no leader-session.json found. "
+            "Either run `fleet leader` first, or pass --formation <name>."
+        )
+    agent = session.get("agent")
+    if not agent or not _agent_spec_valid(agent):
+        raise ResolutionError(
+            f"invalid agent in leader-session.json: {agent!r}"
+        )
+    import sys as _sys
+    print(f"warn: no formation specified, falling back to leader agent ({agent})", file=_sys.stderr)
+    data: dict[str, Any] = {
+        "name": "_leader_solo",
+        "description": "Synthesized 1-stage solo (no formations defined; using leader agent).",
+        "stages": [{"role": "driver", "agent": agent}],
+    }
+    return ("_leader_solo", data)
+
+
+def read_leader_session(state_dir: Path) -> dict[str, Any] | None:
+    """Read ``<state>/leader-session.json``.  Returns None on any error."""
+    path = state_dir / "leader-session.json"
+    try:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        agent = data.get("agent")
+        if not agent:
+            return None
+        return data
+    except Exception:
+        return None
+
+
+def _agent_spec_valid(spec: str) -> bool:
+    try:
+        from .agents import parse_spec
+        parse_spec(spec)
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------

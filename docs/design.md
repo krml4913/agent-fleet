@@ -295,7 +295,7 @@ fleet は multi-vendor (claude / codex / その他) が柱。 claude driver は 
 ### 6.1 設計方針
 
 - **YAML** で定義 (シンプルに始める)
-- **preset** (同梱の標準 formation 数種) + **custom** (project ごとに自作可能)
+- **formation template** (fleet 同梱の雛形) + **formation** (project が持つもの) の二段構成
 - **count なし** (必要に応じて leader が動的に並列起動を判断する)
 - **user_approval** を表現できる (人間の承認ポイントを stage 属性で明示)
 
@@ -378,16 +378,21 @@ formation YAML の必須・任意フィールドを以下に明記する。形�
 `validate()` はトップレベルの `name` / `stages` 必須チェックと、各 stage の `role` 必須チェックを行う。
 それ以上の形式検証 (`peer_review` の構造等) は orchestrator 側に委ねる。
 
-### 6.5 preset / custom
+### 6.5 formation template / formation
 
-- fleet 同梱 preset: `solo` / `pair_review` / `multi_stage` の 3 つ
-- 各 project は `.fleet-state/formations/` に自前 formation を定義可能 (preset を shadow)
-- タスク開始時に `fleet-agent start --formation <name> ...` で選択
+- **formation template** (`src/fleet/templates/`): fleet 同梱の雛形。`solo` / `pair_review` / `multi_stage` の 3 つ。直実行禁止。
+- **formation** (`<state>/formations/<name>.yaml`): project が持つ実体。runtime はこれだけを解決対象にする。
+- template は「こう書けば動く」という推奨デフォルト値を示す雛形。`fleet init --formation <name>` や `fleet formation init --from <name>` でコピーすると project の formation になり、以降は独立する (template との追従なし)。
+- コピー後は `agent:` 既定値の変更、`user_approval` の追加・削除など自由に変更してよい。
 
-**preset は template である。** 同梱 preset は「こう書けば動く」という推奨デフォルト値を示すだけであり、
-プロジェクト固有の制約には合わない場合がある。実プロジェクトは `.fleet-state/formations/` に同名ファイルを
-置くことで preset を上書きできるし、新しい名前で独自 formation を追加してもよい。
-`agent:` 既定値の変更、`user_approval` の追加・削除など、フィールドの自由な変更を推奨する。
+**`fleet-agent start --formation` の解決ルール:**
+
+| 状況 | 結果 |
+|---|---|
+| `--formation <name>` 明示 | `<state>/formations/<name>.yaml` をロード。不在はエラー (template fallback なし) |
+| 省略 + formations/ に 1 件 | その 1 件を自動採用 |
+| 省略 + formations/ が空 | `<state>/leader-session.json` の agent で 1-stage solo を即興合成 (`_leader_solo`) |
+| 省略 + formations/ に 2 件以上 | 曖昧エラー (`--formation <name>` を渡すよう案内) |
 
 ---
 

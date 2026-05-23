@@ -20,9 +20,12 @@ os.environ.setdefault("FLEET_NO_NOTIFY", "1")
 def make_project(fleet_home: Path, name: str, repo: Path) -> Path:
     """Register *name*→*repo* in *fleet_home* and create the state dir.
 
-    Returns the state_dir path.
+    Returns the state_dir path.  The formations/ directory is created and
+    populated with solo.yaml and pair_review.yaml so start tests work without
+    an explicit --formation flag or leader-session.json.
     """
-    from fleet import state
+    import shutil
+    from fleet import state, formation as formation_mod
 
     old = os.environ.get("FLEET_HOME")
     os.environ["FLEET_HOME"] = str(fleet_home)
@@ -30,6 +33,13 @@ def make_project(fleet_home: Path, name: str, repo: Path) -> Path:
         state_dir = state.project_state_dir(name)
         state.init_state(state_dir, name=name, repo=repo)
         state.register_project(name, repo)
+
+        formations_dir = state_dir / "formations"
+        formations_dir.mkdir(exist_ok=True)
+        src = formation_mod.TEMPLATES_DIR / "solo.yaml"
+        if src.is_file():
+            shutil.copyfile(src, formations_dir / "solo.yaml")
+
         return state_dir
     finally:
         if old is None:
