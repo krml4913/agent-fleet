@@ -50,11 +50,7 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     inbox_path = state_mod.task_dir(state_dir, task_id) / "inbox.md"
-    if not inbox_path.exists():
-        print(f"error: inbox.md not found for task-{task_id}", file=sys.stderr)
-        return 1
-
-    text = inbox_path.read_text(encoding="utf-8")
+    text = inbox_path.read_text(encoding="utf-8") if inbox_path.exists() else ""
     print(text, end="")
 
     watermark = extract_watermark(text)
