@@ -12,7 +12,7 @@ Communication:
                  When woken by a "[fleet] inbox に新着メッセージ" notification,
                  run `fleet-agent inbox-read` immediately.
   - outbox.md  — append reports here at milestones.
-  - `fleet-agent ask "<question>"`           — record needs_input + notify user.
+  - `fleet-agent ask "<question>"`           — record awaiting_orders + notify user.
   - `fleet-agent event emit <type> [...]`    — append an audit event.
 
 Rules:

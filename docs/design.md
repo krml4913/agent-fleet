@@ -106,7 +106,7 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
 
 ### 3.1 重要な思想
 
-- **leader は軽い**: 会話と `fleet-agent start` のみ、 状態 polling や needs_input 検知はしない
+- **leader は軽い**: 会話と `fleet-agent start` のみ、 状態 polling や awaiting_orders 検知はしない
 - **driver は直接 user に届く**: events.jsonl + 通知 + dashboard 経由、 leader を中継しない
 - **user は driver と直接話せる**: tmux attach すれば pane に介入できる (これが forge から継承する独自性)
 - **fleet 自体は開発フロー非依存**: worktree / PR / changelog 等は **plugin** で外付け
@@ -127,13 +127,13 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
   paste し、paste settle 後に Enter を送って submit してから終了する (paste するのは prompt 全文ではなく pointer 1 行)。
   submit 後は agent adapter ごとの working marker、または active prompt に pointer が残っていないことを
   `capture-pane` で確認し、pointer が未送信のまま残っていれば bounded retry で Enter を再送する。
-  interactive boot gate (update / trust / login など) を検出した場合は `needs_input` event と通知を一度出すが、
+  interactive boot gate (update / trust / login など) を検出した場合は `awaiting_orders` event と通知を一度出すが、
   polling は hard timeout まで続ける。人間が pane で gate を片付ければ次の ready 検出で自動 paste される。
   timeout では `error` event を出し task を `failed` にする。これは起動時の一回きりの handshake であり、
   heartbeat や継続監視には使わない。
 - 必要に応じてユーザーへの高レベル進捗報告
 
-leader は driver の状態を polling したり、 needs_input を検知したりは **しない**。 これらは構造 (events / dashboard / 通知) が user に直接届ける。
+leader は driver の状態を polling したり、 awaiting_orders を検知したりは **しない**。 これらは構造 (events / dashboard / 通知) が user に直接届ける。
 
 codex driver は初回起動時に directory trust prompt を出すため、 `fleet-agent start` は codex の初段 driver を起動する前に git repo root が `~/.codex/config.toml` 上で trusted かを read-only に確認する。 未信頼なら worktree / task state / prompt を作らず中断し、 user にその repo で一度 `codex` を起動して承認してから再実行するよう誘導する。 `fleet preflight` も同じ trust 状態を optional check として表示する。
 
@@ -348,7 +348,7 @@ stage を跨ぐ通常の advance は次 stage の driver を新しく launch す
 - `fleet-agent done --result approved|changes-requested` が呼ばれると `orchestrator.advance()` が次を判断する
 - approved: driver / reviewer の作業完了を受け、peer_review / user_approval の次状態を判断する。peer_review handoff は live pane があれば inbox 通知で起こし、なければその role を初回 launch する。user_approval が無ければ現 stage を done にして次 stage を launch (次がなければ task completed)
 - changes-requested: peer_review の phase に応じてループを回す。実装者に戻す場合は既存 implementer pane に inbox 通知を流し込み、relaunch しない
-- peer_review 上限 (3 回) 超過時は task.status を `needs_input` に変更してユーザーへ通知
+- peer_review 上限 (3 回) 超過時は task.status を `awaiting_orders` に変更してユーザーへ通知
 - `user_approval.status == asked` のゲートは leader が user の判断を受けて `fleet-agent approve <id>` / `fleet-agent reject <id>` で中継する
   - approve: `user_approval.status` を `approved` にし、stage 完了処理へ進む
   - reject: `user_approval.status` を `pending` に戻し、該当 stage を implementation に戻す。peer_review stage では既存 implementer pane を起こす
@@ -407,8 +407,8 @@ fleet-agent ask "<question>"
 ```
 
 これが呼ばれると:
-1. `events.jsonl` に `needs_input` event を emit
-2. `dashboard.md` を再生成 (needs_input マーク反映)
+1. `events.jsonl` に `awaiting_orders` event を emit
+2. `dashboard.md` を再生成 (awaiting_orders マーク反映)
 3. 通知発火 (macOS / slack)
 
 driver が pane に質問を書いただけでは **どこにも届かない**。 rule を守らないと user に届かない構造的圧力で、 prompt 命令だけより堅く担保する。
@@ -416,7 +416,7 @@ driver が pane に質問を書いただけでは **どこにも届かない**�
 ### 7.2 driver の固まり検知
 
 - 一定時間 driver pane に活動なし → heartbeat 機構が detect
-- fallback として 「needs input か?」 を driver に問い合わせる仕組みを別途置く (詳細は別途設計)
+- fallback として 「awaiting orders か?」 を driver に問い合わせる仕組みを別途置く (詳細は別途設計)
 
 ### 7.3 leader は介在しない
 

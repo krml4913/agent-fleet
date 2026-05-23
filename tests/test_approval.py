@@ -21,7 +21,7 @@ def _approval_task(task_id: str = "1") -> dict:
     return {
         "id": task_id,
         "title": "x",
-        "status": "needs_input",
+        "status": "awaiting_orders",
         "formation": "solo",
         "workflow": "bare",
         "current_stage": 0,

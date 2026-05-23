@@ -170,7 +170,7 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual([e["type"] for e in self._events()], ["prompt_delivered"])
 
-    def test_codex_blocking_update_menu_emits_needs_input(self) -> None:
+    def test_codex_blocking_update_menu_emits_awaiting_orders(self) -> None:
         panes = iter(
             [
                 "Update available\n› 1. Update now\n  2. Skip this version\n  3. Skip for now\n",
@@ -192,7 +192,7 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["needs_input", "prompt_delivered"],
+            ["awaiting_orders", "prompt_delivered"],
         )
 
     def test_codex_trust_menu_cursor_is_not_ready(self) -> None:
@@ -218,7 +218,7 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["needs_input", "prompt_delivered"],
+            ["awaiting_orders", "prompt_delivered"],
         )
 
     def test_claude_ready_marker_matches_current_tui_prompt(self) -> None:
@@ -255,10 +255,10 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["needs_input", "prompt_delivered"],
+            ["awaiting_orders", "prompt_delivered"],
         )
 
-    def test_gate_emits_needs_input_but_keeps_polling_until_ready(self) -> None:
+    def test_gate_emits_awaiting_orders_but_keeps_polling_until_ready(self) -> None:
         panes = iter(
             [
                 "Do you trust the contents of this directory?\n› 1. Yes, continue\n",
@@ -279,7 +279,7 @@ class PromptDelivererTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         events = self._events()
-        self.assertEqual([e["type"] for e in events], ["needs_input", "prompt_delivered"])
+        self.assertEqual([e["type"] for e in events], ["awaiting_orders", "prompt_delivered"])
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "running")
         self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text())
 

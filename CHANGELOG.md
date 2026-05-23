@@ -5,6 +5,11 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### awaiting_orders rename (Issue #108)
+
+- Renamed the user-input wait status/event to `awaiting_orders` across state transitions, driver prompts, CLI output, dashboard rendering, docs, and tests.
+- Updated the related user-facing callouts to "awaiting orders".
+
 ### formation template + `fleet init` UX (Issue #105)
 
 - formation: `src/fleet/presets/` → `src/fleet/templates/` に移動。"preset formation" の用語を廃止し、fleet 同梱の雛形は "formation template"、project が持つ実体は "formation" と呼び分ける。
@@ -281,12 +286,12 @@ signal — without forge's 6-feature lifecycle daemon.
     events.jsonl. Append-only audit log means latest entry wins
     naturally; no extra state needed.
 - `fleet.dashboard.render`:
-  - "⚠ Needs your input" highlight section above the task table when
-    any task has status `needs_input`.
+  - "⚠ Awaiting orders" highlight section above the task table when
+    any task has status `awaiting_orders`.
   - Task table gains **Workflow** + **Last seen** columns.
   - "Recent events (last 10)" section at the bottom.
   - Workflow shown in the header block too.
-- `fleet status` — same enrichment (needs-input call-out + workflow +
+- `fleet status` — same enrichment (awaiting-orders call-out + workflow +
   "seen" age + nicer event formatting).
 - `driver_prompt`: rule added — "between long tool calls, emit a
   heartbeat (`fleet-agent event emit heartbeat`)". Still under the 40-line
@@ -375,8 +380,8 @@ Drivers can now report up to the user without going through the leader
 - `fleet.notify` — best-effort macOS Notification Center + Slack webhook
   dispatch, configured per-project via `.fleet-state/notify.yaml`.
   Failures warn-only, never raise.
-- `fleet ask "<question>"` — record `needs_input` event, flip task status
-  to `needs_input`, append to `questions.md`, fire notification.
+- `fleet ask "<question>"` — record `awaiting_orders` event, flip task status
+  to `awaiting_orders`, append to `questions.md`, fire notification.
   Non-blocking; the driver re-checks `inbox.md` on its own cadence.
 - `fleet event emit <type> [--field K=V ...]` — append arbitrary audit
   events to `events.jsonl` tagged with the current task id.

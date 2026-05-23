@@ -79,17 +79,17 @@ def run(args: argparse.Namespace) -> int:
         )
     )
 
-    needs_input = [t for t in tasks if t.get("status") == "needs_input"]
-    if needs_input:
+    awaiting_orders = [t for t in tasks if t.get("status") == "awaiting_orders"]
+    if awaiting_orders:
         print()
         print(
             _style(
-                f"⚠ needs your input  {len(needs_input)}",
+                f"⚠ awaiting orders  {len(awaiting_orders)}",
                 _RED + _BOLD,
                 use_color,
             )
         )
-        for t in needs_input:
+        for t in awaiting_orders:
             print(f"  task-{t.get('id', '?')}  {t.get('title', '-')}")
 
     print()
@@ -157,7 +157,7 @@ def run(args: argparse.Namespace) -> int:
 
     print()
     legend = []
-    for status in ("done", "running", "needs_input"):
+    for status in ("done", "running", "awaiting_orders"):
         legend.append(f"{_style('●', _status_color(status), use_color)} {status}")
     print("  ".join(legend))
 
@@ -195,12 +195,12 @@ def _run_all(args: argparse.Namespace) -> int:
 
         tasks = state_mod.list_tasks(state_dir)
         by_status: dict[str, int] = {}
-        needs_input_tasks = []
+        awaiting_orders_tasks = []
         for t in tasks:
             s = t.get("status", "?")
             by_status[s] = by_status.get(s, 0) + 1
-            if s == "needs_input":
-                needs_input_tasks.append(t)
+            if s == "awaiting_orders":
+                awaiting_orders_tasks.append(t)
 
         task_summary = "  ".join(
             f"{count} {_style('●', _status_color(st), use_color)} {st}"
@@ -208,10 +208,10 @@ def _run_all(args: argparse.Namespace) -> int:
         ) if by_status else "(no tasks)"
         print(f"  tasks: {task_summary}")
 
-        if needs_input_tasks:
+        if awaiting_orders_tasks:
             print(
-                f"  {_style('⚠ needs input', _RED + _BOLD, use_color)}: "
-                + ", ".join(f"task-{t.get('id','?')}" for t in needs_input_tasks)
+                f"  {_style('⚠ awaiting orders', _RED + _BOLD, use_color)}: "
+                + ", ".join(f"task-{t.get('id','?')}" for t in awaiting_orders_tasks)
             )
 
         print()
@@ -230,7 +230,7 @@ def _status_color(status: str) -> str:
         return _GREEN
     if status in {"running", "spawning"}:
         return _YELLOW
-    if status in {"needs_input", "failed", "changes-requested"}:
+    if status in {"awaiting_orders", "failed", "changes-requested"}:
         return _RED
     return ""
 
