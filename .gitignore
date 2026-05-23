@@ -11,7 +11,6 @@ __pycache__/
 
 # fleet state when dogfooding agent-fleet itself (central layout, not hidden)
 fleet-state/
-fleet-state/projects/*/leader-session.json
 
 # editor / OS
 .DS_Store

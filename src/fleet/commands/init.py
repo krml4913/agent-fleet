@@ -66,7 +66,7 @@ def _flatten_formations(raw: list[str]) -> list[str]:
     return seen
 
 
-def _interactive_pick(state_dir: Path) -> list[str] | None:
+def _interactive_pick() -> list[str] | None:
     """Run the interactive formation template picker.
 
     Returns a list of selected template names, or None if aborted.
@@ -127,7 +127,11 @@ def _interactive_pick(state_dir: Path) -> list[str] | None:
                 unknown.append(part)
 
         if unknown:
-            print(f"  unknown: {', '.join(unknown)}. Try again ({2 - attempt} left).")
+            remaining = 2 - attempt
+            if remaining > 0:
+                print(f"  unknown: {', '.join(unknown)}. Try again ({remaining} left).")
+            else:
+                print(f"  unknown: {', '.join(unknown)}. No retries left.")
             continue
 
         break
@@ -225,7 +229,7 @@ def run(args: argparse.Namespace) -> int:
     if interactive:
         print(f"Initializing project '{name}' at {repo} ...")
         print(f"Registered. State dir: {state_dir}")
-        picked = _interactive_pick(state_dir)
+        picked = _interactive_pick()
         if picked is None:
             # Aborted — project is already registered; keep it but warn
             return 1
