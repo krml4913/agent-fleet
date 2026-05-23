@@ -12,10 +12,12 @@ user's conversational counterpart; per §4.1 it only does dialogue and
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import agents as agents_mod
@@ -124,6 +126,15 @@ def run(args: argparse.Namespace) -> int:
     except tmux_mod.TmuxError as e:
         print(f"error: tmux setup failed: {e}", file=sys.stderr)
         return 1
+
+    leader_session_path = state_dir / "leader-session.json"
+    leader_session_path.write_text(
+        json.dumps({
+            "agent": args.agent,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2),
+        encoding="utf-8",
+    )
 
     if args.auto_paste:
         prompt_text = lp.render(project_name=name, state_dir=state_dir)

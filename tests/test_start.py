@@ -222,7 +222,12 @@ class StartTests(unittest.TestCase):
         run_hook.assert_not_called()
 
     def test_formation_pair_review_starts_first_stage(self) -> None:
+        import shutil
+        from fleet import formation as formation_mod
         from fleet.commands import start
+
+        src = formation_mod.TEMPLATES_DIR / "pair_review.yaml"
+        shutil.copyfile(src, self.state_dir / "formations" / "pair_review.yaml")
 
         args = argparse.Namespace(
             project="demo",

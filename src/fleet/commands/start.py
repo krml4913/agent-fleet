@@ -171,8 +171,11 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--formation",
-        default="solo",
-        help="Formation name (preset or custom). Default: solo.",
+        default=None,
+        help=(
+            "Formation name. Required unless <state>/formations/ is empty, "
+            "in which case fleet falls back to the leader's agent (1-stage solo)."
+        ),
     )
     p.add_argument(
         "--agent",
@@ -261,9 +264,12 @@ def run(args: argparse.Namespace) -> int:
 
     # Load and validate formation
     try:
-        formation_data = formation_mod.load(args.formation, state_dir=state_dir)
+        formation_name, formation_data = formation_mod.resolve_formation(
+            state_dir=state_dir,
+            requested=args.formation,
+        )
         formation_mod.validate(formation_data)
-    except (FileNotFoundError, ValueError) as e:
+    except (formation_mod.ResolutionError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
@@ -319,7 +325,7 @@ def run(args: argparse.Namespace) -> int:
     ctx: dict = {
         "state_dir": state_dir,
         "task_id": args.task_id,
-        "formation": args.formation,
+        "formation": formation_name,
         "role": role_name,
         "agent": agent_spec,
         "description": description,
@@ -338,7 +344,7 @@ def run(args: argparse.Namespace) -> int:
         "title": title,
         "description": description,
         "status": "spawning",
-        "formation": args.formation,
+        "formation": formation_name,
         "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
         "current_stage": current_stage_idx,
         "stages": expanded_stages,
@@ -352,7 +358,7 @@ def run(args: argparse.Namespace) -> int:
     prompt = dp.render(
         task_id=args.task_id,
         description=description,
-        formation_name=args.formation,
+        formation_name=formation_name,
         role=role_name,
         agent=agent_spec,
         workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),
@@ -364,7 +370,7 @@ def run(args: argparse.Namespace) -> int:
         state_dir / "events.jsonl",
         "start",
         task_id=args.task_id,
-        formation=args.formation,
+        formation=formation_name,
         role=role_name,
         agent=agent_spec,
         description=description,
@@ -376,7 +382,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"  driver-prompt:  {task_dir_path / 'driver-prompt.md'}")
     print(f"  agent:          {agent_spec}")
     print(f"  role:           {role_name}")
-    print(f"  formation:       {args.formation}")
+    print(f"  formation:       {formation_name}")
 
     if args.dry_run:
         print("dry-run: tmux step skipped.")
