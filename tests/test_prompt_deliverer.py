@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import prompt_deliverer, prompt_pointer, state  # noqa: E402
+from fleet.events import append_event  # noqa: E402
 
 
 class PromptDelivererTests(unittest.TestCase):
@@ -65,12 +66,20 @@ class PromptDelivererTests(unittest.TestCase):
         path = self.state_dir / "events.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines() if line]
 
+    def _ack_on_enter(self, *_args, **_kwargs) -> None:
+        append_event(
+            self.state_dir / "events.jsonl",
+            "inbox_seen",
+            task_id=self.task_id,
+            watermark=None,
+        )
+
     def test_ready_marker_pastes_pointer_and_emits_event(self) -> None:
         with (
             patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
             patch("fleet.prompt_deliverer.tmux.load_buffer") as load_buffer,
             patch("fleet.prompt_deliverer.tmux.paste_buffer") as paste_buffer,
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
         ):
             result = self._deliver()
 
@@ -89,62 +98,103 @@ class PromptDelivererTests(unittest.TestCase):
         send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
-    def test_codex_retries_enter_when_pointer_remains_at_prompt(self) -> None:
-        pointer = prompt_pointer.pointer_text(self.prompt_path)
-        panes = iter(["ready\n›\n", f"› {pointer}\n", "Working\n"])
+    def test_does_not_retry_enter_while_waiting_for_ack(self) -> None:
         with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
         ):
             result = self._deliver()
 
         self.assertEqual(result, 0)
-        self.assertEqual(send_keys.call_count, 2)
+        self.assertEqual(send_keys.call_count, 1)
         send_keys.assert_called_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
-    def test_claude_retries_enter_when_pointer_remains_at_prompt(self) -> None:
-        pointer = prompt_pointer.pointer_text(self.prompt_path)
-        panes = iter(['status\n❯ Try "help"\n', f"❯ {pointer}\n", "✻ Thinking…\n"])
+    def test_ack_from_other_task_does_not_confirm_delivery(self) -> None:
+        def ack_other_task(*_args, **_kwargs) -> None:
+            append_event(
+                self.state_dir / "events.jsonl",
+                "inbox_seen",
+                task_id="2",
+                watermark=None,
+            )
+
         with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=ack_other_task) as send_keys,
         ):
-            result = self._deliver(agent="claude:opus")
-
-        self.assertEqual(result, 0)
-        self.assertEqual(send_keys.call_count, 2)
-        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
-
-    def test_unsubmitted_pointer_after_retries_marks_failed(self) -> None:
-        pointer = prompt_pointer.pointer_text(self.prompt_path)
-        panes = iter(["ready\n›\n"] + [f"› {pointer}\n"] * prompt_deliverer.SUBMIT_RETRY_ATTEMPTS)
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
-        ):
-            result = self._deliver()
+            result = self._deliver(timeout=0.02)
 
         self.assertEqual(result, 1)
-        self.assertEqual(send_keys.call_count, prompt_deliverer.SUBMIT_RETRY_ATTEMPTS)
+        self.assertEqual(send_keys.call_count, 1)
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
         self.assertEqual(self._events()[-1]["type"], "error")
-        self.assertIn("could not confirm submit", self._events()[-1]["message"])
+        self.assertIn("inbox_seen ack", self._events()[-1]["message"])
+
+    def test_missing_ack_marks_failed(self) -> None:
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+        ):
+            result = self._deliver(timeout=0.02)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(send_keys.call_count, 1)
+        self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
+        self.assertEqual(self._events()[-1]["type"], "error")
+        self.assertIn("inbox_seen ack", self._events()[-1]["message"])
+
+    def test_ack_checkpoint_uses_current_task_timestamp_only(self) -> None:
+        events_path = self.state_dir / "events.jsonl"
+        events_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "ts": "2099-01-01T00:00:00Z",
+                            "type": "heartbeat",
+                            "task_id": "2",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "ts": "2026-05-20T10:00:00Z",
+                            "type": "heartbeat",
+                            "task_id": self.task_id,
+                        }
+                    ),
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        checkpoint = prompt_deliverer._event_checkpoint(events_path, self.task_id)
+        with events_path.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": "2026-05-20T10:01:00Z",
+                        "type": "inbox_seen",
+                        "task_id": self.task_id,
+                    }
+                )
+                + "\n"
+            )
+
+        matched, _offset = prompt_deliverer._scan_for_inbox_seen_ack(
+            events_path,
+            self.task_id,
+            checkpoint,
+            checkpoint.offset,
+        )
+
+        self.assertTrue(matched)
 
     def test_codex_ready_with_update_banner_is_not_a_gate(self) -> None:
         pane = """
@@ -163,19 +213,18 @@ class PromptDelivererTests(unittest.TestCase):
             patch("fleet.prompt_deliverer.tmux.capture_pane", return_value=pane),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver()
 
         self.assertEqual(result, 0)
-        self.assertEqual([e["type"] for e in self._events()], ["prompt_delivered"])
+        self.assertEqual([e["type"] for e in self._events()], ["inbox_seen", "prompt_delivered"])
 
     def test_codex_blocking_update_menu_emits_awaiting_orders(self) -> None:
         panes = iter(
             [
                 "Update available\n› 1. Update now\n  2. Skip this version\n  3. Skip for now\n",
                 "›\n",
-                "Working\n",
             ]
         )
         with (
@@ -185,14 +234,14 @@ class PromptDelivererTests(unittest.TestCase):
             ),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver()
 
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["awaiting_orders", "prompt_delivered"],
+            ["awaiting_orders", "inbox_seen", "prompt_delivered"],
         )
 
     def test_codex_trust_menu_cursor_is_not_ready(self) -> None:
@@ -203,7 +252,7 @@ class PromptDelivererTests(unittest.TestCase):
   2. No, quit
   Press enter to continue
 """
-        panes = iter([pane, "› Run /review on my current changes\n", "Working\n"])
+        panes = iter([pane, "› Run /review on my current changes\n"])
         with (
             patch(
                 "fleet.prompt_deliverer.tmux.capture_pane",
@@ -211,14 +260,14 @@ class PromptDelivererTests(unittest.TestCase):
             ),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver()
 
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["awaiting_orders", "prompt_delivered"],
+            ["awaiting_orders", "inbox_seen", "prompt_delivered"],
         )
 
     def test_claude_ready_marker_matches_current_tui_prompt(self) -> None:
@@ -226,7 +275,7 @@ class PromptDelivererTests(unittest.TestCase):
             patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver(agent="claude:opus")
 
@@ -238,7 +287,6 @@ class PromptDelivererTests(unittest.TestCase):
             [
                 "Do you trust this workspace?\n❯ 1. Yes, proceed\n  2. No\n",
                 'status\n❯ Try "help"\n',
-                "✻ Thinking…\n",
             ]
         )
         with (
@@ -248,14 +296,14 @@ class PromptDelivererTests(unittest.TestCase):
             ),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver(agent="claude:opus")
 
         self.assertEqual(result, 0)
         self.assertEqual(
             [e["type"] for e in self._events()],
-            ["awaiting_orders", "prompt_delivered"],
+            ["awaiting_orders", "inbox_seen", "prompt_delivered"],
         )
 
     def test_gate_emits_awaiting_orders_but_keeps_polling_until_ready(self) -> None:
@@ -263,7 +311,6 @@ class PromptDelivererTests(unittest.TestCase):
             [
                 "Do you trust the contents of this directory?\n› 1. Yes, continue\n",
                 "all set\n›\n",
-                "Working\n",
             ]
         )
         with (
@@ -273,13 +320,13 @@ class PromptDelivererTests(unittest.TestCase):
             ),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
             patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
         ):
             result = self._deliver()
 
         self.assertEqual(result, 0)
         events = self._events()
-        self.assertEqual([e["type"] for e in events], ["awaiting_orders", "prompt_delivered"])
+        self.assertEqual([e["type"] for e in events], ["awaiting_orders", "inbox_seen", "prompt_delivered"])
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "running")
         self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text())
 

@@ -5,6 +5,7 @@ Environment:
   - FLEET_TASK_ID and FLEET_STATE_DIR are pre-set in this pane.
   - `fleet-agent ask` / `fleet-agent event emit` / `fleet-agent done` resolve
     the task automatically from those — no --task-id needed.
+  - Before any other task work, run `fleet-agent inbox-read` to ack prompt delivery and load queued instructions.
 
 Communication:
   - inbox.md   — instructions / turn handoffs; read with `fleet-agent inbox-read`

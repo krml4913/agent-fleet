@@ -125,8 +125,8 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
   deliverer は tmux `capture-pane` を短い間隔で polling し、agent adapter ごとの ready 正規表現
   (claude / codex 各 1 本) に一致したら `driver-prompt.md` を指す pointer を tmux buffer 経由で
   paste し、paste settle 後に Enter を送って submit してから終了する (paste するのは prompt 全文ではなく pointer 1 行)。
-  submit 後は agent adapter ごとの working marker、または active prompt に pointer が残っていないことを
-  `capture-pane` で確認し、pointer が未送信のまま残っていれば bounded retry で Enter を再送する。
+  submit 後は pane の文字面を解釈せず、driver-prompt 冒頭の `fleet-agent inbox-read` 実行によって
+  発火する task-scoped `inbox_seen` event を待って配達完了 ack とする。
   interactive boot gate (update / trust / login など) を検出した場合は `awaiting_orders` event と通知を一度出すが、
   polling は hard timeout まで続ける。人間が pane で gate を片付ければ次の ready 検出で自動 paste される。
   timeout では `error` event を出し task を `failed` にする。これは起動時の一回きりの handshake であり、

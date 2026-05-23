@@ -5,6 +5,11 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ## [Unreleased]
 
+### prompt delivery ack (Issue #107)
+
+- Replaced pane-visual submit confirmation with task-scoped `inbox_seen` ack from `fleet-agent inbox-read`.
+- Driver prompts now instruct drivers to run `fleet-agent inbox-read` before other task work, and missing `inbox.md` is treated as an empty inbox for first-boot ack.
+
 ### awaiting_orders rename (Issue #108)
 
 - Renamed the user-input wait status/event to `awaiting_orders` across state transitions, driver prompts, CLI output, dashboard rendering, docs, and tests.

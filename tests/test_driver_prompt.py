@@ -63,6 +63,16 @@ class DriverPromptTests(unittest.TestCase):
         )
         self.assertIn("fleet-agent ask", text)
 
+    def test_instructs_initial_inbox_read(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            formation_name="solo",
+            role="driver",
+            agent="claude:sonnet",
+        )
+        self.assertIn("Before any other task work, run `fleet-agent inbox-read`", text)
+
     def test_git_worktree_fragment_adds_git_workflow(self) -> None:
         text = driver_prompt.render(
             task_id="1",

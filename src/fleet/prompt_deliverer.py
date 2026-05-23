@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -17,16 +18,12 @@ from .events import append_event, utcnow_iso
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 PASTE_SETTLE_SECONDS = 0.25
-SUBMIT_RETRY_ATTEMPTS = 3
-SUBMIT_RETRY_INTERVAL_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
 class PromptAdapter:
     ready: re.Pattern[str]
     gate: re.Pattern[str]
-    active_prompt: re.Pattern[str]
-    working: re.Pattern[str]
 
 
 ADAPTERS: dict[str, PromptAdapter] = {
@@ -39,14 +36,6 @@ ADAPTERS: dict[str, PromptAdapter] = {
             r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
             r"trust (?:this )?(?:folder|directory|workspace)|do you trust|continue\?)"
         ),
-        active_prompt=re.compile(r"(?m)^\s*❯(?!\s*\d+\.)\s*(?P<input>.*)$"),
-        working=re.compile(
-            r"(?im)(?:"
-            r"^\s*(?:✻|✽|✢|✶|⏺|●|•).*(?:thinking|working|running)|"
-            r"\b(?:thinking|working|running)\b|"
-            r"\b(?:esc|ctrl-c)\s+to\s+interrupt\b"
-            r")"
-        ),
     ),
     "codex": PromptAdapter(
         ready=re.compile(r"(?m)^\s*›(?!\s*\d+\.)"),
@@ -57,16 +46,14 @@ ADAPTERS: dict[str, PromptAdapter] = {
             r"do you trust the contents of this directory|yes,\s*continue|"
             r"sign in|login|log in|authentication|authenticate|api key)"
         ),
-        active_prompt=re.compile(r"(?m)^\s*›(?!\s*\d+\.)\s*(?P<input>.*)$"),
-        working=re.compile(
-            r"(?im)(?:"
-            r"^\s*(?:⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏|●|•).*(?:working|thinking|running)|"
-            r"\b(?:working|thinking|running)\b|"
-            r"\b(?:esc|ctrl-c)\s+to\s+interrupt\b"
-            r")"
-        ),
     ),
 }
+
+
+@dataclass(frozen=True)
+class EventCheckpoint:
+    ts: str
+    offset: int
 
 
 def start_detached(
@@ -173,22 +160,26 @@ def deliver(
                 # Paste a short pointer to the prompt file, not the prompt
                 # body — pasting the full body trips agent-CLI input quirks
                 # (mixed-character corruption, see Issue #90).
+                checkpoint = _event_checkpoint(state_dir / "events.jsonl", task_id)
                 prompt_pointer.load_pointer_buffer(tmux, buffer_name, prompt_path)
                 tmux.paste_buffer(session, window, buffer_name)
-                submitted = _submit_after_paste(
+                acknowledged = _submit_and_wait_for_inbox_seen(
+                    state_dir=state_dir,
+                    task_id=task_id,
                     session=session,
                     window=window,
-                    prompt_path=prompt_path,
-                    adapter=adapter,
+                    checkpoint=checkpoint,
+                    deadline=deadline,
+                    poll_interval=poll_interval,
                 )
             except tmux.TmuxError as e:
                 _fail(state_dir, task_id, f"prompt deliverer cannot paste prompt: {e}", window)
                 return 1
-            if not submitted:
+            if not acknowledged:
                 _fail(
                     state_dir,
                     task_id,
-                    "prompt deliverer pasted prompt but could not confirm submit",
+                    "prompt deliverer pasted prompt but did not receive inbox_seen ack",
                     window,
                 )
                 return 1
@@ -278,48 +269,79 @@ def _mark_running_if_needed(state_dir: Path, task_id: str) -> None:
         state_mod.save_task(state_dir, task_id, task)
 
 
-def _submit_after_paste(
+def _submit_and_wait_for_inbox_seen(
     *,
+    state_dir: Path,
+    task_id: str,
     session: str,
     window: str,
-    prompt_path: Path,
-    adapter: PromptAdapter,
+    checkpoint: EventCheckpoint,
+    deadline: float,
+    poll_interval: float,
 ) -> bool:
-    """Press Enter after paste settles, retrying only while the pointer is still input."""
-    pointer = prompt_pointer.pointer_text(prompt_path)
+    """Press Enter after paste settles, then wait for the driver inbox-read ack."""
     time.sleep(PASTE_SETTLE_SECONDS)
+    tmux.send_keys(session, window, "", enter=True)
 
-    for attempt in range(SUBMIT_RETRY_ATTEMPTS):
-        tmux.send_keys(session, window, "", enter=True)
-        time.sleep(SUBMIT_RETRY_INTERVAL_SECONDS)
-        pane = tmux.capture_pane(session, window)
-        if _pane_shows_submitted(pane, adapter, pointer):
+    events_path = state_dir / "events.jsonl"
+    offset = checkpoint.offset
+    while time.monotonic() <= deadline:
+        matched, offset = _scan_for_inbox_seen_ack(events_path, task_id, checkpoint, offset)
+        if matched:
             return True
-        if not _pane_shows_unsubmitted_prompt(pane, adapter, pointer):
-            return True
+        time.sleep(max(0.1, poll_interval))
 
     return False
 
 
-def _pane_shows_submitted(pane: str, adapter: PromptAdapter, pointer: str) -> bool:
-    """Return true when the agent appears to have accepted the pasted prompt."""
-    return bool(adapter.working.search(pane)) or not _pane_shows_unsubmitted_prompt(
-        pane, adapter, pointer
-    )
+def _event_checkpoint(events_path: Path, task_id: str) -> EventCheckpoint:
+    """Return this task's latest event timestamp and the log offset before paste."""
+    if not events_path.exists():
+        return EventCheckpoint(ts="", offset=0)
+
+    latest_ts = ""
+    offset = 0
+    with events_path.open("rb") as f:
+        for raw in f:
+            offset += len(raw)
+            try:
+                event = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if event.get("task_id") == task_id:
+                latest_ts = max(latest_ts, str(event.get("ts") or ""))
+    return EventCheckpoint(ts=latest_ts, offset=offset)
 
 
-def _pane_shows_unsubmitted_prompt(
-    pane: str,
-    adapter: PromptAdapter,
-    pointer: str,
-) -> bool:
-    pointer_start = pointer[: min(48, len(pointer))]
-    prompt_path_text = pointer.rsplit(": ", 1)[-1]
-    for match in adapter.active_prompt.finditer(pane):
-        prompt_input = match.group("input")
-        if pointer_start in prompt_input or prompt_path_text in prompt_input:
-            return True
-    return False
+def _scan_for_inbox_seen_ack(
+    events_path: Path,
+    task_id: str,
+    checkpoint: EventCheckpoint,
+    offset: int,
+) -> tuple[bool, int]:
+    if not events_path.exists():
+        return False, 0
+
+    with events_path.open("rb") as f:
+        try:
+            f.seek(offset)
+        except OSError:
+            f.seek(0)
+        new_offset = f.tell()
+        for raw in f:
+            new_offset += len(raw)
+            try:
+                event = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                continue
+            ts = str(event.get("ts") or "")
+            if (
+                event.get("type") == "inbox_seen"
+                and event.get("task_id") == task_id
+                and (ts > checkpoint.ts or (ts == checkpoint.ts and new_offset > checkpoint.offset))
+            ):
+                return True, new_offset
+    return False, new_offset
 
 
 def _fleet_clone_root() -> Path:

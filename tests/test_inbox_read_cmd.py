@@ -122,15 +122,18 @@ class InboxReadCmdTests(unittest.TestCase):
         seen = [e for e in events if e["type"] == "inbox_seen"]
         self.assertIsNone(seen[-1]["watermark"])
 
-    def test_missing_inbox_returns_error(self) -> None:
+    def test_missing_inbox_is_empty_ack(self) -> None:
         (self.task_dir / "inbox.md").unlink(missing_ok=True)
         r = run_fleet_agent(
             "inbox-read",
             env={"FLEET_TASK_ID": "1", "FLEET_STATE_DIR": str(self.state_dir)},
             cwd=self.project,
         )
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("not found", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "")
+        seen = [e for e in self._events() if e["type"] == "inbox_seen"]
+        self.assertTrue(seen, "inbox_seen event not emitted")
+        self.assertIsNone(seen[-1]["watermark"])
 
     def test_no_task_id_returns_error(self) -> None:
         r = run_fleet_agent(
