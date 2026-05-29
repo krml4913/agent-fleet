@@ -125,5 +125,116 @@ class DoneTests(unittest.TestCase):
         self.assertNotEqual(task["status"], "completed")
 
 
+class DoneNotifyTests(unittest.TestCase):
+    """notify.send の title / message が status ごとに正しく出し分けられるかを検証する。"""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo", repo=self.project)
+        (self.state_dir / "notify.yaml").write_text(
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run_done(self, task_id: str, result: str = "approved") -> tuple[int, str, str]:
+        """done.run を呼び出し (notify.send をモック)。done.py が送った最後の send 引数を返す。"""
+        from fleet.commands import done as done_mod
+
+        sent: list[dict] = []
+
+        def _fake_send(sd, *, title, message):  # noqa: ANN001
+            sent.append({"title": title, "message": message})
+
+        with (
+            unittest.mock.patch("fleet.orchestrator._launch_driver_for_stage"),
+            unittest.mock.patch(
+                "fleet.commands.done.task_context.resolve",
+                return_value=(self.state_dir, task_id),
+            ),
+            unittest.mock.patch("fleet.commands.done.notify.send", side_effect=_fake_send),
+        ):
+            ret = done_mod.run(argparse.Namespace(task_id=task_id, result=result))
+
+        # done.py の notify.send は最後に呼ばれる (orchestrator 内部の send より後)
+        return ret, sent[-1]["title"] if sent else "", sent[-1]["message"] if sent else ""
+
+    def test_notify_completed(self) -> None:
+        """単一 stage タスクが完了したとき 'completed' 文言が送られる。"""
+        state.save_task(self.state_dir, "c1", {
+            "id": "c1", "title": "x", "status": "running",
+            "formation": "solo", "workspace": "none",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
+        })
+        task_dir = self.state_dir / "tasks" / "task-c1"
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        ret, title, message = self._run_done("c1")
+
+        self.assertEqual(ret, 0)
+        self.assertIn("完了", message)
+        self.assertIn("全 stage 終了", message)
+        self.assertIn("c1", message)
+
+    def test_notify_awaiting_orders(self) -> None:
+        """user_approval ゲートで止まったとき 'awaiting_orders' 文言が送られる。"""
+        state.save_task(self.state_dir, "ua1", {
+            "id": "ua1", "title": "x", "status": "running",
+            "formation": "solo", "workspace": "none",
+            "current_stage": 0,
+            "stages": [
+                {
+                    "role": "driver", "agent": "claude:sonnet", "status": "running",
+                    "user_approval": {"required": True, "status": "pending"},
+                },
+            ],
+        })
+        task_dir = self.state_dir / "tasks" / "task-ua1"
+        task_dir.mkdir(parents=True, exist_ok=True)
+
+        ret, title, message = self._run_done("ua1")
+
+        self.assertEqual(ret, 0)
+        task = state.load_task(self.state_dir, "ua1")
+        self.assertEqual(task["status"], "awaiting_orders")
+        self.assertIn("承認待ち", message)
+        self.assertIn("ua1", message)
+        self.assertIn("driver", message)
+        # stage 1/1 の形式
+        self.assertIn("1/1", message)
+
+    def test_notify_next_stage_running(self) -> None:
+        """次 stage に進んだとき 'stage N done → 次 stage (role) 開始' 文言が送られる。"""
+        state.save_task(self.state_dir, "ms1", {
+            "id": "ms1", "title": "x", "status": "running",
+            "formation": "pair_review", "workspace": "none",
+            "current_stage": 0,
+            "stages": [
+                {"role": "implementer", "agent": "claude:sonnet", "status": "running"},
+                {"role": "reviewer", "agent": "claude:opus", "status": "pending"},
+            ],
+        })
+        task_dir = self.state_dir / "tasks" / "task-ms1"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "driver-prompt.md").write_text("test prompt")
+        (task_dir / "inbox.md").write_text("")
+        (task_dir / "outbox.md").write_text("")
+
+        ret, title, message = self._run_done("ms1")
+
+        self.assertEqual(ret, 0)
+        task = state.load_task(self.state_dir, "ms1")
+        self.assertEqual(task["status"], "running")
+        self.assertIn("ms1", message)
+        self.assertIn("stage 1 done", message)
+        self.assertIn("reviewer", message)
+        self.assertIn("開始", message)
+
+
 if __name__ == "__main__":
     unittest.main()
