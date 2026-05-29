@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from fleet import driver_prompt  # noqa: E402
-from fleet.plugins import git_worktree  # noqa: E402
 
 
 class DriverPromptTests(unittest.TestCase):
@@ -20,13 +19,11 @@ class DriverPromptTests(unittest.TestCase):
             formation_name="solo",
             role="driver",
             agent="claude:sonnet",
-            workflow_fragment="Workflow-specific instructions.",
         )
         self.assertIn("task id:   task-42", text)
         self.assertIn("formation:  solo", text)
         self.assertIn("role:      driver", text)
         self.assertIn("agent:     claude:sonnet", text)
-        self.assertIn("Workflow-specific instructions.", text)
         self.assertIn("Implement the foo feature.", text)
 
     def test_base_prompt_does_not_include_git_workflow(self) -> None:
@@ -73,18 +70,6 @@ class DriverPromptTests(unittest.TestCase):
         )
         self.assertIn("Before any other task work, run `fleet-agent inbox-read`", text)
 
-    def test_git_worktree_fragment_adds_git_workflow(self) -> None:
-        text = driver_prompt.render(
-            task_id="1",
-            description="x",
-            formation_name="solo",
-            role="driver",
-            agent="claude:sonnet",
-            workflow_fragment=git_worktree.DRIVER_PROMPT_FRAGMENT,
-        )
-        self.assertIn("Git workflow", text)
-        self.assertIn("gh pr create", text)
-
     def test_includes_role_fragment_when_role_file_exists(self) -> None:
         text = driver_prompt.render(
             task_id="1",
@@ -108,21 +93,18 @@ class DriverPromptTests(unittest.TestCase):
         self.assertNotIn("あなたは査読者", text)
         self.assertNotIn("あなたは設計者", text)
 
-    def test_composes_base_workflow_role_then_description(self) -> None:
+    def test_composes_base_role_then_description(self) -> None:
         text = driver_prompt.render(
             task_id="1",
             description="Task description sentinel.",
             formation_name="pair_review",
             role="implementer",
             agent="claude:sonnet",
-            workflow_fragment="Workflow sentinel.",
         )
         base_idx = text.index("You are a fleet driver")
-        workflow_idx = text.index("Workflow sentinel.")
         role_idx = text.index("あなたは実装者")
         description_idx = text.index("Task description sentinel.")
-        self.assertLess(base_idx, workflow_idx)
-        self.assertLess(workflow_idx, role_idx)
+        self.assertLess(base_idx, role_idx)
         self.assertLess(role_idx, description_idx)
 
 

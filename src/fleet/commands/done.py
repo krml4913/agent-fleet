@@ -4,7 +4,7 @@ The stage transition logic lives in :mod:`fleet.orchestrator`; this command
 is intentionally thin: resolve context → call orchestrator → emit event.
 
 Real cleanup (worktree removal, branch deletion, tmux window kill) belongs
-in a workflow plugin (stage 5).
+in ``fleet-agent cleanup``.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import sys
 
 from .. import notify
 from .. import orchestrator as orch
-from .. import plugins as plugins_mod
 from .. import state as state_mod
 from .. import task_context
 from ..events import append_event
@@ -28,8 +27,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "With --result=approved (default) the next stage is launched or "
             "the task is completed. With --result=changes-requested the stage "
             "result is recorded for the stage-5 peer_review loop. "
-            "Cleanup (worktree / branch / tmux window) is delegated to a "
-            "workflow plugin."
+            "Cleanup (worktree / branch / tmux window) is done via fleet-agent cleanup."
         ),
     )
     p.add_argument(
@@ -62,19 +60,6 @@ def run(args: argparse.Namespace) -> int:
 
     result = getattr(args, "result", "approved") or "approved"
     orch.advance(state_dir, task_id, task, result=result)
-
-    task = state_mod.load_task(state_dir, task_id)
-
-    workflow = plugins_mod.load_workflow(state_dir)
-    ctx: dict = {
-        "state_dir": state_dir,
-        "task_id": task_id,
-        "task": task,
-    }
-    try:
-        plugins_mod.run_hook(workflow, "on_post_done", ctx)
-    except Exception as e:  # noqa: BLE001 — plugin errors warn but don't fail done
-        print(f"warn: workflow post_done failed: {e}", file=sys.stderr)
 
     append_event(state_dir / "events.jsonl", "done", task_id=task_id)
 

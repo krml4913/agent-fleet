@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import types
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -28,35 +27,36 @@ class PreflightLibraryTests(unittest.TestCase):
         self.assertTrue(results["python"].required)
 
     def test_optionals_dont_block(self) -> None:
+        # git required-ness depends on workspace (may be true in git repos with worktree).
+        # Only verify that the truly optional tools are optional.
         results = {r.name: r for r in preflight.check_all()}
-        self.assertFalse(results["git"].required)
         self.assertFalse(results["claude"].required)
         self.assertFalse(results["codex"].required)
         self.assertFalse(results["codex-update"].required)
         self.assertFalse(results["codex-trust"].required)
 
-    def test_git_required_for_git_worktree_workflow(self) -> None:
+    def test_git_required_for_worktree_workspace(self) -> None:
         with (
             unittest.mock.patch(
                 "fleet.commands.preflight.state_mod.resolve_state_dir",
                 return_value=Path("/tmp/state"),
             ),
             unittest.mock.patch(
-                "fleet.commands.preflight.plugins_mod.load_workflow",
-                return_value=types.SimpleNamespace(WORKFLOW_NAME="git_worktree"),
+                "fleet.commands.preflight.workspace_mod.load",
+                return_value="worktree",
             ),
         ):
             self.assertTrue(preflight._git_required_for_cwd(Path("/tmp/repo")))
 
-    def test_git_optional_for_bare_workflow(self) -> None:
+    def test_git_optional_for_none_workspace(self) -> None:
         with (
             unittest.mock.patch(
                 "fleet.commands.preflight.state_mod.resolve_state_dir",
                 return_value=Path("/tmp/state"),
             ),
             unittest.mock.patch(
-                "fleet.commands.preflight.plugins_mod.load_workflow",
-                return_value=types.SimpleNamespace(WORKFLOW_NAME="bare"),
+                "fleet.commands.preflight.workspace_mod.load",
+                return_value="none",
             ),
         ):
             self.assertFalse(preflight._git_required_for_cwd(Path("/tmp/repo")))

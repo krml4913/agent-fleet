@@ -14,7 +14,7 @@ from pathlib import Path
 from .. import agents as agents_mod
 from .. import driver_prompt as dp
 from .. import prompt_deliverer
-from .. import plugins as plugins_mod
+from .. import workspace as workspace_mod
 from .. import prompt_pointer
 from .. import state as state_mod
 from .. import formation as formation_mod
@@ -319,9 +319,8 @@ def run(args: argparse.Namespace) -> int:
 
     title = args.title or (description.splitlines() or [""])[0][:80]
 
-    # Workflow plugin: on_pre_start hook can attach extra task fields and/or
-    # override the window cwd (e.g. git_worktree creates the worktree here).
-    workflow = plugins_mod.load_workflow(state_dir)
+    # workspace: on_pre_start hook can attach extra task fields and/or
+    # override the window cwd (workspace=worktree creates the worktree here).
     ctx: dict = {
         "state_dir": state_dir,
         "task_id": args.task_id,
@@ -333,11 +332,12 @@ def run(args: argparse.Namespace) -> int:
         "project_root": _project_root_for_trust or state_dir.parent,
         "dry_run": bool(args.dry_run),
     }
-    try:
-        plugins_mod.run_hook(workflow, "on_pre_start", ctx)
-    except Exception as e:  # noqa: BLE001 — plugin errors are reportable
-        print(f"error: workflow on_pre_start failed: {e}", file=sys.stderr)
-        return 1
+    if not args.dry_run:
+        try:
+            workspace_mod.on_pre_start(ctx)
+        except Exception as e:  # noqa: BLE001 — workspace errors are reportable
+            print(f"error: workspace on_pre_start failed: {e}", file=sys.stderr)
+            return 1
 
     task_data: dict = {
         "id": args.task_id,
@@ -345,7 +345,7 @@ def run(args: argparse.Namespace) -> int:
         "description": description,
         "status": "spawning",
         "formation": formation_name,
-        "workflow": getattr(workflow, "WORKFLOW_NAME", "bare"),
+        "workspace": workspace_mod.load(state_dir),
         "current_stage": current_stage_idx,
         "stages": expanded_stages,
     }
@@ -361,7 +361,6 @@ def run(args: argparse.Namespace) -> int:
         formation_name=formation_name,
         role=role_name,
         agent=agent_spec,
-        workflow_fragment=getattr(workflow, "DRIVER_PROMPT_FRAGMENT", ""),
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt)
 

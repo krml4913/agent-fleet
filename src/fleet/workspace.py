@@ -1,12 +1,8 @@
-"""``git_worktree`` workflow.
+"""workspace 機構 — fleet が持つ唯一の開発フロー機構。
 
-On start: create a git worktree at ``<state_dir>/worktrees/task-<id>``
-on branch ``<project-name>/task/<id>`` from the project root. The start
-window's cwd is overridden to that worktree.
-
-On done: no-op for MVP. Worktree teardown will land in a follow-up
-phase (likely a separate ``fleet-agent cleanup`` CLI rather than a hook —
-keeps the post_done path safe-by-default).
+``project.yaml`` の ``workspace:`` フィールド (``worktree`` / ``none``) を
+読み、ライフサイクル境界の git (worktree 作成 / 削除) を実行する。
+作業の git (commit / push / PR) には触らない — それは PJ の責務。
 """
 from __future__ import annotations
 
@@ -15,33 +11,55 @@ import sys
 from pathlib import Path
 from typing import Any
 
-WORKFLOW_NAME = "git_worktree"
-DESCRIPTION = (
-    "Per-task git worktree on branch <project-name>/task/<id>, rooted at the project dir."
-)
-DRIVER_PROMPT_FRAGMENT = """\
-Git workflow (作業の git は driver が担う):
-  - 作業完了後は必ず以下の手順を実行してから `fleet-agent done` を呼ぶ:
-      1. git add / git commit   — 変更を commit する
-      2. git push -u origin <branch>  — remote に push する
-      3. gh pr create           — PR を作成する (タイトル・本文を適切に記述)
-      4. fleet-agent done       — 最後に done を呼んで orchestrator に通知
-  - PR のマージは行わない。マージは leader / user の判断に委ねる。
-  - conflict が発生した場合は driver (AI) が自力で解決する:
-      git fetch origin main → git rebase origin/main (または git merge) →
-      conflict を手動編集して解消 → git rebase --continue → git push --force-with-lease
-  - push reject された場合も driver が原因を調べて対処する (force-with-lease / rebase 等)。
-  - 作業の git (commit / push / PR) は fleet core ではなく driver (AI) の責務。
-    fleet core が git commit / push / PR を自動実行することはない。
-  - 各 role 固有の追加規律は role 断片に記載する。
-"""
+VALUES = ("worktree", "none")
+DEFAULT = "worktree"
+
+
+def load(state_dir: Path) -> str:
+    """Return the active workspace value for state_dir."""
+    from . import state as state_mod  # break cycle
+
+    project = state_mod.load_project(state_dir)
+    value = project.get("workspace") or DEFAULT
+    if value not in VALUES:
+        raise ValueError(
+            f"unknown workspace value: {value!r}; expected one of {VALUES}"
+        )
+    return value
+
+
+def on_pre_start(ctx: dict[str, Any]) -> None:
+    """Run before driver pane spawn. Create worktree if workspace=worktree."""
+    try:
+        value = load(ctx["state_dir"])
+    except FileNotFoundError:
+        value = DEFAULT
+    if value != "worktree":
+        return
+    _worktree_add(ctx)
+
+
+def on_cleanup(ctx: dict[str, Any]) -> None:
+    """Run on fleet-agent cleanup. Remove worktree if workspace=worktree."""
+    try:
+        value = load(ctx["state_dir"])
+    except FileNotFoundError:
+        value = DEFAULT
+    if value != "worktree":
+        return
+    _worktree_remove(ctx)
+
+
+# ---------------------------------------------------------------------------
+# worktree implementation (旧 git_worktree.py からそのまま移植)
+# ---------------------------------------------------------------------------
 
 
 def _git(
     target: Path,
     *args: str,
     timeout: float = 5,
-) -> subprocess.CompletedProcess[str] | None:
+) -> "subprocess.CompletedProcess[str] | None":
     try:
         return subprocess.run(
             ["git", "-C", str(target), *args],
@@ -56,9 +74,8 @@ def _git(
 def _warn_if_base_branch_behind_upstream(target: Path) -> None:
     """Warn when the branch used for the new worktree is behind its upstream.
 
-    This intentionally does not fetch. ``fleet-agent start`` should remain fast
-    and should continue to work offline; the comparison uses refs git already
-    knows locally.
+    Intentionally does not fetch — fleet-agent start should remain fast and
+    work offline; the comparison uses refs git already knows locally.
     """
     branch_r = _git(target, "rev-parse", "--abbrev-ref", "HEAD")
     if branch_r is None or branch_r.returncode != 0:
@@ -102,7 +119,7 @@ def _warn_if_base_branch_behind_upstream(target: Path) -> None:
 
     plural = "" if behind == 1 else "s"
     print(
-        "warn: git_worktree base branch "
+        "warn: workspace worktree base branch "
         f"{branch!r} is {behind} commit{plural} behind {upstream!r}; "
         "run `git pull --ff-only` before `fleet-agent start` to spawn "
         "from the latest code. Continuing anyway.",
@@ -110,7 +127,7 @@ def _warn_if_base_branch_behind_upstream(target: Path) -> None:
     )
 
 
-def on_pre_start(ctx: dict[str, Any]) -> None:
+def _worktree_add(ctx: dict[str, Any]) -> None:
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
     project_name: str = state_dir.name
@@ -122,7 +139,7 @@ def on_pre_start(ctx: dict[str, Any]) -> None:
 
     if worktree.exists():
         raise RuntimeError(
-            f"git_worktree: worktree already exists: {worktree}"
+            f"workspace: worktree already exists: {worktree}"
         )
 
     _warn_if_base_branch_behind_upstream(target)
@@ -134,27 +151,21 @@ def on_pre_start(ctx: dict[str, Any]) -> None:
     )
     if r.returncode != 0:
         raise RuntimeError(
-            f"git_worktree: `git worktree add` failed:\n{r.stderr.strip()}"
+            f"workspace: `git worktree add` failed:\n{r.stderr.strip()}"
         )
 
     extra = ctx.setdefault("task_extra", {})
     extra["worktree"] = str(worktree)
     extra["branch"] = branch
-    # Drivers should work inside the worktree.
     ctx["cwd"] = worktree
 
     print(
-        f"git_worktree: created {worktree} on branch {branch}",
+        f"workspace: created {worktree} on branch {branch}",
         file=sys.stderr,
     )
 
 
-def on_post_done(ctx: dict[str, Any]) -> None:
-    return None
-
-
-def on_cleanup(ctx: dict[str, Any]) -> None:
-    """Remove the per-task worktree + branch. Errors warn but don't raise."""
+def _worktree_remove(ctx: dict[str, Any]) -> None:
     state_dir: Path = ctx["state_dir"]
     task_id: str = ctx["task_id"]
     project_name: str = state_dir.name
@@ -177,14 +188,12 @@ def on_cleanup(ctx: dict[str, Any]) -> None:
                 file=sys.stderr,
             )
 
-    # Delete the branch; tolerate "not found" / "unborn".
     r = subprocess.run(
         ["git", "-C", str(project_root), "branch", "-D", branch],
         capture_output=True,
         text=True,
     )
     if r.returncode != 0:
-        # Branch may never have been committed onto; this is non-fatal.
         msg = r.stderr.strip()
         if "not found" not in msg and "no such branch" not in msg:
             print(f"warn: git branch -D failed: {msg}", file=sys.stderr)

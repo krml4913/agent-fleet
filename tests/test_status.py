@@ -46,7 +46,7 @@ class StatusCommandTests(unittest.TestCase):
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("demo  ·  bare  ·  v0.0.1  ·  since ", result.stdout)
+        self.assertIn("demo  ·  worktree  ·  v0.0.1  ·  since ", result.stdout)
         self.assertIn("TASKS  0", result.stdout)
         self.assertIn("EVENTS  last 5 / 0", result.stdout)
         self.assertIn("  (none)", result.stdout)
@@ -64,7 +64,7 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("TASKS  1", result.stdout)
         self.assertIn("● task-1  pending  seen —", result.stdout)
         self.assertIn(
-            "      do thing  (formation -  agent claude:sonnet  workflow -)",
+            "      do thing  (formation -  agent claude:sonnet  workspace -)",
             result.stdout,
         )
 
@@ -75,7 +75,7 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "      legacy thing  (formation -  agent -  workflow -)",
+            "      legacy thing  (formation -  agent -  workspace -)",
             result.stdout,
         )
 
@@ -85,7 +85,7 @@ class StatusCommandTests(unittest.TestCase):
             "title": "multi thing",
             "status": "running",
             "formation": "multi_stage",
-            "workflow": "git_worktree",
+            "workspace": "worktree",
             "current_stage": 1,
             "stages": [
                 {"role": "plan", "agent": "codex:gpt-5.5", "status": "done"},
@@ -98,7 +98,7 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("● task-1  running  stage 2/3  seen —", result.stdout)
         self.assertIn(
-            "      multi thing  (formation multi_stage  agent codex:gpt-5.5  workflow git_worktree)",
+            "      multi thing  (formation multi_stage  agent codex:gpt-5.5  workspace worktree)",
             result.stdout,
         )
 
@@ -228,7 +228,7 @@ class UnreadTasksTests(unittest.TestCase):
                 "id": "1", "title": "t", "status": "in_progress",
                 "current_stage": 0,
                 "stages": [{"role": "driver", "agent": "x", "status": "running"}],
-                "workflow": "bare",
+                "workspace": "none",
             })
             ev_path = sd / "events.jsonl"
             with open(ev_path, "a", encoding="utf-8") as f:

@@ -36,7 +36,7 @@ def render(state_dir: Path) -> str:
     last_seen = heartbeat.last_per_task(events)
 
     name = project.get("name", "?")
-    workflow = project.get("workflow") or "bare"
+    workspace = project.get("workspace") or "worktree"
 
     lines: list[str] = []
     lines.append(f"# fleet — {name}")
@@ -47,7 +47,7 @@ def render(state_dir: Path) -> str:
     lines.append(f"- project name: **{name}**")
     lines.append(f"- created: `{project.get('created_at', '?')}`")
     lines.append(f"- fleet version: `{project.get('version', '?')}`")
-    lines.append(f"- workflow: `{workflow}`")
+    lines.append(f"- workspace: `{workspace}`")
     lines.append("")
 
     # Highlight tasks awaiting orders.
@@ -69,17 +69,17 @@ def render(state_dir: Path) -> str:
     if not tasks:
         lines.append("_(no tasks yet)_")
     else:
-        lines.append("| ID | Title | Status | Agent | Workflow | Last seen |")
-        lines.append("|----|-------|--------|-------|----------|-----------|")
+        lines.append("| ID | Title | Status | Agent | Workspace | Last seen |")
+        lines.append("|----|-------|--------|-------|-----------|-----------|")
         for t in tasks:
             tid = t.get("id", "?")
             lines.append(
-                "| {id} | {title} | {status} | {agent} | {workflow} | {seen} |".format(
+                "| {id} | {title} | {status} | {agent} | {workspace} | {seen} |".format(
                     id=tid,
                     title=t.get("title", "-"),
                     status=t.get("status", "-"),
                     agent=_task_agent(t),
-                    workflow=t.get("workflow", "-"),
+                    workspace=t.get("workspace", "-"),
                     seen=last_seen.get(tid, "—"),
                 )
             )

@@ -5,7 +5,7 @@ Each subcommand lives in ``src/fleet/commands/<name>.py`` and exposes an
 
 Two entrypoints:
   fleet        — user-facing (init / preflight / leader / attach / status /
-                 log / formation / workflow)
+                 log / formation / workspace)
   fleet-agent  — agent-facing (start / inbox / inbox-read / send-prompt /
                  cleanup / ask / event / approve / reject / done)
 """
@@ -33,7 +33,7 @@ from .commands import send_prompt as send_prompt_cmd
 from .commands import start as start_cmd
 from .commands import status as status_cmd
 from .commands import formation as formation_cmd
-from .commands import workflow as workflow_cmd
+from .commands import workspace as workspace_cmd
 
 
 def build_parser_user() -> argparse.ArgumentParser:
@@ -54,7 +54,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     status_cmd.add_parser(sub)
     log_cmd.add_parser(sub)
     formation_cmd.add_parser(sub)
-    workflow_cmd.add_parser(sub)
+    workspace_cmd.add_parser(sub)
     rm_cmd.add_parser(sub)
     return parser
 

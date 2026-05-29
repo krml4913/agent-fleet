@@ -34,14 +34,10 @@ def render(
     formation_name: str,
     role: str,
     agent: str,
-    workflow_fragment: str = "",
 ) -> str:
     """Return the prompt string to send to the driver."""
     base = _load_base()
     parts = [base.rstrip()]
-    fragment = workflow_fragment.strip()
-    if fragment:
-        parts.append(fragment)
     role_fragment = _load_role_fragment(role).strip()
     if role_fragment:
         parts.append(role_fragment)

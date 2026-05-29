@@ -68,7 +68,7 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
    できる —— これが forge から継承する独自性であり mission の核。
 
 9. **core は最小、 開発フローは外付け。** fleet core は coding 専用の機能を
-   持たない。 git / PR / changelog 等は driver と plugin の領分 (§8)。
+   持たない。 worktree は workspace mode、 commit / PR / changelog 等は PJ 任せ (§8)。
 
 並列実行・エージェント相互通信・race・dynamic prompt injection を agent-fleet が
 持たないのは、 すべてこの原則の帰結である (詳細は §9 anti-scope)。
@@ -109,7 +109,7 @@ claude-forge は機能肥大と技術的負債で作り直しになった ——
 - **leader は軽い**: 会話と `fleet-agent start` のみ、 状態 polling や awaiting_orders 検知はしない
 - **driver は直接 user に届く**: events.jsonl + 通知 + dashboard 経由、 leader を中継しない
 - **user は driver と直接話せる**: tmux attach すれば pane に介入できる (これが forge から継承する独自性)
-- **fleet 自体は開発フロー非依存**: worktree / PR / changelog 等は **plugin** で外付け
+- **fleet 自体は開発フロー非依存**: worktree は workspace mode、 PR / changelog 等は PJ 任せ
 
 ---
 
@@ -203,7 +203,7 @@ fleet leader --project image-gallery     # 特定 project の leader へ
     projects.yaml.lock                 ← flock 用
     projects/
       <name>/                          ← 1 project の state_dir
-        project.yaml     # name / repo / created_at / version / workflow
+        project.yaml     # name / repo / created_at / version / workspace
         events.jsonl     # append-only audit log
         dashboard.md     # read-only view (自動生成、直接編集禁止)
         notify.yaml      # 通知設定
@@ -218,7 +218,7 @@ fleet leader --project image-gallery     # 特定 project の leader へ
             outbox.md         # driver → leader の報告
             driver-prompt.md  # spawn 時に展開済みの prompt (agent が自分で読む)
         worktrees/
-          task-<id>/     # git_worktree plugin 使用時のみ
+          task-<id>/     # workspace: worktree のときのみ
 ```
 
 #### project 解決ロジック
@@ -424,56 +424,72 @@ driver → events / dashboard / 通知 → user の経路は **leader を経由�
 
 ---
 
-## 8. core / plugin 境界
+## 8. workspace と開発フロー境界
 
-### 8.1 設計思想
+### 8.1 設計思想 (2026-05-29 確定)
 
-> **fleet 自体に開発フロー (git / worktree / PR / changelog) に関わる機能は極力持たせない。**
-> **ただし複数の開発フローを選べる plugin 機構は持つ。**
+> **fleet 自体に開発フロー (commit / push / PR / conflict 解決 / merge 判断) の規律を持たせない。**
+> **開発フローは全部 PJ 任せ — PJ owner が CLAUDE.md / AGENTS.md / role プロンプトに書く。**
+> **fleet が開発フローについて持つのは「worktree を切るか否か」のフラグ1個だけ。**
 
-これにより coding 以外 (research / monitoring / data analysis 等) の用途も plugin 次第で乗る。
+これにより:
 
-### 8.2 git 操作の責務分界 (確定: 2026-05-20)
+- PJ / タスクごとの作業フローを fleet の語彙に縛らず、 プロンプトで柔軟に流せる (突発調査タスクで「コミットするな」も task プロンプト1行で済み、 per-task override 機構が要らない)
+- coding 以外 (research / monitoring) の用途も乗りやすい (`workspace=none` を選ぶだけ)
+- 「規律 plugin」のような拡張点を持たないので forge 化の防衛線になる
 
-git は例外が多い (conflict / push reject / detached HEAD / 認証切れ / rebase 失敗)。 Python コードで全例外を捌くのは破綻するため、 操作を 2 種類に分けて担い手を明確にする。
+### 8.2 層の切り分け
+
+| 層 | 性格 | 担い手 / 置き場 |
+|---|---|---|
+| **formation** | チーム編成。 ガッツリ規律 | fleet (YAML) |
+| **workspace** | worktree を切る/切らない | fleet 機構。 開発フローについて fleet が持つ唯一のスイッチ |
+| **fleet protocol** | done / inbox / ask / heartbeat / memory | fleet (`driver-base.md`、 常に注入、 vendor 中立) |
+| **開発フロー規律** | commit / push / PR / conflict / merge 判断 | 全部 PJ 任せ (`CLAUDE.md` / `AGENTS.md` / role プロンプト)。 fleet は何も持たない |
+
+### 8.3 workspace enum
+
+- 値は **`worktree`** または **`none`**。 `project.yaml` の `workspace:` 1 フィールドだけ
+- 中身は実質 bool (worktree 切る/切らない)。 enum にしているのは将来 `clone` / `container` の余地を残すため
+- default は **`worktree`** (並行作業が fleet の主眼。 worktree を使わないならそもそも fleet を使わない、 という前提)
+- 任意 Python plugin loader (`<state>/plugins/<name>.py`) は持たない。 PJ が独自 workspace 実装を差し込むルートはない (実害なしと判断、 §1.4 原則 1)
+
+### 8.4 git 操作の責務分界
 
 | 種別 | 操作 | 担い手 | 理由 |
 |---|---|---|---|
-| **作業の git** | commit / push / PR 作成 / conflict 解決 / rebase | **driver (AI)** | 例外が多く AI が柔軟に対応できる |
-| **ライフサイクル境界の git** | `worktree add` / `worktree remove` | **plugin (仕組み側)** | 定型操作で例外がほぼ無い; driver が自分の作業場所を自分で作れない (鶏と卵) |
+| **ライフサイクル境界の git** | `worktree add` / `worktree remove` | **fleet (workspace=worktree のとき)** | 定型操作。 driver が自分の作業場所を自分で作れない (鶏と卵) |
+| **作業の git** | commit / push / PR 作成 / conflict 解決 / rebase / merge 判断 | **PJ owner が `CLAUDE.md` / `AGENTS.md` / role プロンプトに書く → driver (AI) が読んで実行** | 例外が多く、 PJ ごとに規律が違う。 §1.4 原則 5 |
 
-- driver-prompt は `docs/prompts/driver-base.md` の fleet 共通プロトコルに、workflow plugin が任意で提供する `DRIVER_PROMPT_FRAGMENT`、`docs/prompts/roles/<role>.md` の role 断片、task description を合成して生成する。 `git_worktree` は作業完了後の `commit → push → gh pr create → fleet-agent done` 手順を断片として持ち、`bare` は持たない。
-- `git_worktree` の `on_pre_start` は、worktree を切る現在 branch が既知の upstream より遅れている場合だけ警告する。`start` の latency と offline 起動を守るため fetch は行わず、警告して続行する。`bare` workflow には適用しない。
-- tmux pane へ paste するのは prompt 全文ではなく、prompt ファイルを指す短い pointer のみ。 `start` / `send-prompt` / `leader` は共通ヘルパで `.driver-prompt.md.paste-pointer` または `.leader-prompt.md.paste-pointer` を生成し、`Read the prompt file at this path before doing anything else, then follow its instructions: <絶対パス>` を1行で paste する。 prompt 本体は agent が起動直後に `Read` / file-reading tool で読む。
-- driver-prompt の pointer は `fleet-agent start` / `fleet-agent send-prompt` が直接 paste せず、detached prompt deliverer が agent CLI の ready marker を見てから注入し、submit 確認まで行う (§4.1 参照)。 deliverer が paste するのも prompt 全文ではなく pointer 1 行。
-- leader-prompt は `docs/prompts/leader-base.md` の fleet 汎用 leader プロトコル (不変・project 非依存) を土台に、project 名・state dir・memory 入口を `---` footer として合成して生成する。 `fleet leader` が pane 起動時に pointer を注入する (driver-prompt の paste 機構と同様)。 project 固有・揮発なコンテキスト (現在の方針 / handoff) は leader-base.md には入れず、project memory と `leader-handoff.md` 側が持つ。 leader は fleet memory の主要な維持者でもある。
-- fleet core の Python コードは作業の git (commit / push / PR) を一切叩かない。
-- PR のマージは driver が行わない。 leader / user の判断に委ねる。
+- fleet core の Python コードは作業の git (commit / push / PR / changelog) を一切叩かない
+- fleet が driver-prompt に注入する文字列にも作業の git 手順は含めない (`driver-base.md` + role 断片 + task description のみ)
+- PR のマージは fleet が決めない。 必要なら PJ が「マージは leader / user に委ねる」と `CLAUDE.md` に書く
 
-### 8.3 配置
+### 8.5 配置
 
-| 機能 | 配置 | 備考 |
-|---|---|---|
-| tmux pane 起動 | core | fleet の基盤 |
-| inbox / outbox file 通信 | core | text-based async は本質 |
-| driver-prompt 注入 | core | 起動の一部 |
-| state DB 更新 | core | 全 plugin が共通利用 |
-| events.jsonl 記録 | core | 監査 log は core |
-| dashboard 生成 | core | view layer |
-| `on_pre_start` / `on_post_done` hook 機構 | core | plugin がここに乗る |
-| worktree 作成 / 削除 | **plugin** | ライフサイクル境界の git |
-| commit / push / PR 作成 | **driver (AI)** | 作業の git; core は関与しない |
-| changelog 更新 | **driver (AI)** | 開発フローの一部; 作業の git と同様 |
-| review-request | **driver (AI)** | formation と workflow に応じて role が判断 |
+| 機能 | 配置 |
+|---|---|
+| tmux pane 起動 | core |
+| inbox / outbox file 通信 | core |
+| driver-prompt 注入 | core |
+| state DB 更新 | core |
+| events.jsonl 記録 | core |
+| dashboard 生成 | core |
+| `on_pre_start` / `on_cleanup` hook (workspace 内蔵) | core |
+| worktree 作成 / 削除 | core (workspace=worktree 時のみ) |
+| commit / push / PR / changelog / review-request | **PJ 任せ (driver)** |
+| vendor 中立な「規律ファイル」シーム | **持たない** (PJ owner が `CLAUDE.md` / `AGENTS.md` を個別に用意) |
 
-### 8.4 想定 workflow plugin
+### 8.6 旧 plugin 機構との差分 (2026-05-29 移行、 #119)
 
-plugin の責務は worktree ライフサイクル (作成/削除) のみ。 PR / commit は plugin の担当ではない。
+- 旧 `workflow` plugin 機構 → `workspace` enum に縮小
+- 旧 `git_worktree` plugin の `DRIVER_PROMPT_FRAGMENT` (commit→push→PR 手順) → 削除、 PJ の `CLAUDE.md` / `AGENTS.md` に移植
+- 旧 任意 Python plugin loader (`<state>/plugins/<name>.py`) → 撤去
+- 旧 `fleet workflow` CLI → `fleet workspace` (`list` / `set` のみ、 `show` は不要)
+- 旧 `project.yaml` の `workflow:` field → `workspace:` (rename、 後方互換なし)
+- 旧 `on_post_done` hook 機構 → 撤去 (実利用者がいない)
 
-- `git_worktree`: worktree + branch 作成/削除 (現行実装)
-- `bare`: worktree なし、 直接編集 (git 非依存)
-
-plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ねる。
+関連: Issue #119 (本変更の原典) / Issue #113 (本変更がその設計論点の核を解決)
 
 ---
 
@@ -483,7 +499,7 @@ plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ね�
 
 | 項目 | 理由 |
 |---|---|
-| coding 以外の汎用 orchestrator 化 | core は coding 想定、 他用途は plugin で扱う |
+| coding 以外の汎用 orchestrator 化 | core は coding 想定、 他用途は workspace=none + PJ 任せで対応 |
 | 完全自律 (人間介入を最小化する方向) | mission に反する、 介入できることが本質 |
 | cost-based routing | MVP 不要、 必要になったら後で |
 | OpenAI / Gemini / local LLM 対応 | MVP は claude + codex のみ |
@@ -497,7 +513,7 @@ plugin 機構そのもの (フラグ化など) の議論は Issue #37 に委ね�
 
 ### 10.1 引き継ぐ概念
 
-- worktree per task (plugin として)
+- worktree per task (workspace=worktree として)
 - inbox.md / outbox.md による text-based async
 - events.jsonl の append-only event sourcing
 - tmux pane での human-fallback
@@ -589,7 +605,7 @@ agent-fleet/
 
 - 2 entrypoint script (どちらも shebang `#!/usr/bin/env python3`):
   - `./fleet`       — 人間 (user) が打つ: `init` / `preflight` / `leader` / `attach` /
-                      `status` / `log` / `formation` / `workflow`
+                      `status` / `log` / `formation` / `workspace`
   - `./fleet-agent` — システム (leader / driver agent) が自動で叩く:
                       `start` / `inbox` / `inbox-read` / `send-prompt` / `cleanup` /
                       `ask` / `event` / `approve` / `reject` / `done`

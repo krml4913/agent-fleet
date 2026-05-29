@@ -23,7 +23,7 @@ def _approval_task(task_id: str = "1") -> dict:
         "title": "x",
         "status": "awaiting_orders",
         "formation": "solo",
-        "workflow": "bare",
+        "workspace": "none",
         "current_stage": 0,
         "stages": [
             {

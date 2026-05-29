@@ -183,7 +183,7 @@ class TaskTests(_FleetHomeBase):
         stages = [{"role": "driver", "agent": "claude:sonnet", "status": "running"}]
         state.save_task(state_dir, "t1", {
             "title": "new schema task", "status": "spawning",
-            "formation": "solo", "workflow": "bare",
+            "formation": "solo", "workspace": "none",
             "current_stage": 0, "stages": stages,
         })
         loaded = state.load_task(state_dir, "t1")

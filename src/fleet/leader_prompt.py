@@ -1,7 +1,7 @@
 """Build the prompt pasted into a freshly-launched leader pane.
 
 Symmetric with driver_prompt.py but much thinner: the leader has no task
-metadata, role, or workflow fragment. Kept small on purpose (design §10.2 /
+metadata or role fragment. Kept small on purpose (design §10.2 /
 §1.4 — base prompts must not balloon).
 """
 from __future__ import annotations
