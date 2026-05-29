@@ -22,7 +22,7 @@ from fleet import state  # noqa: E402
 def _solo_task_data(task_id: str = "1", status: str = "spawning") -> dict:
     return {
         "id": task_id, "title": "x", "status": status,
-        "formation": "solo", "workflow": "bare",
+        "formation": "solo", "workspace": "none",
         "current_stage": 0,
         "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
     }
@@ -80,7 +80,7 @@ class DoneTests(unittest.TestCase):
         sd = self.state_dir
         state.save_task(sd, "2", {
             "id": "2", "title": "multi", "description": "pair review task",
-            "status": "spawning", "formation": "pair_review", "workflow": "bare",
+            "status": "spawning", "formation": "pair_review", "workspace": "none",
             "current_stage": 0,
             "stages": [
                 {"role": "implementer", "agent": "claude:sonnet", "status": "running"},

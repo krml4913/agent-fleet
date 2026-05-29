@@ -131,46 +131,18 @@ class StartTests(unittest.TestCase):
         self.assertIn(str(missing), result.stderr)
         self.assertFalse((self.state_dir / "tasks" / "task-missing-file").exists())
 
-    def test_bare_workflow_prompt_omits_git_fragment(self) -> None:
+    def test_prompt_omits_git_workflow(self) -> None:
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
-            "bare-prompt", "No git workflow here",
+            "no-git", "No git workflow here",
             fleet_home=self.fleet_home,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         prompt = (
-            self.state_dir / "tasks" / "task-bare-prompt" / "driver-prompt.md"
+            self.state_dir / "tasks" / "task-no-git" / "driver-prompt.md"
         ).read_text()
         self.assertNotIn("Git workflow", prompt)
         self.assertNotIn("gh pr create", prompt)
-
-    def test_git_worktree_workflow_prompt_includes_git_fragment(self) -> None:
-        from fleet.commands import start
-
-        project = state.load_project(self.state_dir)
-        project["workflow"] = "git_worktree"
-        state.save_project(self.state_dir, project)
-
-        args = argparse.Namespace(
-            project="demo",
-            task_id="git-prompt",
-            description="Git workflow here",
-            formation="solo",
-            agent=None,
-            title=None,
-            dry_run=True,
-            auto_paste=True,
-            prompt_delay=0.0,
-        )
-        with unittest.mock.patch("fleet.commands.start.plugins_mod.run_hook"):
-            result = start.run(args)
-
-        self.assertEqual(result, 0)
-        prompt = (
-            self.state_dir / "tasks" / "task-git-prompt" / "driver-prompt.md"
-        ).read_text()
-        self.assertIn("Git workflow", prompt)
-        self.assertIn("gh pr create", prompt)
 
     def test_rejects_duplicate_task_id(self) -> None:
         run_fleet_agent("start", "--project", "demo", "--dry-run",
@@ -211,7 +183,7 @@ class StartTests(unittest.TestCase):
                 "fleet.commands.start.agents_mod.codex_repo_trusted",
                 return_value=False,
             ),
-            unittest.mock.patch("fleet.commands.start.plugins_mod.run_hook") as run_hook,
+            unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start") as on_pre_start,
         ):
             result = start.run(args)
 
@@ -219,7 +191,7 @@ class StartTests(unittest.TestCase):
         self.assertFalse(
             (self.state_dir / "tasks" / "task-codex-untrusted").exists()
         )
-        run_hook.assert_not_called()
+        on_pre_start.assert_not_called()
 
     def test_formation_pair_review_starts_first_stage(self) -> None:
         import shutil
@@ -362,6 +334,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
 
         with (
             unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start"),
             unittest.mock.patch(
                 "fleet.commands.start.prompt_deliverer.start_detached",
                 return_value=self.state_dir / "tasks" / "task-200" / "prompt-deliverer.log",
@@ -404,7 +377,10 @@ class StartAutopasteEnterTests(unittest.TestCase):
             prompt_delay=0.0,
         )
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+        with (
+            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start"),
+        ):
             mock_tmux.available.return_value = True
             mock_tmux.session_exists.return_value = True
             mock_tmux.TmuxError = Exception

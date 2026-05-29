@@ -28,7 +28,7 @@ def _make_task(
         "description": "test description",
         "status": "running",
         "formation": formation,
-        "workflow": "bare",
+        "workspace": "none",
         "current_stage": current_stage,
         "stages": stages,
     }
@@ -130,7 +130,7 @@ class AdvanceApprovedTests(unittest.TestCase):
             "title": "legacy",
             "status": "running",
             "formation": "solo",
-            "workflow": "bare",
+            "workspace": "none",
         }
         state.save_task(self.sd, "5", task_data)
         task = state.load_task(self.sd, "5")
@@ -598,7 +598,7 @@ class WindowCwdTests(unittest.TestCase):
             "description": "test description",
             "status": "running",
             "formation": "pair_review",
-            "workflow": "git_worktree" if worktree else "bare",
+            "workspace": "worktree" if worktree else "none",
             "current_stage": 0,
             "stages": [{"role": "driver", "agent": "claude:sonnet", "status": "running"}],
         }
@@ -615,9 +615,6 @@ class WindowCwdTests(unittest.TestCase):
         task = self._make_task("wt1", worktree=worktree_path)
         stage = task["stages"][0]
         project = state.load_project(self.sd)
-        project["workflow"] = "git_worktree"
-        state.save_project(self.sd, project)
-
         with (
             unittest.mock.patch("fleet.tmux.available", return_value=True),
             unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt") as mock_render,
@@ -628,7 +625,7 @@ class WindowCwdTests(unittest.TestCase):
         mock_launch.assert_called_once()
         kwargs = mock_launch.call_args.kwargs
         self.assertEqual(kwargs["window_cwd"], Path(worktree_path))
-        self.assertIn("Git workflow", mock_render.call_args.kwargs["workflow_fragment"])
+        mock_render.assert_called_once()
 
     def test_no_worktree_task_passes_window_cwd_none(self) -> None:
         task = self._make_task("wt2", worktree=None)
@@ -644,7 +641,7 @@ class WindowCwdTests(unittest.TestCase):
         mock_launch.assert_called_once()
         kwargs = mock_launch.call_args.kwargs
         self.assertIsNone(kwargs.get("window_cwd"))
-        self.assertEqual(mock_render.call_args.kwargs["workflow_fragment"], "")
+        mock_render.assert_called_once()
 
     def test_tmux_unavailable_skips_launch(self) -> None:
         task = self._make_task("wt3", worktree="/tmp/fake-worktree-wt3")

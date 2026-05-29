@@ -3,8 +3,8 @@
 Conceptually distinct from ``fleet-agent done``:
   * ``done``    flips the status to ``completed`` and emits an event.
   * ``cleanup`` is the destructive step: kill the tmux window, drop the
-    driver-prompt buffer, run the workflow plugin's ``on_cleanup`` hook
-    (e.g. git_worktree removes the worktree + branch), and optionally
+    driver-prompt buffer, run the workspace ``on_cleanup`` hook
+    (workspace=worktree removes the worktree + branch), and optionally
     archive the task dir.
 
 Refuses to run unless the task is in a terminal state (``completed`` /
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from .. import dashboard as dashboard_mod
-from .. import plugins as plugins_mod
+from .. import workspace as workspace_mod
 from .. import state as state_mod
 from .. import task_context
 from .. import tmux as tmux_mod
@@ -33,8 +33,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "cleanup",
         help="Tear down a finished task (worktree, tmux window, optional archive)",
         description=(
-            "Run the workflow plugin's on_cleanup hook, kill the task's "
-            "tmux window if any, drop its prompt buffer. Optionally archive "
+            "Run the workspace on_cleanup hook (removes worktree if workspace=worktree), "
+            "kill the task's tmux window if any, drop its prompt buffer. Optionally archive "
             "the task directory. Refuses to run on a non-terminal task "
             "unless --force is passed."
         ),
@@ -84,8 +84,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Workflow plugin hook
-    workflow = plugins_mod.load_workflow(state_dir)
+    # workspace cleanup hook
     ctx: dict = {
         "state_dir": state_dir,
         "task_id": task_id,
@@ -93,9 +92,9 @@ def run(args: argparse.Namespace) -> int:
         "project_root": state_dir.parent,
     }
     try:
-        plugins_mod.run_hook(workflow, "on_cleanup", ctx)
-    except Exception as e:  # noqa: BLE001 — plugin errors warn, don't block
-        print(f"warn: workflow on_cleanup failed: {e}", file=sys.stderr)
+        workspace_mod.on_cleanup(ctx)
+    except Exception as e:  # noqa: BLE001 — workspace errors warn, don't block
+        print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
 
     # Drop tmux artefacts.
     project = state_mod.load_project(state_dir)

@@ -43,13 +43,13 @@ class DashboardRenderTests(unittest.TestCase):
         # Body has both the highlight block AND the standard table.
         self.assertIn("| 1 |", text)
 
-    def test_workflow_column(self) -> None:
+    def test_workspace_column(self) -> None:
         state.save_task(self.sd, "1", {
             "id": "1", "title": "T", "status": "running",
-            "agent": "claude:sonnet", "workflow": "git_worktree",
+            "agent": "claude:sonnet", "workspace": "worktree",
         })
         text = dashboard.render(self.sd)
-        self.assertIn("git_worktree", text)
+        self.assertIn("worktree", text)
 
     def test_recent_events_shown(self) -> None:
         append_event(self.sd / "events.jsonl", "milestone", task_id="1", note="x")

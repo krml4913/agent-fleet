@@ -67,12 +67,12 @@ def run(args: argparse.Namespace) -> int:
     unread = _unread_tasks(events)
     use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
-    workflow = project.get("workflow") or "bare"
+    workspace = project.get("workspace") or "worktree"
     print(
         "  ·  ".join(
             [
                 project.get("name", "?"),
-                workflow,
+                workspace,
                 f"v{project.get('version', '?')}",
                 f"since {_short_date(project.get('created_at', '?'))}",
             ]
@@ -109,7 +109,7 @@ def run(args: argparse.Namespace) -> int:
                     "title": t.get("title", "-"),
                     "formation": str(t.get("formation") or "-"),
                     "agent": _task_agent(t),
-                    "workflow": t.get("workflow", "-"),
+                    "workspace": t.get("workspace", "-"),
                     "unread": tid in unread,
                 }
             )
@@ -130,7 +130,7 @@ def run(args: argparse.Namespace) -> int:
             )
             meta = (
                 f"formation {row['formation']}  "
-                f"agent {row['agent']}  workflow {row['workflow']}"
+                f"agent {row['agent']}  workspace {row['workspace']}"
             )
             if row["unread"]:
                 meta += "  [unread inbox]"

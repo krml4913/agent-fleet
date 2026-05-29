@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet.cli import build_parser_agent, build_parser_user  # noqa: E402
 
-USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "log", "formation", "workflow", "rm"}
+USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "log", "formation", "workspace", "rm"}
 AGENT_COMMANDS = {
     "start", "inbox", "inbox-read", "send-prompt", "cleanup", "ask", "event",
     "approve", "reject", "done",

@@ -1,6 +1,6 @@
 """``fleet preflight`` — environment dependency check.
 
-Verifies the toolbelt fleet relies on: Python version, tmux, workflow
+Verifies the toolbelt fleet relies on: Python version, tmux, workspace
 dependencies, and the agent CLIs (claude / codex). Required tools
 missing → exit 1; optional tools missing → warn but continue.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .. import agents as agents_mod
-from .. import plugins as plugins_mod
+from .. import workspace as workspace_mod
 from .. import state as state_mod
 
 
@@ -97,10 +97,9 @@ def _git_required_for_cwd(cwd: Path) -> bool:
     if state_dir is None:
         return False
     try:
-        workflow = plugins_mod.load_workflow(state_dir)
+        return workspace_mod.load(state_dir) == "worktree"
     except Exception:
         return False
-    return getattr(workflow, "WORKFLOW_NAME", "bare") == "git_worktree"
 
 
 def _git_toplevel(cwd: Path) -> Path | None:

@@ -1,4 +1,4 @@
-"""Tests for the ``git_worktree`` plugin (requires a working ``git`` binary)."""
+"""Tests for the workspace worktree implementation (requires a working ``git`` binary)."""
 from __future__ import annotations
 
 import os
@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet.plugins import git_worktree  # noqa: E402
+from fleet import workspace  # noqa: E402
 
 
 @unittest.skipIf(shutil.which("git") is None, "git not available")
-class GitWorktreeTests(unittest.TestCase):
+class WorkspaceWorktreeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
@@ -38,10 +38,6 @@ class GitWorktreeTests(unittest.TestCase):
         self.git("add", "README.md")
         self.git("commit", "-q", "-m", "initial")
 
-        # state_dir is now stored in fleet-state/projects/<name>/,
-        # but the plugin only cares that state_dir.is_dir() and
-        # state_dir / "worktrees" is where it creates the worktree.
-        # We simulate this by using a tempdir as the state_dir directly.
         self.fleet_home = Path(self._tmp.name) / "fleet-state"
         self.fleet_home.mkdir()
         self.state_dir = self.fleet_home / "projects" / "testproj"
@@ -54,7 +50,7 @@ class GitWorktreeTests(unittest.TestCase):
         self,
         *args: str,
         cwd: Path | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
+    ) -> "subprocess.CompletedProcess[bytes]":
         return subprocess.run(
             ["git", "-C", str(cwd or self.project), *args],
             check=True,
@@ -68,7 +64,7 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "7",
             "project_root": self.project,
         }
-        git_worktree.on_pre_start(ctx)
+        workspace._worktree_add(ctx)
         worktree = self.state_dir / "worktrees" / "task-7"
         self.assertTrue(worktree.is_dir())
         self.assertEqual(ctx["task_extra"]["worktree"], str(worktree))
@@ -78,10 +74,6 @@ class GitWorktreeTests(unittest.TestCase):
     def test_pre_start_warns_when_base_branch_is_behind_upstream(self) -> None:
         remote = Path(self._tmp.name) / "remote.git"
         upstream_clone = Path(self._tmp.name) / "upstream"
-        # `-b main` pins the bare repo's HEAD; without it the default branch
-        # depends on the host `init.defaultBranch` (CI defaults to `master`),
-        # which makes `git clone` skip the checkout and the fixture stops
-        # reproducing the behind state.
         subprocess.run(
             ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
             check=True,
@@ -106,10 +98,10 @@ class GitWorktreeTests(unittest.TestCase):
         }
         stderr = StringIO()
         with redirect_stderr(stderr):
-            git_worktree.on_pre_start(ctx)
+            workspace._worktree_add(ctx)
 
         self.assertIn(
-            "warn: git_worktree base branch 'main' is 1 commit behind 'origin/main'",
+            "warn: workspace worktree base branch 'main' is 1 commit behind 'origin/main'",
             stderr.getvalue(),
         )
         self.assertIn("git pull --ff-only", stderr.getvalue())
@@ -123,7 +115,7 @@ class GitWorktreeTests(unittest.TestCase):
         }
         stderr = StringIO()
         with redirect_stderr(stderr):
-            git_worktree.on_pre_start(ctx)
+            workspace._worktree_add(ctx)
 
         self.assertNotIn("base branch", stderr.getvalue())
         self.assertTrue((self.state_dir / "worktrees" / "task-no-upstream").is_dir())
@@ -135,7 +127,7 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "42",
             "project_root": self.project,
         }
-        git_worktree.on_pre_start(ctx)
+        workspace._worktree_add(ctx)
         branch = ctx["task_extra"]["branch"]
         project_name = self.state_dir.name  # "testproj"
         self.assertEqual(branch, f"{project_name}/task/42")
@@ -146,9 +138,9 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "8",
             "project_root": self.project,
         }
-        git_worktree.on_pre_start(ctx)
+        workspace._worktree_add(ctx)
         with self.assertRaises(RuntimeError):
-            git_worktree.on_pre_start(dict(ctx))
+            workspace._worktree_add(dict(ctx))
 
     def test_cleanup_removes_worktree_and_branch(self) -> None:
         ctx: dict = {
@@ -156,7 +148,7 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "9",
             "project_root": self.project,
         }
-        git_worktree.on_pre_start(ctx)
+        workspace._worktree_add(ctx)
         worktree = self.state_dir / "worktrees" / "task-9"
         self.assertTrue(worktree.is_dir())
 
@@ -171,7 +163,7 @@ class GitWorktreeTests(unittest.TestCase):
             "task_id": "9",
             "project_root": self.project,
         }
-        git_worktree.on_cleanup(cleanup_ctx)
+        workspace._worktree_remove(cleanup_ctx)
 
         self.assertFalse(worktree.exists())
         r = subprocess.run(
