@@ -6,6 +6,7 @@ Shared ``launch_stage_driver()`` is called by the orchestrator for subsequent st
 from __future__ import annotations
 
 import argparse
+import re
 import shlex
 import subprocess
 import sys
@@ -20,6 +21,28 @@ from .. import state as state_mod
 from .. import formation as formation_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
+
+
+_TASK_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_TASK_ID_MAX_LEN = 24
+
+
+def _validate_task_id(task_id: str) -> str | None:
+    """Validate a task id as a slug.
+
+    Returns an error message describing the violation, or ``None`` when the
+    id is valid. The id must be kebab-case (lowercase ``a-z``, ``0-9``, single
+    hyphens, no leading/trailing/consecutive hyphens) and at most
+    ``_TASK_ID_MAX_LEN`` characters.
+    """
+    if not _TASK_ID_RE.match(task_id):
+        return (
+            "error: task id must be kebab-case "
+            f"(lowercase a-z, 0-9, single hyphens): {task_id}"
+        )
+    if len(task_id) > _TASK_ID_MAX_LEN:
+        return f"error: task id too long ({len(task_id)} chars, max {_TASK_ID_MAX_LEN}): {task_id}"
+    return None
 
 
 def _fleet_clone_root() -> Path:
@@ -243,6 +266,11 @@ def _resolve_description(args: argparse.Namespace) -> str | None:
 
 
 def run(args: argparse.Namespace) -> int:
+    task_id_error = _validate_task_id(args.task_id)
+    if task_id_error is not None:
+        print(task_id_error, file=sys.stderr)
+        return 1
+
     description = _resolve_description(args)
     if description is None:
         return 1
