@@ -1,7 +1,7 @@
-# agent-fleet driver 規律 (pointer)
+# agent-fleet driver discipline (pointer)
 
-> これは agent-fleet repo 向けの規律。
-> 他 PJ の driver は自分の PJ の CLAUDE.md / AGENTS.md を読め。
+> This is the discipline for the agent-fleet repo.
+> Drivers of other projects must read their own project's CLAUDE.md / AGENTS.md.
 
-driver 規律 (git workflow 等) は **同階層の `AGENTS.md`** に書いてある。
-Read tool でそれを開いて従え。内容の重複を避けるため本ファイルは pointer のみ。
+The driver discipline (git workflow, etc.) is written in **`AGENTS.md` in the same directory**.
+Open it with the Read tool and follow it. To avoid duplicating content, this file is only a pointer.

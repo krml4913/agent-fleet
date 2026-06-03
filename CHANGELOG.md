@@ -17,157 +17,157 @@ development **Phase** (per `docs/design.md`) until the first tagged release.
 
 ### formation template + `fleet init` UX (Issue #105)
 
-- formation: `src/fleet/presets/` → `src/fleet/templates/` に移動。"preset formation" の用語を廃止し、fleet 同梱の雛形は "formation template"、project が持つ実体は "formation" と呼び分ける。
-- formation: `fleet init` に `--formation` / `--no-formation` / `--non-interactive` オプションを追加。TTY では番号・名前入力の対話ピッカーを表示し、選択した formation template を `<state>/formations/` にコピーする。非 TTY (CI / pipe) では `--formation` 未指定時は formations/ 空で完了。
-- formation: `fleet formation init --from <template> [--name <name>]` サブコマンドを新設。既存 project に後から formation template をコピーできる。
-- formation: `fleet formation list` の見出しを "preset formations:" → "template formations:" に更新。
-- formation: `fleet-agent start --formation` のデフォルトを `solo` から `None` に変更。解決ルール: 明示指定 → `<state>/formations/` から strict ロード (template fallback なし)。未指定 + 1 件のみ → 自動採用。未指定 + 空 → `leader-session.json` の agent で即興 `_leader_solo` 合成。未指定 + 複数 → 曖昧エラー。
-- leader: `fleet leader` が起動時に `<state>/leader-session.json` を書くようになった。start の formation fallback がこれを読んで leader の agent で solo formation を合成する。
+- formation: moved `src/fleet/presets/` → `src/fleet/templates/`. Dropped the term "preset formation"; the templates bundled with fleet are called "formation template", while the actual entities a project owns are called "formation".
+- formation: added `--formation` / `--no-formation` / `--non-interactive` options to `fleet init`. On a TTY it shows an interactive picker that accepts a number or name, and copies the chosen formation template into `<state>/formations/`. On a non-TTY (CI / pipe), if `--formation` is not specified it completes with an empty formations/.
+- formation: added a new `fleet formation init --from <template> [--name <name>]` subcommand. It lets you copy a formation template into an existing project after the fact.
+- formation: updated the heading of `fleet formation list` from "preset formations:" → "template formations:".
+- formation: changed the default of `fleet-agent start --formation` from `solo` to `None`. Resolution rule: explicit specification → strict load from `<state>/formations/` (no template fallback). Unspecified + exactly 1 present → auto-adopted. Unspecified + empty → synthesize an ad-hoc `_leader_solo` from the agent in `leader-session.json`. Unspecified + multiple → ambiguity error.
+- leader: `fleet leader` now writes `<state>/leader-session.json` at startup. The start formation fallback reads this to synthesize a solo formation with the leader's agent.
 
 ### prompt deliverer submit retry (Issue #98)
 
 - Detached prompt deliverer now waits briefly after paste, sends Enter, and verifies submit via adapter-specific working markers or by checking that the prompt pointer no longer remains in the active input line.
 - If the pointer is still sitting at the Codex/Claude prompt, the deliverer retries Enter a bounded number of times before failing the task with an error event.
 
-### Codex update prompt 抑止 (Issue #93)
+### Suppress Codex update prompt (Issue #93)
 
-- Codex driver 起動時に `-c check_for_update_on_startup=false` を渡し、update prompt が driver prompt を吸い込む事故を発生源で抑止。
-- `fleet preflight` に `codex-update` optional check を追加。`codex --version` と npm latest、npm global install の version を比較し、古い CLI や PATH ズレを警告する。
+- Pass `-c check_for_update_on_startup=false` when launching the Codex driver, suppressing at the source the accident where the update prompt swallows the driver prompt.
+- Added a `codex-update` optional check to `fleet preflight`. It compares the version of `codex --version`, the npm latest, and the npm global install, warning about an outdated CLI or a PATH mismatch.
 
-### topology → formation 改称 (Issue #88)
+### topology → formation rename (Issue #88)
 
-- 概念名 `topology` を `formation` に全面改称
+- Renamed the concept name `topology` to `formation` across the board.
 
-### race formation を廃止 (2026-05-20)
+### Remove the race formation (2026-05-20)
 
-**Migration note**: `race` formation preset および `candidates` shape は削除された。
-Issue #29 結論 E の実装 (root 大改修 段階 1)。
+**Migration note**: the `race` formation preset and the `candidates` shape have been removed.
+This is the implementation of Issue #29 conclusion E (root overhaul, stage 1).
 
-- `src/fleet/presets/race.yaml` を削除
-- formation の valid shape は `roles` / `stages` のみ (`candidates` は無効)
-- preset は `solo` / `pair_review` / `multi_stage` の 3 つ
+- Removed `src/fleet/presets/race.yaml`.
+- The valid shapes for a formation are only `roles` / `stages` (`candidates` is invalid).
+- The presets are the 3: `solo` / `pair_review` / `multi_stage`.
 
-`candidates` を使っていた formation YAML は `roles` / `stages` に書き直すこと。
+Formation YAML that used `candidates` must be rewritten to `roles` / `stages`.
 
-### task.yaml スキーマ刷新 (2026-05-20)
+### task.yaml schema overhaul (2026-05-20)
 
-root 大改修 段階 2 (PR #46)。Issue #28/#29 結論 D の実装。
+Root overhaul stage 2 (PR #46). The implementation of Issue #28/#29 conclusion D.
 
-- `task.yaml` を「1 task = 1 formation、複数 stage を持つ」新スキーマに刷新
-- task 作成時に formation 定義を task.yaml に展開コピー (snapshot)
-- 各 stage は `status` (pending/running/done)、任意で `peer_review` / `user_approval` を持つ
-- task 全体の `status` は stages から導出するキャッシュ
+- Overhauled `task.yaml` to the new schema "1 task = 1 formation, with multiple stages".
+- At task creation time, the formation definition is expanded and copied into task.yaml (snapshot).
+- Each stage has a `status` (pending/running/done) and optionally `peer_review` / `user_approval`.
+- The task-wide `status` is a cache derived from the stages.
 
-### `fleet spawn` → `fleet start` 改名・役割変更 (2026-05-20)
+### Rename/role change of `fleet spawn` → `fleet start` (2026-05-20)
 
-root 大改修 段階 3 (PR #47)。Issue #29 結論 C の実装。
+Root overhaul stage 3 (PR #47). The implementation of Issue #29 conclusion C.
 
-**Migration note**: `fleet-agent spawn` は廃止。driver 起動は `fleet-agent start`。
+**Migration note**: `fleet-agent spawn` is gone. Driver launch is `fleet-agent start`.
 
-- `fleet start <id> "<desc>" --formation T` = task 開始 (task.yaml 作成 + worktree + 最初の stage の driver 起動)
-- `--role` オプション廃止 (orchestrator が stage を順に回す)
-- 「指定 stage の driver を起動」を `launch_stage_driver()` に切り出し (start と orchestrator で共用)
-- `save_task` を `yaml.safe_dump` に変更 — title 等に `:` `#` を含んでも task.yaml が壊れない
+- `fleet start <id> "<desc>" --formation T` = start a task (create task.yaml + worktree + launch the driver for the first stage).
+- Removed the `--role` option (the orchestrator cycles through stages in order).
+- Extracted "launch the driver for a given stage" into `launch_stage_driver()` (shared by start and the orchestrator).
+- Changed `save_task` to `yaml.safe_dump` — task.yaml no longer breaks even when the title etc. contains `:` or `#`.
 
-### orchestrator.py 新設 + done.py を role 単位に (2026-05-20)
+### New orchestrator.py + done.py made role-scoped (2026-05-20)
 
-root 大改修 段階 4 (PR #48)。Issue #29 結論 A/B の実装。
+Root overhaul stage 4 (PR #48). The implementation of Issue #29 conclusion A/B.
 
-- `src/fleet/orchestrator.py` 新設 — done 駆動の state machine。daemon / polling は持たない
-- `fleet-agent done --result <approved|changes-requested>` — role 単位の完了
-- done が `orchestrator.advance()` を呼び、次 stage を起動 (無ければ task を completed に)
+- New `src/fleet/orchestrator.py` — a done-driven state machine. It has no daemon / polling.
+- `fleet-agent done --result <approved|changes-requested>` — completion per role.
+- done calls `orchestrator.advance()`, launching the next stage (or marking the task completed if there is none).
 
-### peer_review ループ + user_approval ゲート (2026-05-20)
+### peer_review loop + user_approval gate (2026-05-20)
 
-root 大改修 段階 5 (PR #50)。Issue #28 の実装。
+Root overhaul stage 5 (PR #50). The implementation of Issue #28.
 
-- stage 属性 `peer_review` — stage 内で implement → 査読 → changes なら実装担当に戻る (上限 3 巡)
-- stage 属性 `user_approval` — done 前に `fleet-agent ask` で user の明示承認を取る
-- stage 内処理順序: implement → peer_review (max 3) → user_approval → stage 完了
+- stage attribute `peer_review` — within a stage, implement → review → if changes, return to the implementer (up to 3 rounds).
+- stage attribute `user_approval` — before done, take the user's explicit approval via `fleet-agent ask`.
+- Processing order within a stage: implement → peer_review (max 3) → user_approval → stage complete.
 
-### git を driver に寄せる (2026-05-20)
+### Move git over to the driver (2026-05-20)
 
-root 大改修 段階 6 (PR #51)。Issue #30 の実装。
+Root overhaul stage 6 (PR #51). The implementation of Issue #30.
 
-- 作業の git (commit / push / PR / conflict 解決) は driver が行う。手順は `driver-base.md` に明記
-- fleet core は worktree の作成/削除以外の git を叩かない
-- `docs/design.md` §8 を「作業の git は driver、worktree 境界だけ仕組み」に更新
+- The work's git (commit / push / PR / conflict resolution) is done by the driver. The procedure is spelled out in `driver-base.md`.
+- fleet core does not touch git other than creating/removing the worktree.
+- Updated `docs/design.md` §8 to "the work's git is the driver's; only the worktree boundary is mechanism".
 
-### root 改修 総点検 (2026-05-20)
+### root overhaul full inspection (2026-05-20)
 
-root 大改修 段階 7 (PR #52)。
+Root overhaul stage 7 (PR #52).
 
-- 旧 `src/fleet/commands/spawn.py` (start.py 新設時の消し漏れ、289 行) を削除
-- README.md / design.md / leader-handoff.md を新設計に整合
-- preset 3 つ (solo / pair_review / multi_stage) が新スキーマであることを確認
+- Removed the old `src/fleet/commands/spawn.py` (a 289-line leftover that was missed when start.py was created).
+- Reconciled README.md / design.md / leader-handoff.md with the new design.
+- Confirmed the 3 presets (solo / pair_review / multi_stage) conform to the new schema.
 
-### `fleet-agent cleanup` の通知を削除 (2026-05-20)
+### Remove the `fleet-agent cleanup` notification (2026-05-20)
 
-PR #49。`cleanup` 時の macOS / Slack 通知をやめた。task の片付け通知はノイズになり、
-`ask` (user の判断が要る) の通知を埋もれさせるため。`done` / `ask` の通知は維持。
+PR #49. Stopped the macOS / Slack notification on `cleanup`. Task-teardown notifications become noise and
+bury the `ask` notification (which requires a user decision). The `done` / `ask` notifications are kept.
 
-### inbox delivery + ack 機構 (2026-05-20)
+### inbox delivery + ack mechanism (2026-05-20)
 
-leader → driver の通知を double-ended に強化。
+Strengthened the leader → driver notification to be double-ended.
 
-#### A. delivery — inbox 追記後に driver pane を起こす
+#### A. delivery — wake the driver pane after appending to the inbox
 
-- `fleet-agent inbox` が inbox.md への追記・event 発火に加え、driver の tmux pane に
-  通知テキスト (`[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ`) を
-  `send-keys` で送信するようになった。
-- pane が存在しない場合 (driver 未 spawn / 既終了) は warn のみ出して inbox 追記は成功させる。
-- `inbox_message` event に `inbox_ts` フィールド追加 (inbox.md ヘッダと同一タイムスタンプ)。
+- In addition to appending to inbox.md and firing the event, `fleet-agent inbox` now sends
+  notification text (`[fleet] new message in inbox. check it with fleet-agent inbox-read`) to the
+  driver's tmux pane via `send-keys`.
+- When the pane does not exist (driver not yet spawned / already terminated), it only warns and still succeeds at appending to the inbox.
+- Added an `inbox_ts` field to the `inbox_message` event (the same timestamp as the inbox.md header).
 
-#### B. ack — `fleet-agent inbox-read` 新コマンド (driver-side)
+#### B. ack — new `fleet-agent inbox-read` command (driver-side)
 
-- `fleet-agent inbox-read` を新設。
-  - 当該タスクの `inbox.md` を stdout に出力。
-  - 副作用で `inbox_seen` event を events.jsonl に append。
-  - `watermark` = inbox.md の最後の `### <ISO8601>` ヘッダの値。
-- driver は inbox を `cat` で直読みせず `fleet-agent inbox-read` 経由で読む。
+- Added `fleet-agent inbox-read`.
+  - Prints the task's `inbox.md` to stdout.
+  - As a side effect, appends an `inbox_seen` event to events.jsonl.
+  - `watermark` = the value of the last `### <ISO8601>` header in inbox.md.
+- The driver reads the inbox via `fleet-agent inbox-read` rather than reading it directly with `cat`.
 
-#### C. driver-base.md rule 変更
+#### C. driver-base.md rule change
 
-- "check inbox each turn" → "`fleet-agent inbox-read` で読め (cat/Read 直読み禁止)"。
-- delivery で起こされた driver が `fleet-agent inbox-read` を叩く流れを rule に明記。
+- "check inbox each turn" → "read it with `fleet-agent inbox-read` (direct cat/Read reading prohibited)".
+- The flow where a driver woken by delivery runs `fleet-agent inbox-read` is spelled out in the rule.
 
-#### D. 未読表示 — `fleet status`
+#### D. unread display — `fleet status`
 
-- `fleet status` の task 一覧に `[unread inbox]` フラグを追加。
-- 判定: 最新 `inbox_message.ts` > 最新 `inbox_seen.watermark` なら未読。
+- Added an `[unread inbox]` flag to the task list in `fleet status`.
+- Determination: unread if the latest `inbox_message.ts` > the latest `inbox_seen.watermark`.
 
-#### E. `task_context.resolve` 改善
+#### E. `task_context.resolve` improvement
 
-- `FLEET_STATE_DIR` env var を state-dir 解決のフォールバックとして利用するように変更。
-  cwd-based discovery が失敗したときのみ使用 (spawned pane の CWD がプロジェクト外の場合の救済)。
+- Changed to use the `FLEET_STATE_DIR` env var as a fallback for state-dir resolution.
+  Used only when cwd-based discovery fails (a rescue for when the spawned pane's CWD is outside the project).
 
 #### Migration note
 
-- driver 側ルール更新: inbox は `fleet-agent inbox-read` 経由で読むこと (cat 直読み禁止)。
-- `inbox_message` event に `inbox_ts` フィールドが追加された (後方互換維持、WIP スコープ)。
+- Driver-side rule update: read the inbox via `fleet-agent inbox-read` (direct cat reading prohibited).
+- An `inbox_ts` field was added to the `inbox_message` event (backward compatibility maintained, WIP scope).
 
 #### Tests
 
-- `test_inbox_cmd.py`: delivery mock テスト 3 件追加。
-- `test_inbox_read_cmd.py`: 新規 — watermark 計算 4 件 + inbox-read コマンド 6 件 = 計 10 件。
-- `test_status.py`: 未読判定ロジック 6 件 + 統合テスト 1 件追加。
-- `test_cli_parsers.py`: agent コマンド数 7 → 8 (inbox-read 追加)。
-- Tests: 166 cases pass。
+- `test_inbox_cmd.py`: added 3 delivery mock tests.
+- `test_inbox_read_cmd.py`: new — 4 watermark-calculation + 6 inbox-read command = 10 total.
+- `test_status.py`: added 6 unread-determination logic + 1 integration test.
+- `test_cli_parsers.py`: agent command count 7 → 8 (inbox-read added).
+- Tests: 166 cases pass.
 
-### `fleet-agent spawn` auto-paste が Enter を送信するよう修正 (2026-05-20)
+### Fix `fleet-agent spawn` auto-paste so it sends Enter (2026-05-20)
 
-- `tmux.send_keys` に空文字列を渡すと一部の tmux バージョンでエラーが発生し、
-  外側の `except TmuxError` に吸い込まれて Enter が未送信のまま return していた。
-- `send_keys` を修正: `text` が空の場合は最初の `_run` をスキップし、
-  `enter=True` の場合は必ず Enter を送信するよう保証した。
-- spawn の auto-paste パスは変更なし（`paste_buffer` → `send_keys("", enter=True)` の順序は維持）。
-- テスト 6 件追加: `send_keys` の mock-based 単体テスト 4 件 + spawn auto-paste の結合テスト 2 件。
+- Passing an empty string to `tmux.send_keys` triggered an error in some tmux versions,
+  which got swallowed by the outer `except TmuxError`, returning with Enter unsent.
+- Fixed `send_keys`: when `text` is empty, skip the first `_run`, and
+  guarantee that Enter is always sent when `enter=True`.
+- No change to the spawn auto-paste path (the order `paste_buffer` → `send_keys("", enter=True)` is preserved).
+- Added 6 tests: 4 mock-based unit tests for `send_keys` + 2 integration tests for spawn auto-paste.
 
-### driver-prompt を markdown テンプレートに切り出し (2026-05-20)
+### Extract the driver prompt into a markdown template (2026-05-20)
 
-- `src/fleet/driver_prompt.py` に直書きされていたプロンプト本文を `docs/prompts/driver-base.md` に移動。
-- `driver_prompt.py` はテンプレート読み込み + 変数差し込みのみに特化。振る舞いは不変。
-- `docs/prompts/driver-base.md` を直接編集することで markdown レビューとしてプロンプト変更が可視化される。
+- Moved the prompt body that was hardcoded in `src/fleet/driver_prompt.py` to `docs/prompts/driver-base.md`.
+- `driver_prompt.py` is now specialized to just template loading + variable substitution. Behavior is unchanged.
+- By editing `docs/prompts/driver-base.md` directly, prompt changes become visible as a markdown review.
 
 ### `fleet-agent spawn` auto-paste by default (2026-05-20)
 
@@ -377,7 +377,7 @@ live in an opt-in plugin.
 ### Phase 4 — driver communication protocol (2026-05-19)
 
 Drivers can now report up to the user without going through the leader
-(design doc §7 — "leader は介在しない").
+(design doc §7 — "the leader does not intervene").
 
 - `fleet.task_context.resolve(...)` — figure out which task a driver-side
   CLI call is acting on, from (1) explicit `--task-id`, (2) `FLEET_TASK_ID`
