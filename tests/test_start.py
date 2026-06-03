@@ -561,5 +561,118 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         mock_tmux.new_window.assert_called_once()
 
 
+class ValidateTaskIdTests(unittest.TestCase):
+    """Unit tests for the pure ``_validate_task_id`` slug validator."""
+
+    def test_valid_ids_return_none(self) -> None:
+        from fleet.commands import start
+
+        valid = [
+            "a",
+            "7",
+            "task1",
+            "validate-task-id",
+            "fix-the-bug",
+            "abc-123-def",
+            "a1b2c3",
+            "x" * 24,  # exactly at the max length
+        ]
+        for task_id in valid:
+            with self.subTest(task_id=task_id):
+                self.assertIsNone(start._validate_task_id(task_id))
+
+    def test_invalid_shape_returns_kebab_error(self) -> None:
+        from fleet.commands import start
+
+        invalid = [
+            "",  # empty
+            "-leading",
+            "trailing-",
+            "double--hyphen",
+            "Upper",
+            "has space",
+            "under_score",
+            "sym!bol",
+            "слон",  # non-ascii
+        ]
+        for task_id in invalid:
+            with self.subTest(task_id=task_id):
+                msg = start._validate_task_id(task_id)
+                self.assertIsNotNone(msg)
+                self.assertIn("kebab-case", msg)
+                self.assertIn(task_id, msg)
+
+    def test_too_long_returns_length_error(self) -> None:
+        from fleet.commands import start
+
+        task_id = "a" * 25  # one over the max
+        msg = start._validate_task_id(task_id)
+        self.assertIsNotNone(msg)
+        self.assertIn("too long", msg)
+        self.assertIn("25 chars", msg)
+        self.assertIn("max 24", msg)
+        self.assertIn(task_id, msg)
+
+    def test_shape_checked_before_length(self) -> None:
+        from fleet.commands import start
+
+        # Too long AND malformed (uppercase) — shape error wins.
+        task_id = "A" * 25
+        msg = start._validate_task_id(task_id)
+        self.assertIsNotNone(msg)
+        self.assertIn("kebab-case", msg)
+
+
+class StartTaskIdValidationTests(unittest.TestCase):
+    """``start`` rejects invalid task ids before creating any state."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "demo", self.project)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def test_rejects_malformed_task_id(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "Bad_ID", "some work",
+            fleet_home=self.fleet_home,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("kebab-case", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-Bad_ID").exists())
+
+    def test_rejects_too_long_task_id(self) -> None:
+        long_id = "a" * 25
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            long_id, "some work",
+            fleet_home=self.fleet_home,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("too long", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / f"task-{long_id}").exists())
+
+    def test_accepts_valid_kebab_task_id(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "valid-task-id", "some work",
+            fleet_home=self.fleet_home,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.state_dir / "tasks" / "task-valid-task-id").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()
