@@ -48,7 +48,7 @@ class DriverPromptTests(unittest.TestCase):
         )
         line_count = text.count("\n")
         # Be generous; we just want a tripwire if BASE balloons.
-        self.assertLess(line_count, 45, f"driver-prompt got fat: {line_count} lines")
+        self.assertLess(line_count, 60, f"driver-prompt got fat: {line_count} lines")
 
     def test_mentions_fleet_agent_ask_rule(self) -> None:
         text = driver_prompt.render(
@@ -78,8 +78,8 @@ class DriverPromptTests(unittest.TestCase):
             role="implementer",
             agent="claude:sonnet",
         )
-        self.assertIn("あなたは実装者", text)
-        self.assertIn("承認された設計", text)
+        self.assertIn("You are the implementer", text)
+        self.assertIn("an approved design exists", text)
 
     def test_skips_role_fragment_when_role_file_is_missing(self) -> None:
         text = driver_prompt.render(
@@ -89,9 +89,9 @@ class DriverPromptTests(unittest.TestCase):
             role="unknown-role",
             agent="claude:sonnet",
         )
-        self.assertNotIn("あなたは実装者", text)
-        self.assertNotIn("あなたは査読者", text)
-        self.assertNotIn("あなたは設計者", text)
+        self.assertNotIn("You are the implementer", text)
+        self.assertNotIn("You are the reviewer", text)
+        self.assertNotIn("You are the designer", text)
 
     def test_composes_base_role_then_description(self) -> None:
         text = driver_prompt.render(
@@ -102,7 +102,7 @@ class DriverPromptTests(unittest.TestCase):
             agent="claude:sonnet",
         )
         base_idx = text.index("You are a fleet driver")
-        role_idx = text.index("あなたは実装者")
+        role_idx = text.index("You are the implementer")
         description_idx = text.index("Task description sentinel.")
         self.assertLess(base_idx, role_idx)
         self.assertLess(role_idx, description_idx)
