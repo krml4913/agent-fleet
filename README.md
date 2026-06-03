@@ -110,8 +110,13 @@ yourself from a second shell:
 
 ```bash
 cd /tmp/trial
-~/dev/agent-fleet/fleet-agent start 1 "Implement a hello-world script." --formation solo
+~/dev/agent-fleet/fleet-agent start hello-world "Implement a hello-world script." --formation solo
 ```
+
+The first argument (`hello-world` here) is the **task id** you choose — a short
+kebab-case slug (lowercase letters, digits, hyphens) that names the task. It is
+not an auto-assigned number; it becomes the branch name, the state directory,
+and the tmux window label, so pick something descriptive.
 
 This writes the task state, renders a `driver-prompt.md`, opens a new tmux
 window running the first stage's driver, and (by default) auto-pastes a pointer
@@ -126,7 +131,7 @@ From any shell in the project:
 
 ```bash
 ~/dev/agent-fleet/fleet status                 # project + task list + recent events
-~/dev/agent-fleet/fleet log 1                   # tail this task's events
+~/dev/agent-fleet/fleet log hello-world          # tail this task's events
 cat fleet-state/projects/trial/dashboard.md     # human-readable rollup
 ```
 
@@ -140,7 +145,7 @@ This is the core of the felt experience. To look over a driver's shoulder or
 take over:
 
 ```bash
-~/dev/agent-fleet/fleet attach 1      # attach to task 1's driver pane
+~/dev/agent-fleet/fleet attach hello-world   # attach to the task's driver pane
 ~/dev/agent-fleet/fleet attach        # attach to the leader (default target)
 ```
 
@@ -150,7 +155,7 @@ leave the driver an asynchronous note instead of attaching, the leader can drop
 a message in its inbox:
 
 ```bash
-~/dev/agent-fleet/fleet-agent inbox 1 "Use argparse, not sys.argv parsing."
+~/dev/agent-fleet/fleet-agent inbox hello-world "Use argparse, not sys.argv parsing."
 ```
 
 ### 8. Answer questions and approval gates
@@ -162,8 +167,8 @@ finishes. You make the call; the **leader relays it** (the leader never
 self-approves):
 
 ```bash
-~/dev/agent-fleet/fleet-agent approve 1     # approve the pending gate
-~/dev/agent-fleet/fleet-agent reject 1      # reject; the stage returns to work
+~/dev/agent-fleet/fleet-agent approve hello-world   # approve the pending gate
+~/dev/agent-fleet/fleet-agent reject hello-world    # reject; the stage returns to work
 ```
 
 In a `pair_review` formation, the implementer hands off to an AI reviewer
@@ -174,7 +179,7 @@ automatically; only the final user-approval gate needs you.
 When a task is done, tear it down (and optionally archive its state):
 
 ```bash
-~/dev/agent-fleet/fleet-agent cleanup 1 --archive
+~/dev/agent-fleet/fleet-agent cleanup hello-world --archive
 ```
 
 This runs the workspace cleanup hook (removing the worktree if you used one),
