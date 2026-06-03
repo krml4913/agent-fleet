@@ -1,19 +1,19 @@
 # Backlog
 
-実装 TODO の置き場。 設計課題 / open question は **GitHub Issues** で管理する。
-完了したら削除 (履歴は git log と CHANGELOG.md で十分)。
+A place to park implementation TODOs. Design questions / open questions are managed in **GitHub Issues**.
+Delete items once done (git log and CHANGELOG.md are enough for history).
 
 ## priority
 
-(空)
+(empty)
 
 ## someday
 
-(空)
+(empty)
 
 ---
 
-2026-05-20 dogfooding session で旧項目はすべて消化済み (実装済み or
-GitHub Issues へ移行)。 設計課題は `gh issue list` を見ろ。
+2026-05-20 During the dogfooding session, all old items were cleared out (either implemented or
+migrated to GitHub Issues). For design questions, see `gh issue list`.
 
-新しい実装 TODO が出たらここに足す。
+When new implementation TODOs come up, add them here.
