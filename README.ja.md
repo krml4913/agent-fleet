@@ -117,8 +117,13 @@ leader は動き続ける。
 
 ```bash
 cd /tmp/trial
-~/dev/agent-fleet/fleet-agent start 1 "Implement a hello-world script." --formation solo
+~/dev/agent-fleet/fleet-agent start hello-world "Implement a hello-world script." --formation solo
 ```
+
+第 1 引数（ここでは `hello-world`）は自分で付ける **タスク id** である。短い
+kebab-case の slug（小文字英字・数字・ハイフン）でタスクに名前を付ける。自動採番の
+番号ではない。これが branch 名・state ディレクトリ・tmux ウィンドウ名になるので、
+内容が分かる名前を付ける。
 
 これはタスク state を書き込み、`driver-prompt.md` をレンダリングし、最初の stage の
 driver を動かす新しい tmux ウィンドウを開き、（デフォルトでは）エージェントの準備が
@@ -133,7 +138,7 @@ driver を動かす新しい tmux ウィンドウを開き、（デフォルト�
 
 ```bash
 ~/dev/agent-fleet/fleet status                 # プロジェクト + タスク一覧 + 直近のイベント
-~/dev/agent-fleet/fleet log 1                   # このタスクのイベントを tail
+~/dev/agent-fleet/fleet log hello-world          # このタスクのイベントを tail
 cat fleet-state/projects/trial/dashboard.md     # 人間が読めるロールアップ
 ```
 
@@ -146,7 +151,7 @@ cat fleet-state/projects/trial/dashboard.md     # 人間が読めるロールア
 これがこの体験の核心である。driver の肩越しに覗いたり、引き継いだりするには:
 
 ```bash
-~/dev/agent-fleet/fleet attach 1      # タスク 1 の driver ペインにアタッチ
+~/dev/agent-fleet/fleet attach hello-world   # このタスクの driver ペインにアタッチ
 ~/dev/agent-fleet/fleet attach        # leader にアタッチ（デフォルトターゲット）
 ```
 
@@ -156,7 +161,7 @@ cat fleet-state/projects/trial/dashboard.md     # 人間が読めるロールア
 投げ込める:
 
 ```bash
-~/dev/agent-fleet/fleet-agent inbox 1 "Use argparse, not sys.argv parsing."
+~/dev/agent-fleet/fleet-agent inbox hello-world "Use argparse, not sys.argv parsing."
 ```
 
 ### 8. 質問と承認ゲートに答える
@@ -168,8 +173,8 @@ driver があなたを必要とするときは `fleet-agent ask` を呼び、タ
 自分で承認しない）:
 
 ```bash
-~/dev/agent-fleet/fleet-agent approve 1     # 保留中のゲートを承認
-~/dev/agent-fleet/fleet-agent reject 1      # 却下。stage は作業に戻る
+~/dev/agent-fleet/fleet-agent approve hello-world   # 保留中のゲートを承認
+~/dev/agent-fleet/fleet-agent reject hello-world    # 却下。stage は作業に戻る
 ```
 
 `pair_review` formation では、implementer が自動的に AI reviewer に引き継ぐ。あなたが
@@ -180,7 +185,7 @@ driver があなたを必要とするときは `fleet-agent ask` を呼び、タ
 タスクが完了したら、それを撤去する（任意で state をアーカイブする）:
 
 ```bash
-~/dev/agent-fleet/fleet-agent cleanup 1 --archive
+~/dev/agent-fleet/fleet-agent cleanup hello-world --archive
 ```
 
 これは workspace のクリーンアップフックを実行し（worktree を使っていれば削除し）、
