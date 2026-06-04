@@ -37,11 +37,12 @@ leader drives the drivers via the `fleet-agent` CLI.
 
 ---
 
-## Tutorial: from clone to first task
+## Quickstart — the user's path
 
-This walkthrough takes a fresh checkout to a running task you can watch and
-intervene in. Commands assume you cloned agent-fleet to `~/dev/agent-fleet`;
-adjust the path to match yours.
+This is what using fleet actually feels like: a little one-time setup, then you
+mostly **talk to the leader in chat**. You rarely type the per-task mechanics
+yourself — the leader issues them for you. Commands assume you cloned
+agent-fleet to `~/dev/agent-fleet`; adjust the path to match yours.
 
 ### 1. Clone and verify the environment
 
@@ -71,42 +72,86 @@ git add -A && git -c user.email=t@x -c user.name=t commit -m init
 ```
 
 `init` registers the project in fleet's registry and creates its state under
-`agent-fleet/fleet-state/projects/trial/`. It also offers to copy formation
-templates in; pass `--formation solo,pair_review` (or `--no-formation`) to skip
-the interactive picker. You can run the rest of the commands from inside the
-project directory — fleet resolves the project name from your cwd.
+`agent-fleet/fleet-state/projects/trial/`. Run the rest of the commands from
+inside the project directory — fleet resolves the project name from your cwd.
 
-### 3. Choose a workspace mode (optional)
-
-By default tasks run in place. To give each task its own git branch/worktree:
+Optionally give each task its own git branch/worktree (the default is in-place):
 
 ```bash
 ~/dev/agent-fleet/fleet workspace set worktree
-~/dev/agent-fleet/fleet workspace list   # confirm the active mode
 ```
 
-With `worktree`, `fleet-agent start` warns (but continues) if your branch is
-behind its known upstream — it never fetches and never blocks an offline start.
-
-### 4. Launch the leader
+### 3. Launch the leader
 
 ```bash
 ~/dev/agent-fleet/fleet leader --attach
 ```
 
 This creates the tmux session `fleet-trial` with the leader agent (default
-`claude:opus`) running in it, and attaches you to it in the foreground. The
-session is single-instance per project: if it already exists, fleet just prints
-the attach command. Override the agent with `--agent claude:sonnet` etc.
+`claude:opus`) running in it, and attaches you in the foreground. The session is
+single-instance per project. Detach any time with `C-b d`; the leader keeps
+running. This is the one pane you live in.
 
-You are now in a normal tmux session. Detach any time with `C-b d`; the leader
-keeps running.
+### 4. Talk to the leader
 
-### 5. Dispatch a task
+Here is the actual core of using fleet: **you describe the task in plain prose
+to the leader in chat**, and the leader does the rest — it picks a formation,
+chooses the agent(s), and spawns the driver(s) for you.
 
-You normally *tell the leader in chat* what you want, and the leader issues the
-`fleet-agent start` call for you. To see the mechanics directly, run it
-yourself from a second shell:
+```
+you ▸ Add a --json flag to the status command and cover it with a test.
+      Use the pair_review formation.
+
+leader ▸ Starting `status-json-flag` as pair_review (codex implements,
+         claude reviews). I'll ping you when it needs your sign-off.
+```
+
+You do **not** normally run `fleet-agent start` yourself — the leader translates
+your request into that call. From here on you mostly type prose, not shell
+commands: steer the work by chatting with the leader.
+
+### 5. Watch, intervene, and approve
+
+Keep an eye on progress from any shell in the project:
+
+```bash
+~/dev/agent-fleet/fleet status                 # tasks + recent events
+cat fleet-state/projects/trial/dashboard.md    # human-readable rollup (auto-updated)
+```
+
+To look over a driver's shoulder or take over, attach into its pane — this is
+the core of the felt experience:
+
+```bash
+~/dev/agent-fleet/fleet attach status-json-flag   # a task's driver pane
+~/dev/agent-fleet/fleet attach                     # the leader (default target)
+```
+
+You land directly in the live agent session — read its output, type into it,
+correct its course, then detach with `C-b d`.
+
+When a driver needs a decision it fires a notification (pane output alone never
+reaches you), and formations with a `user_approval` gate pause the same way.
+You make the call and **tell the leader**; the leader relays it (it never
+self-approves). Saying "looks good, ship it" or "no, fix X first" in chat is all
+you do — the leader runs the actual approve/reject for you.
+
+That is the whole loop: **init → launch the leader → chat → watch / approve.**
+You do not normally touch `fleet-agent start / inbox / approve / cleanup` —
+those are the leader's job. The next section shows them anyway, for when you
+want to understand the mechanics or hand-drive a task.
+
+---
+
+## Under the hood — driving it manually
+
+> You don't normally type any of these. The leader runs them on your behalf
+> when you chat with it. This section is a reference for understanding the
+> moving parts — or for driving a task by hand without a leader.
+
+Everything below uses the `hello-world` task id as the example.
+
+### Dispatch a task
 
 ```bash
 cd /tmp/trial
@@ -125,46 +170,20 @@ to the prompt into the pane once the agent is ready. Pick the team shape with
 override the first-stage agent with `--agent`. Use `--prompt-file PATH` to pass
 a long description from a file instead of inline.
 
-### 6. Watch progress
+### Leave a driver an asynchronous note
 
-From any shell in the project:
-
-```bash
-~/dev/agent-fleet/fleet status                 # project + task list + recent events
-~/dev/agent-fleet/fleet log hello-world          # tail this task's events
-cat fleet-state/projects/trial/dashboard.md     # human-readable rollup
-```
-
-`status` shows each task's status (`in_progress`, `awaiting_orders`, `done`,
-…) and the latest events. `dashboard.md` is regenerated automatically and is a
-good at-a-glance view to keep open.
-
-### 7. Attach into a driver to intervene
-
-This is the core of the felt experience. To look over a driver's shoulder or
-take over:
-
-```bash
-~/dev/agent-fleet/fleet attach hello-world   # attach to the task's driver pane
-~/dev/agent-fleet/fleet attach        # attach to the leader (default target)
-```
-
-You land directly in the agent's pane. Read its output, type into it, correct
-its course — it is a live agent session. Detach with `C-b d` when done. To
-leave the driver an asynchronous note instead of attaching, the leader can drop
-a message in its inbox:
+Instead of attaching, drop a message into a driver's inbox:
 
 ```bash
 ~/dev/agent-fleet/fleet-agent inbox hello-world "Use argparse, not sys.argv parsing."
 ```
 
-### 8. Answer questions and approval gates
+This appends a timestamped note to the task's `inbox.md` and wakes the pane.
 
-When a driver needs you, it calls `fleet-agent ask`, which flips the task to
-`awaiting_orders` and fires a notification — pane output alone never reaches
-you. Formations with a `user_approval` gate pause the same way when a stage
-finishes. You make the call; the **leader relays it** (the leader never
-self-approves):
+### Approve or reject a gate
+
+When a driver calls `fleet-agent ask`, or a stage with a `user_approval` gate
+finishes, the task flips to `awaiting_orders`. Relay the decision:
 
 ```bash
 ~/dev/agent-fleet/fleet-agent approve hello-world   # approve the pending gate
@@ -172,9 +191,9 @@ self-approves):
 ```
 
 In a `pair_review` formation, the implementer hands off to an AI reviewer
-automatically; only the final user-approval gate needs you.
+automatically; only the final user-approval gate needs a human.
 
-### 9. Finish and clean up
+### Finish and clean up
 
 When a task is done, tear it down (and optionally archive its state):
 

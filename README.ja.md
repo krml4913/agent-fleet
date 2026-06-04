@@ -40,11 +40,12 @@ CLI を通じて driver を動かす。
 
 ---
 
-## チュートリアル: clone から最初のタスクまで
+## クイックスタート: user の歩む道
 
-このウォークスルーは、新規 checkout から、観察したり介入したりできる稼働中の
-タスクまでを案内する。コマンドは agent-fleet を `~/dev/agent-fleet` に clone した
-前提なので、パスは自分の環境に合わせて調整すること。
+fleet を使う実際の体感はこうだ。一度きりのちょっとしたセットアップを済ませたら、
+あとはほぼ **チャットで leader に話しかけるだけ**。per-task の細かいコマンドを自分で
+打つことはまずない —— それは leader が代わりに発行する。コマンドは agent-fleet を
+`~/dev/agent-fleet` に clone した前提なので、パスは自分の環境に合わせて調整すること。
 
 ### 1. clone して環境を検証する
 
@@ -74,27 +75,18 @@ git add -A && git -c user.email=t@x -c user.name=t commit -m init
 ```
 
 `init` はプロジェクトを fleet のレジストリに登録し、その state を
-`agent-fleet/fleet-state/projects/trial/` 配下に作成する。formation テンプレートの
-コピーも提案される。`--formation solo,pair_review` を渡せば（または
-`--no-formation` で）対話的なピッカーをスキップできる。残りのコマンドは
+`agent-fleet/fleet-state/projects/trial/` 配下に作成する。残りのコマンドは
 プロジェクトディレクトリ内から実行できる。fleet は cwd からプロジェクト名を
 解決する。
 
-### 3. workspace モードを選ぶ（任意）
-
-デフォルトではタスクはその場で実行される。各タスクに専用の git branch/worktree を
-与えるには:
+任意で、各タスクに専用の git branch/worktree を与えることもできる（デフォルトは
+その場での作業）:
 
 ```bash
 ~/dev/agent-fleet/fleet workspace set worktree
-~/dev/agent-fleet/fleet workspace list   # アクティブなモードを確認
 ```
 
-`worktree` の場合、`fleet-agent start` は、branch が既知の upstream より遅れて
-いると警告する（ただし続行する）。fetch は決して行わず、オフラインでの start を
-ブロックすることもない。
-
-### 4. leader を起動する
+### 3. leader を起動する
 
 ```bash
 ~/dev/agent-fleet/fleet leader --attach
@@ -102,18 +94,69 @@ git add -A && git -c user.email=t@x -c user.name=t commit -m init
 
 これは `fleet-trial` という tmux セッションを作成し、その中で leader エージェント
 （デフォルトは `claude:opus`）を動かし、フォアグラウンドでアタッチする。セッションは
-プロジェクトごとに単一インスタンスで、既に存在する場合は fleet がアタッチ用の
-コマンドを表示するだけである。エージェントは `--agent claude:sonnet` などで
-上書きできる。
+プロジェクトごとに単一インスタンスである。いつでも `C-b d` でデタッチでき、leader は
+動き続ける。あなたが常駐するのはこの 1 つのペインだ。
 
-これで通常の tmux セッションに入った状態になる。いつでも `C-b d` でデタッチでき、
-leader は動き続ける。
+### 4. leader に話しかける
 
-### 5. タスクをディスパッチする
+ここが fleet を使う体験の核心だ。**あなたはやりたいことを自然な散文で leader に
+チャットで伝える** だけで、あとは leader がやってくれる —— formation を選び、
+エージェントを決め、driver を起動する。
 
-通常は *チャットで leader に欲しいものを伝え*、leader が代わりに
-`fleet-agent start` を発行する。仕組みを直接見るには、2 つ目のシェルから自分で
-実行する:
+```
+you ▸ status コマンドに --json フラグを足して、テストでカバーして。
+      pair_review formation で。
+
+leader ▸ `status-json-flag` を pair_review で開始する（codex が実装、
+         claude がレビュー）。承認が要るタイミングで知らせる。
+```
+
+`fleet-agent start` を自分で打つことは **通常ない** —— leader があなたの依頼を
+そのコマンドに翻訳する。ここから先はシェルコマンドではなく、ほぼ散文を打つだけだ。
+作業は leader とのチャットで舵を取る。
+
+### 5. 観察し、介入し、承認する
+
+プロジェクト内の任意のシェルから進捗を見られる:
+
+```bash
+~/dev/agent-fleet/fleet status                 # タスク一覧 + 直近のイベント
+cat fleet-state/projects/trial/dashboard.md    # 人間が読めるロールアップ（自動更新）
+```
+
+driver の肩越しに覗いたり引き継いだりするには、そのペインにアタッチする —— これが
+体感の核心だ:
+
+```bash
+~/dev/agent-fleet/fleet attach status-json-flag   # このタスクの driver ペイン
+~/dev/agent-fleet/fleet attach                     # leader（デフォルトターゲット）
+```
+
+ライブのエージェントセッションに直接降り立つ —— 出力を読み、入力し、軌道を修正し、
+終わったら `C-b d` でデタッチする。
+
+driver が判断を必要とするときは通知を発火する（ペインの出力だけではあなたに
+届かない）。`user_approval` ゲートを持つ formation も、同じように一時停止する。
+判断を下すのはあなたで、それを **leader に伝える** —— leader が中継する（leader は
+決して自分で承認しない）。チャットで「いいね、出して」「いや、まず X を直して」と
+言うだけでよい —— 実際の approve/reject は leader が代わりに実行する。
+
+これが全体のループだ: **init → leader を起動 → チャット → 観察 / 承認。**
+`fleet-agent start / inbox / approve / cleanup` を自分で触ることは通常ない ——
+それらは leader の仕事だ。次のセクションでは、仕組みを理解したい人や手動でタスクを
+動かしたい人のために、それらを一通り示す。
+
+---
+
+## 内部の仕組み: 手動で動かす
+
+> 通常はこれらを自分で打つことはない。あなたが leader とチャットすると、leader が
+> 代わりに実行する。このセクションは動く部品を理解するための —— あるいは leader
+> なしで手動でタスクを動かすための —— リファレンスである。
+
+以下はすべて `hello-world` というタスク id を例に使う。
+
+### タスクをディスパッチする
 
 ```bash
 cd /tmp/trial
@@ -132,55 +175,30 @@ driver を動かす新しい tmux ウィンドウを開き、（デフォルト�
 最初の stage のエージェントは `--agent` で上書きする。長い説明をインラインではなく
 ファイルから渡すには `--prompt-file PATH` を使う。
 
-### 6. 進捗を見る
+### driver に非同期のメモを残す
 
-プロジェクト内の任意のシェルから:
-
-```bash
-~/dev/agent-fleet/fleet status                 # プロジェクト + タスク一覧 + 直近のイベント
-~/dev/agent-fleet/fleet log hello-world          # このタスクのイベントを tail
-cat fleet-state/projects/trial/dashboard.md     # 人間が読めるロールアップ
-```
-
-`status` は各タスクの状態（`in_progress`、`awaiting_orders`、`done` …）と最新の
-イベントを表示する。`dashboard.md` は自動で再生成され、開きっぱなしにしておくと
-一目で状況を把握できる良いビューになる。
-
-### 7. driver にアタッチして介入する
-
-これがこの体験の核心である。driver の肩越しに覗いたり、引き継いだりするには:
-
-```bash
-~/dev/agent-fleet/fleet attach hello-world   # このタスクの driver ペインにアタッチ
-~/dev/agent-fleet/fleet attach        # leader にアタッチ（デフォルトターゲット）
-```
-
-エージェントのペインに直接降り立つ。出力を読み、入力し、軌道を修正できる。これは
-ライブのエージェントセッションである。終わったら `C-b d` でデタッチする。アタッチ
-する代わりに driver へ非同期のメモを残すには、leader が inbox にメッセージを
-投げ込める:
+アタッチする代わりに、driver の inbox にメッセージを投げ込める:
 
 ```bash
 ~/dev/agent-fleet/fleet-agent inbox hello-world "Use argparse, not sys.argv parsing."
 ```
 
-### 8. 質問と承認ゲートに答える
+これはタスクの `inbox.md` にタイムスタンプ付きのメモを追記し、ペインを起こす。
 
-driver があなたを必要とするときは `fleet-agent ask` を呼び、タスクを
-`awaiting_orders` に切り替えて通知を発火する。ペインの出力だけではあなたに届かない。
-`user_approval` ゲートを持つ formation は、stage が完了したときに同じように一時停止
-する。判断を下すのはあなたで、**それを中継するのは leader** である（leader は決して
-自分で承認しない）:
+### ゲートを承認 / 却下する
+
+driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲートを持つ stage
+が完了したとき、タスクは `awaiting_orders` に切り替わる。判断を中継する:
 
 ```bash
 ~/dev/agent-fleet/fleet-agent approve hello-world   # 保留中のゲートを承認
 ~/dev/agent-fleet/fleet-agent reject hello-world    # 却下。stage は作業に戻る
 ```
 
-`pair_review` formation では、implementer が自動的に AI reviewer に引き継ぐ。あなたが
+`pair_review` formation では、implementer が自動的に AI reviewer に引き継ぐ。人間が
 必要なのは最終のユーザー承認ゲートだけである。
 
-### 9. 終了して片付ける
+### 終了して片付ける
 
 タスクが完了したら、それを撤去する（任意で state をアーカイブする）:
 
