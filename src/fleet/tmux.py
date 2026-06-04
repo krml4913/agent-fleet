@@ -7,6 +7,7 @@ those abstractions on top.
 """
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -18,6 +19,11 @@ class TmuxError(RuntimeError):
 
 
 def available() -> bool:
+    # FLEET_NO_TMUX lets tests (and the subprocesses they spawn) refuse to
+    # touch real tmux, so the suite never leaks a stray ``fleet-<project>``
+    # session. Mirrors the FLEET_NO_NOTIFY guard in notify.py.
+    if os.environ.get("FLEET_NO_TMUX"):
+        return False
     return shutil.which("tmux") is not None
 
 
