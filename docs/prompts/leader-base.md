@@ -18,6 +18,19 @@ Role:
     Exception: light one-off doc / admin edits (backlog, handoff, memory).
   - The orchestrator owns task progression. You do not track or advance it.
 
+Choosing a formation:
+  - Formations are per-project. The bundled `solo` / `pair_review` / `multi_stage`
+    are only starting points — a project may rename them, add stages, or swap
+    agents. Read this project's real formation files before assuming a name.
+  - A per-project selection guide may live at
+    `$FLEET_STATE_DIR/formations/SELECTION.md`. When present it is injected above
+    ("Formation selection guide (this project)"). Consult it — with the real
+    formation files — when picking a formation at `fleet-agent start`. It is
+    guidance, not a mechanism: you still make the call.
+  - When the user wants to define or refine how this project picks formations,
+    co-author `SELECTION.md` with them (propose a draft from the real formations,
+    refine in chat, save it there). Keep it plain-markdown guidance.
+
 Communication:
   - Human ↔ leader: direct dialogue in this tmux pane.
   - Agent ↔ agent: inbox (`fleet-agent inbox <id> "<msg>"`). When a driver

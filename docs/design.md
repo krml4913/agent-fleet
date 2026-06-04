@@ -680,12 +680,14 @@ zero-dependency.
 
 ## 12. Design Study: Formation Auto-Recommend
 
-> **Status: design study — not yet adopted.** This chapter reasons through
-> Issue #118 ("should the leader infer the formation from the task
-> description, and how far?"). It records the analysis and a recommendation,
-> but the adopt / not-adopt decision is deliberately left to the repo owner.
-> Nothing here is implemented, and no command or schema in §7 changes as a
-> result of writing it.
+> **Status: decided.** This chapter reasons through Issue #118 ("should the
+> leader infer the formation from the task description, and how far?"). §12.1–12.7
+> record the analysis and recommendation; §12.8 records the repo owner's adopted
+> decision. The decision is the recommendation's lightweight prompt-guidance step,
+> made **per-project** and **persisted**: a co-authored, leader-injected
+> `SELECTION.md` guide. No deciding mechanism is added and no command or schema in
+> §7 changes — only a prompt injection (the same shape as the MEMORY.md injection
+> of Issue #114).
 
 ### 12.1 Current Reality
 
@@ -805,15 +807,48 @@ judgment at `start` time — for these reasons:
    defaults and need no new code.
 
 The **one lightweight, mechanism-free** step worth considering — *not* a new
-command — is to **write the implicit heuristics down as guidance in the leader's
-prompt / role** (e.g. "small fix → solo; heavy change needing review →
-pair_review; design-before-build → multi_stage"). That improves the consistency
-of the existing in-context judgment without introducing a separate mechanism,
-a second source of truth for state, or any change to §7's schema. It is prompt
-guidance, which is how the fleet steers judgment elsewhere (§8.1).
+command — is to **write the implicit heuristics down as guidance** that the
+leader consults at `start`. That improves the consistency of the existing
+in-context judgment without introducing a separate mechanism, a second source of
+truth for state, or any change to §7's schema. It is prompt guidance, which is
+how the fleet steers judgment elsewhere (§8.1).
 
-This chapter does **not** close Issue #118. The recommendation above is the
-study's conclusion; the final adopt / not-adopt decision — including whether to
-take even the lightweight prompt-guidance step — rests with the repo owner. If
-the decision is "do not adopt," the reasoning should be distilled into a fleet
-memory entry per the issue's instruction.
+One correction to the framing above, though: those example heuristics ("small
+fix → solo; heavy change needing review → pair_review; design-before-build →
+multi_stage") read as *universal*, but they are not. The bundled
+`solo` / `pair_review` / `multi_stage` are only **templates** — every project
+customizes its formations (names, stages, roles, agents; §7). So the *criteria
+for picking among them* are equally **per-project**. A universal "small fix →
+solo" rule baked into the leader base prompt would be wrong for a project that
+renamed `solo` or whose cheapest formation is something else. The guidance must
+therefore be per-project, not a global constant.
+
+### 12.8 Adopted Decision — per-project `SELECTION.md`
+
+The repo owner adopted the lightweight prompt-guidance step from §12.7, made
+**per-project** and **persisted** (and not a deciding mechanism):
+
+- **Where.** A plain-markdown guide at `<state>/formations/SELECTION.md`,
+  alongside the project's actual formation files. It is per-project because
+  formations are per-project (§12.7 correction).
+- **How it reaches the leader.** `leader_prompt.render` injects the file's
+  contents into the rendered leader prompt under the heading
+  `## Formation selection guide (this project)` when it exists, and injects
+  nothing when it is absent. This mirrors the MEMORY.md index injection added for
+  Issue #114 (`driver_prompt._memory_index_section`): load one named file, wrap
+  it under a clear heading, no-op if missing — no new command, no schema change.
+- **How it is authored.** Co-authored by the leader and user: when the user
+  wants to define or refine the project's selection criteria, the leader proposes
+  a draft from the project's real formations, refines it in chat, and saves it to
+  that path. `docs/prompts/leader-base.md` carries the standing instruction to do
+  this and to consult the injected guide (with the real formation files) when
+  choosing a formation.
+- **Why this and not a mechanism.** This is exactly the "lightweight
+  prompt-guidance" of §12.7, kept consistent with the principle analysis: the
+  leader (an LLM) still makes the judgment (§12.6, principle 4); nothing polls or
+  tracks state (principle 7); no command or schema is added (principle 1). The
+  guide is persisted, project-tuned prompt context — not a rule engine that
+  decides. The recommendation against a *separate auto-recommend mechanism*
+  (§12.7) stands; this adopts only the prompt-guidance escape hatch it called out.
+
+This closes Issue #118.

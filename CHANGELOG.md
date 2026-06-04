@@ -7,6 +7,12 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### per-project formation-selection guide (Issue #118)
+
+- `leader_prompt.render` now injects `<state>/formations/SELECTION.md` into the leader prompt under `## Formation selection guide (this project)` when the file exists, and injects nothing when it is absent — mirroring the MEMORY.md index injection (Issue #114). No new command, no schema change, no mechanism that picks a formation: the leader still decides.
+- `docs/prompts/leader-base.md` gained a "Choosing a formation" section: formations are per-project (the bundled solo/pair_review/multi_stage are only templates), the leader consults the injected `SELECTION.md` together with the project's real formation files, and co-authors that guide with the user when asked.
+- `docs/design.md` §12 updated from "design study" to "decided": added §12.8 recording the adopted per-project, co-authored, leader-injected `SELECTION.md` guide, and corrected the §12.7 framing that implicitly treated selection criteria as universal (they are per-project because formations are per-project).
+
 ### design study: formation auto-recommend (Issue #118)
 
 - Added §12 "Design Study: Formation Auto-Recommend" to `docs/design.md`, marked "design study — not yet adopted". It reasons through whether the leader should infer the formation from the task description and how far to automate it, covering rule options (LLM-inferred vs static keyword vs task classes), override semantics, input/output, failure fallback, and consistency with the mission principles. Recommends *not* building a separate mechanism (the leader is already an LLM that picks the formation in-context) while leaving the final adopt/not-adopt decision to the repo owner. No code or schema change.
