@@ -7,6 +7,10 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### design study: formation auto-recommend (Issue #118)
+
+- Added §12 "Design Study: Formation Auto-Recommend" to `docs/design.md`, marked "design study — not yet adopted". It reasons through whether the leader should infer the formation from the task description and how far to automate it, covering rule options (LLM-inferred vs static keyword vs task classes), override semantics, input/output, failure fallback, and consistency with the mission principles. Recommends *not* building a separate mechanism (the leader is already an LLM that picks the formation in-context) while leaving the final adopt/not-adopt decision to the repo owner. No code or schema change.
+
 ### richer notifications: status emoji + Slack color (Issue #139)
 
 - `notify.send(...)` gained a `level` arg (`success` / `waiting` / `progress` / `error` / `info`, default `info`). Each transport renders from `(title, message, level)` — no per-call-site channel knowledge.

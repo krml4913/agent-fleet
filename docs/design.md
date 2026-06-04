@@ -675,3 +675,145 @@ agent-fleet/
 
 Only developers `pip install pytest ruff`; the fleet itself stays
 zero-dependency.
+
+---
+
+## 12. Design Study: Formation Auto-Recommend
+
+> **Status: design study — not yet adopted.** This chapter reasons through
+> Issue #118 ("should the leader infer the formation from the task
+> description, and how far?"). It records the analysis and a recommendation,
+> but the adopt / not-adopt decision is deliberately left to the repo owner.
+> Nothing here is implemented, and no command or schema in §7 changes as a
+> result of writing it.
+
+### 12.1 Current Reality
+
+The leader is itself an LLM. When a user delegates a task, the leader already
+chooses a formation in-context as part of `fleet-agent start` (§4.1: "deciding
+which agent vendor / model / formation to launch"). The heuristics are implicit
+and unwritten, but real:
+
+- A small, low-risk fix → `solo`.
+- A heavier code change that wants a review gate → `pair_review`.
+- A task that needs a design pass before implementation → `multi_stage`.
+
+So "the leader infers the formation from the task description" is not a missing
+capability — it is **already happening**, every time, inside the leader's
+ordinary reasoning. The honest framing of Issue #118 is therefore not "can we
+build formation inference?" but: **should this already-working implicit judgment
+be formalized into a separate, explicit mechanism, and is that worth it?**
+(§1.3 principle 3: question the premise before asking how to implement.)
+
+### 12.2 Rule Options
+
+Two families of "rule," plus an orthogonal question of task classes.
+
+| Option | What it is | Assessment |
+|---|---|---|
+| **A. LLM-inferred (status quo)** | The leader, an LLM, picks the formation from the task request in-context. No new code. | This is what happens today. It handles nuance, mixed signals, and unusual phrasings that no fixed rule anticipates. |
+| **B. Static keyword rules** | A program scans the description for keywords (`fix`, `bug`, `refactor`, `design`, `docs`, …) and maps them to a formation. | Brittle. Keywords are a poor proxy for risk/scope; "small fix to the auth flow" and "fix a typo" share a keyword but want different formations. A mechanism here would be **making a judgment**, which §1.3 principle 4 explicitly forbids ("Mechanisms do not make judgments"). |
+| **C. Task classes** | Introduce an explicit taxonomy — `design-study` / `implementation` / `documentation` — then map class → formation. | Adds vocabulary and a classification step the workflow can run without. The leader already distinguishes these implicitly; naming them buys consistency only if the class is also written down somewhere and kept in sync — a second source of truth (§1.3 principle 6). |
+
+Option B is the classic anti-pattern this codebase already rejects elsewhere:
+encoding judgment into static rules that an LLM is strictly better at. Option C
+is not wrong in principle, but it earns its keep only if a *downstream consumer*
+needs the class as data (e.g. analytics, routing). For formation selection alone
+it is redundant with the leader's in-context read.
+
+### 12.3 Override Semantics
+
+If auto-recommend were adopted, the user (or leader) naming a formation
+explicitly must win. Two shapes:
+
+- **Hard override** — an explicit `--formation <name>` bypasses inference
+  entirely. This is already the behavior in §7.5's resolution table, and it is
+  the right default: an explicit human choice is the strongest possible signal
+  and should never be second-guessed by a mechanism.
+- **Suggest-and-confirm** — inference proposes a formation and waits for a
+  human "yes." This adds a round-trip to every task launch. For a leader that is
+  *already* an LLM choosing in-context, the confirm step is friction with no
+  added judgment: the user delegated precisely so they would not have to
+  hand-pick the formation.
+
+Conclusion for override: keep the existing hard-override semantics (§7.5).
+Any inference layer must sit *below* an explicit `--formation`, never above it.
+
+### 12.4 Input / Output
+
+| Axis | Options | Note |
+|---|---|---|
+| **Input** | (a) description only; (b) description + past-task formation history | History could bias toward "what this project usually does," but the fleet keeps no centralized cross-task metadata store (§9: "Centralized global metadata management" is a non-goal), and reading `events.jsonl` across tasks to build a prior edges toward the polling/state-tracking the leader must not do (§1.3 principle 7). Description-only is the mission-consistent input. |
+| **Output** | (a) a single formation name; (b) a ranked candidate list | A ranked list only has value if something *chooses among* the candidates — which is exactly the judgment the leader already makes. A single resolved name matches how `start` consumes the value today. A ranked list would push the decision downstream to either the user (re-introducing the confirm round-trip, §12.3) or another mechanism (more surface area, §1.3 principle 1). |
+
+Both axes point the same way: **description-only input, single-name output** —
+which is, again, a description of what the leader already does in its head.
+
+### 12.5 Failure Behavior
+
+If inference cannot decide, it must fall back deterministically rather than
+stall. The natural fallback is **`solo`**: it is the lightest formation, it is
+what §7.5 already synthesizes when no formation file is present
+(`_leader_solo`), and an under-powered guess (solo when pair_review was wanted)
+is cheaply correctable mid-task — the user can intervene in the driver pane
+(§1.3 principle 8), or the leader can launch a review follow-up. Over-powering
+(pair_review for a typo fix) wastes an agent boot and a review loop. Fail toward
+the lighter formation.
+
+### 12.6 Mission Consistency — the Key Tension
+
+This is the decisive section. Hold the proposal against the principles:
+
+- **§1.3 principle 4 — "AI decides, mechanism wires."** The leader (AI) is the
+  decider; the orchestrator (mechanism) wires deterministically. Formation
+  choice is a *judgment*, so by this principle it belongs to the AI — and the
+  leader **is** that AI. A separate inference mechanism (Option B/C) would be a
+  mechanism making a judgment, which the principle forbids. A separate
+  inference *LLM call* would be a second AI doing what the first AI already
+  does in the same breath.
+- **§1.3 principle 7 — "The leader is light."** The leader does conversation +
+  spawn only, no state tracking or polling. Pulling past-task history to inform
+  inference (§12.4) is exactly the state-tracking this principle rules out.
+- **§1.3 principle 1 — "Cutting scope has value."** A new command, schema, or
+  classification step must clear the bar of "the workflow cannot run without
+  it." The workflow demonstrably runs without it today.
+
+The core realization: **the leader already performs formation inference as an
+intrinsic part of being an LLM that reads the task and calls `start`.** A
+*separate* auto-recommend mechanism does not add a capability that is missing;
+at best it relocates an in-context judgment into either (a) static rules that
+are strictly worse at judgment, or (b) a redundant extra LLM step. Running
+explicit inference logic inside the leader is therefore largely **redundant with
+the leader itself**. The one thing a separate mechanism could add — *consistency*
+and *auditability* of the heuristic — comes at the cost of a second source of
+truth to maintain (§1.3 principle 6) and is not currently a demonstrated harm
+(§1.3 principle 2: decide on real harm, not on "would be cleaner").
+
+### 12.7 Recommendation
+
+**Recommended: do not build a separate formation auto-recommend mechanism.**
+Keep formation selection where it already lives — the leader's in-context
+judgment at `start` time — for these reasons:
+
+1. The capability is **not missing**; it is intrinsic to the leader being an
+   LLM. A mechanism would relocate, not add, judgment (§12.6).
+2. Static keyword rules (Option B) violate "mechanisms do not make judgments"
+   (§1.3 principle 4) and are brittle against real task phrasing.
+3. History-based input violates "the leader is light" / no polling
+   (§1.3 principle 7, §9).
+4. Hard override (§7.5) and a `solo` fallback (§12.5) are already the right
+   defaults and need no new code.
+
+The **one lightweight, mechanism-free** step worth considering — *not* a new
+command — is to **write the implicit heuristics down as guidance in the leader's
+prompt / role** (e.g. "small fix → solo; heavy change needing review →
+pair_review; design-before-build → multi_stage"). That improves the consistency
+of the existing in-context judgment without introducing a separate mechanism,
+a second source of truth for state, or any change to §7's schema. It is prompt
+guidance, which is how the fleet steers judgment elsewhere (§8.1).
+
+This chapter does **not** close Issue #118. The recommendation above is the
+study's conclusion; the final adopt / not-adopt decision — including whether to
+take even the lightweight prompt-guidance step — rests with the repo owner. If
+the decision is "do not adopt," the reasoning should be distilled into a fleet
+memory entry per the issue's instruction.
