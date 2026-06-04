@@ -62,22 +62,18 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TASKS  1", result.stdout)
-        self.assertIn("● task-1  pending  seen —", result.stdout)
         self.assertIn(
-            "      do thing  (formation -  agent claude:sonnet  workspace -)",
+            "● task-1  pending  -  stage 1/1 (driver, claude:sonnet)  —  do thing",
             result.stdout,
         )
 
-    def test_status_task_without_stages_falls_back_to_dash_agent(self) -> None:
+    def test_status_task_without_stages_falls_back_to_dash_stage(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
         state.save_task(sd, "1", {"title": "legacy thing", "status": "pending"})
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            "      legacy thing  (formation -  agent -  workspace -)",
-            result.stdout,
-        )
+        self.assertIn("● task-1  pending  -  -  —  legacy thing", result.stdout)
 
     def test_status_shows_formation_and_stage_progress(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
@@ -96,9 +92,8 @@ class StatusCommandTests(unittest.TestCase):
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("● task-1  running  stage 2/3  seen —", result.stdout)
         self.assertIn(
-            "      multi thing  (formation multi_stage  agent codex:gpt-5.5  workspace worktree)",
+            "● task-1  running  multi_stage  stage 2/3 (driver, codex:gpt-5.5)  —  multi thing",
             result.stdout,
         )
 
@@ -123,23 +118,81 @@ class StatusCommandTests(unittest.TestCase):
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("● task-1  running  review ×1  seen —", result.stdout)
+        self.assertIn(
+            "● task-1  running  pair_review  stage 1/1 (driver, codex:gpt-5.5)  review ×1",
+            result.stdout,
+        )
 
-    def test_status_hides_solo_progress_token(self) -> None:
+    def test_status_shows_solo_stage_cell(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
         state.save_task(sd, "1", {
             "title": "solo thing",
             "status": "running",
             "formation": "solo",
             "current_stage": 0,
-            "stages": [{"role": "driver", "agent": "codex:gpt-5.5", "status": "running"}],
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
         })
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("● task-1  running  seen —", result.stdout)
-        self.assertNotIn("stage 1/1", result.stdout)
-        self.assertNotIn("review ×", result.stdout)
+        self.assertIn(
+            "● task-1  running  solo  stage 1/1 (driver, claude:opus)  —  solo thing",
+            result.stdout,
+        )
+
+    def test_status_highlights_awaiting_orders_row(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "needs you",
+            "status": "awaiting_orders",
+            "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # awaiting_orders rows get a ▸ marker so they stand out in the list.
+        self.assertIn("▸ ● task-1  awaiting_orders", result.stdout)
+
+    def test_status_verbose_expands_stages_and_acks(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "multi thing",
+            "status": "running",
+            "formation": "multi_stage",
+            "current_stage": 1,
+            "stages": [
+                {"role": "designer", "agent": "claude:opus", "status": "done"},
+                {"role": "implementer", "agent": "codex:gpt-5.5", "status": "running"},
+                {"role": "code-reviewer", "agent": "claude:opus", "status": "pending"},
+            ],
+        })
+        ev_path = sd / "events.jsonl"
+        with open(ev_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": "2026-05-20T14:03:00Z", "type": "inbox_seen", "task_id": "1", "watermark": "2026-05-20T14:00:00Z"}) + "\n")
+            f.write(json.dumps({"ts": "2026-05-20T14:05:00Z", "type": "heartbeat", "task_id": "1"}) + "\n")
+        result = run_fleet("status", "demo", "--verbose",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("      stage 1/3  done     designer       claude:opus", result.stdout)
+        self.assertIn("      stage 2/3  current  implementer    codex:gpt-5.5", result.stdout)
+        self.assertIn("      stage 3/3  pending  code-reviewer  claude:opus", result.stdout)
+        self.assertIn("      acks: inbox_seen 14:03  ·  heartbeat 14:05", result.stdout)
+
+    def test_status_verbose_acks_dash_when_none(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "solo thing",
+            "status": "running",
+            "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        result = run_fleet("status", "demo", "-v",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("      acks: inbox_seen —  ·  heartbeat —", result.stdout)
 
     def test_status_shows_awaiting_orders_section(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
