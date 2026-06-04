@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -12,42 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import agents, notify, prompt_pointer, state as state_mod, tmux
+from .adapters import REGISTRY
 from .events import append_event, utcnow_iso
 
 
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 PASTE_SETTLE_SECONDS = 0.25
-
-
-@dataclass(frozen=True)
-class PromptAdapter:
-    ready: re.Pattern[str]
-    gate: re.Pattern[str]
-
-
-ADAPTERS: dict[str, PromptAdapter] = {
-    "claude": PromptAdapter(
-        ready=re.compile(r"(?m)^\s*❯(?!\s*\d+\.)"),
-        gate=re.compile(
-            r"(?im)"
-            r"(?:login|log in|sign in|authentication|authenticate|"
-            r"^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"
-            r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
-            r"trust (?:this )?(?:folder|directory|workspace)|do you trust|continue\?)"
-        ),
-    ),
-    "codex": PromptAdapter(
-        ready=re.compile(r"(?m)^\s*›(?!\s*\d+\.)"),
-        gate=re.compile(
-            r"(?im)"
-            r"(?:^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"
-            r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
-            r"do you trust the contents of this directory|yes,\s*continue|"
-            r"sign in|login|log in|authentication|authenticate|api key)"
-        ),
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -141,7 +111,7 @@ def deliver(
     initial_delay: float = 0.0,
 ) -> int:
     vendor, _model = agents.parse_spec(agent_spec)
-    adapter = ADAPTERS[vendor]
+    adapter = REGISTRY[vendor]
     deadline = time.monotonic() + max(0.0, timeout)
     gate_notified = False
 

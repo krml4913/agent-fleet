@@ -7,6 +7,11 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### vendor adapter registry (Issue #116)
+
+- Added `src/fleet/adapters/` with one self-contained file per vendor (`claude.py`, `codex.py`) behind a `VendorAdapter` interface, plus an explicit-import `REGISTRY` in `adapters/__init__.py`.
+- `agents.parse_spec` / `agents.cli_command` / `agents.SUPPORTED_VENDORS` and the prompt deliverer's ready/gate detection now derive from the registry instead of hardcoding claude/codex. Adding a vendor is now one new adapter file plus one registry line. Behavior is unchanged.
+
 ## [0.1.0] - 2026-06-04
 
 ### prompt delivery ack (Issue #107)
