@@ -85,13 +85,16 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
     if not project_name:
         return
     session = f"fleet-{project_name}"
+    from .. import driver_prompt as dp
+
+    fleet_bin = dp.fleet_agent_bin()
     try:
         windows = tmux_mod.task_window_names(session, task_id)
         for window in windows:
             tmux_mod.send_keys(
                 session,
                 window,
-                "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
+                f"[fleet] inbox に新着メッセージ。{fleet_bin} inbox-read で確認しろ",
             )
     except tmux_mod.TmuxError:
         # Pane not found or session gone — warn and continue.

@@ -7,11 +7,34 @@ plugin hook, not here.
 """
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
-_PROMPTS_DIR = Path(__file__).parent.parent.parent / "docs" / "prompts"
+_CLONE_ROOT = Path(__file__).resolve().parent.parent.parent
+_PROMPTS_DIR = _CLONE_ROOT / "docs" / "prompts"
 _TEMPLATE_PATH = _PROMPTS_DIR / "driver-base.md"
 _ROLES_DIR = _PROMPTS_DIR / "roles"
+
+
+def fleet_agent_bin() -> str:
+    """Return the path used to invoke ``fleet-agent`` from inside a driver pane.
+
+    Driver panes do not get ``fleet-agent`` on their ``PATH``: ``start`` injects
+    ``PATH=<clone-root>:…`` via ``tmux new-window -e``, but macOS ``path_helper``
+    (run by ``/etc/zprofile`` on every zsh login) plus the user's rc files rebuild
+    ``PATH`` from scratch and drop the injected entry. Plain env vars
+    (``FLEET_TASK_ID`` etc.) survive that rebuild; ``PATH`` does not. So lifecycle
+    signaling commands must be referenced by absolute path — the one channel that
+    is identical for both vendors (claude/codex) and immune to the shell-rc
+    ``PATH`` rebuild.
+
+    Returns the absolute path to the ``fleet-agent`` script when it can be located
+    next to this package, otherwise falls back to the bare ``fleet-agent`` name.
+    """
+    candidate = _CLONE_ROOT / "fleet-agent"
+    if candidate.is_file():
+        return str(candidate)
+    return "fleet-agent"
 
 
 def _load_base() -> str:
@@ -34,14 +57,24 @@ def render(
     formation_name: str,
     role: str,
     agent: str,
+    fleet_bin: str | None = None,
 ) -> str:
-    """Return the prompt string to send to the driver."""
+    """Return the prompt string to send to the driver.
+
+    ``fleet-agent`` references in the fleet-managed prompt text (base + role
+    fragment) are rewritten to an absolute path so the driver can run lifecycle
+    commands regardless of whether ``fleet-agent`` is on ``PATH`` — see
+    :func:`fleet_agent_bin` for why a bare ``fleet-agent`` is unreliable. The
+    user-supplied ``description`` is left untouched.
+    """
+    bin_path = fleet_bin if fleet_bin is not None else fleet_agent_bin()
     base = _load_base()
     parts = [base.rstrip()]
     role_fragment = _load_role_fragment(role).strip()
     if role_fragment:
         parts.append(role_fragment)
     body = "\n\n".join(parts)
+    body = body.replace("fleet-agent", shlex.quote(bin_path))
     return (
         body
         + "\n---\n"

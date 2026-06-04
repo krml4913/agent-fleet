@@ -67,6 +67,7 @@ class DriverPromptTests(unittest.TestCase):
             formation_name="solo",
             role="driver",
             agent="claude:sonnet",
+            fleet_bin="fleet-agent",
         )
         self.assertIn("Before any other task work, run `fleet-agent inbox-read`", text)
 
@@ -106,6 +107,71 @@ class DriverPromptTests(unittest.TestCase):
         description_idx = text.index("Task description sentinel.")
         self.assertLess(base_idx, role_idx)
         self.assertLess(role_idx, description_idx)
+
+
+class FleetAgentPathInjectionTests(unittest.TestCase):
+    """Issue #125: lifecycle commands must resolve without ``fleet-agent`` on PATH.
+
+    Driver panes never get ``fleet-agent`` on PATH (macOS path_helper + shell rc
+    rebuild PATH and drop the env injected by ``tmux new-window -e``), so the
+    prompt rewrites every fleet-agent command to an absolute path that works for
+    both claude and codex regardless of PATH.
+    """
+
+    def test_fleet_agent_bin_is_absolute_and_exists(self) -> None:
+        bin_path = driver_prompt.fleet_agent_bin()
+        self.assertTrue(Path(bin_path).is_absolute(), bin_path)
+        self.assertTrue(Path(bin_path).is_file(), bin_path)
+        self.assertEqual(Path(bin_path).name, "fleet-agent")
+
+    def test_render_rewrites_commands_to_absolute_path(self) -> None:
+        bin_path = "/opt/agent-fleet/fleet-agent"
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            formation_name="solo",
+            role="driver",
+            agent="codex:gpt-5.5",
+            fleet_bin=bin_path,
+        )
+        # Every fleet-managed command uses the absolute path...
+        self.assertIn(f"`{bin_path} inbox-read`", text)
+        self.assertIn(f"{bin_path} done --result approved", text)
+        # ...and no bare `fleet-agent` command survives (backtick then bare name).
+        self.assertNotIn("`fleet-agent ", text)
+
+    def test_render_default_uses_resolved_bin(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            formation_name="solo",
+            role="driver",
+            agent="codex:gpt-5.5",
+        )
+        self.assertIn(f"`{driver_prompt.fleet_agent_bin()} inbox-read`", text)
+
+    def test_render_leaves_user_description_untouched(self) -> None:
+        # A user description that mentions fleet-agent must not be rewritten.
+        text = driver_prompt.render(
+            task_id="1",
+            description="See `fleet-agent` PATH bug.",
+            formation_name="solo",
+            role="driver",
+            agent="claude:opus",
+            fleet_bin="/opt/agent-fleet/fleet-agent",
+        )
+        self.assertIn("See `fleet-agent` PATH bug.", text)
+
+    def test_render_quotes_path_with_spaces(self) -> None:
+        text = driver_prompt.render(
+            task_id="1",
+            description="x",
+            formation_name="solo",
+            role="driver",
+            agent="claude:opus",
+            fleet_bin="/opt/agent fleet/fleet-agent",
+        )
+        self.assertIn("'/opt/agent fleet/fleet-agent' inbox-read", text)
 
 
 if __name__ == "__main__":

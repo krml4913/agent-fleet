@@ -417,10 +417,13 @@ def _handoff_to_stage_driver(
 
     _append_handoff_inbox(state_dir, task_id, message)
     try:
+        from . import driver_prompt as dp
+
+        fleet_bin = dp.fleet_agent_bin()
         tmux_mod.send_keys(
             session,
             window,
-            "[fleet] inbox に新着メッセージ。fleet-agent inbox-read で確認しろ",
+            f"[fleet] inbox に新着メッセージ。{fleet_bin} inbox-read で確認しろ",
         )
     except tmux_mod.TmuxError:
         return
@@ -459,11 +462,14 @@ def _peer_review_handoff_message(
     phase: str,
     iteration: int,
 ) -> str:
+    from . import driver_prompt as dp
+
+    fleet_bin = dp.fleet_agent_bin()
     return (
         f"[fleet handoff] role={target_role} phase={phase} iteration={iteration}. "
-        "It is your turn now. Run `fleet-agent inbox-read` if you have not "
+        f"It is your turn now. Run `{fleet_bin} inbox-read` if you have not "
         "already, continue from the retained pane context, and call "
-        "`fleet-agent done --result approved` when finished. Reviewers should "
+        f"`{fleet_bin} done --result approved` when finished. Reviewers should "
         "use `--result changes-requested` when rework is needed."
     )
 

@@ -99,6 +99,21 @@ class InboxDeliveryTests(unittest.TestCase):
             self.assertEqual(call_args[0][1], "42·implementer")
             self.assertIn("inbox-read", call_args[0][2])
 
+    def test_ping_uses_absolute_fleet_agent_path(self) -> None:
+        """Issue #125: the wake ping must call fleet-agent by absolute path so a
+        codex pane (no fleet-agent on PATH) can act on a mid-task inbox message."""
+        from fleet import driver_prompt
+
+        with (
+            patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
+            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
+            patch("fleet.commands.inbox.tmux_mod.send_keys") as mock_send,
+        ):
+            inbox_mod._wake_driver_pane(self.state_dir, "42")
+            ping = mock_send.call_args[0][2]
+            self.assertIn(f"{driver_prompt.fleet_agent_bin()} inbox-read", ping)
+            self.assertNotIn("。fleet-agent inbox-read", ping)
+
     def test_skips_when_tmux_unavailable(self) -> None:
         with (
             patch("fleet.commands.inbox.tmux_mod.available", return_value=False),
