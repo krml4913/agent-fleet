@@ -507,6 +507,7 @@ def _notify_escalation(
         state_dir,
         title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
         message=question,
+        level="waiting",
     )
 
 
@@ -537,6 +538,7 @@ def _request_user_approval(
         state_dir,
         title=f"fleet {project.get('name', '?')}: task-{task_id} needs approval",
         message=question,
+        level="waiting",
     )
 
 

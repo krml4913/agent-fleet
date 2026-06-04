@@ -1,6 +1,7 @@
 """Tests for ``fleet.notify`` — best-effort, never raises."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -98,6 +99,102 @@ class NoNotifyEnvTests(unittest.TestCase):
             with patch("fleet.notify._macos_notify") as mock_macos:
                 notify.send(self.state_dir, "title", "message")
         mock_macos.assert_called_once()
+
+
+class LevelMappingTests(unittest.TestCase):
+    """level → emoji and level → Slack color mappings."""
+
+    def test_level_emoji_mapping(self) -> None:
+        self.assertEqual(notify.level_emoji("success"), "✅")
+        self.assertEqual(notify.level_emoji("waiting"), "🟡")
+        self.assertEqual(notify.level_emoji("progress"), "▶️")
+        self.assertEqual(notify.level_emoji("error"), "❌")
+        self.assertEqual(notify.level_emoji("info"), "ℹ️")
+
+    def test_level_emoji_unknown_falls_back_to_info(self) -> None:
+        self.assertEqual(notify.level_emoji("bogus"), notify.level_emoji("info"))
+
+    def test_level_color_mapping(self) -> None:
+        self.assertEqual(notify.level_color("success"), "good")
+        self.assertEqual(notify.level_color("waiting"), "warning")
+        self.assertEqual(notify.level_color("error"), "danger")
+        # progress / info use neutral (non-keyword) colors, distinct from the above.
+        self.assertNotIn(
+            notify.level_color("progress"), {"good", "warning", "danger"}
+        )
+        self.assertNotIn(notify.level_color("info"), {"good", "warning", "danger"})
+
+    def test_level_color_unknown_falls_back_to_info(self) -> None:
+        self.assertEqual(notify.level_color("bogus"), notify.level_color("info"))
+
+
+class MacosRenderTests(unittest.TestCase):
+    """macOS notification carries the level emoji in the message body."""
+
+    def test_macos_message_includes_emoji(self) -> None:
+        with patch("fleet.notify.platform.system", return_value="Darwin"), \
+             patch("fleet.notify.shutil.which", return_value="/usr/bin/osascript"), \
+             patch("fleet.notify.subprocess.run") as mock_run:
+            notify._macos_notify({}, "the title", "the message", "success")
+        mock_run.assert_called_once()
+        script = mock_run.call_args.args[0][-1]
+        self.assertIn("✅", script)
+        self.assertIn("the message", script)
+        self.assertIn("the title", script)
+
+
+class SlackRenderTests(unittest.TestCase):
+    """Slack payload is an attachment with the level color, emoji + title, context."""
+
+    def _capture_payload(self, level: str, title: str, message: str) -> dict:
+        captured = {}
+
+        class _Resp:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+            def read(self_inner):
+                return b""
+
+        def fake_urlopen(req, timeout=None):
+            captured["data"] = req.data
+            return _Resp()
+
+        cfg = {"enabled": True, "webhook_url": "https://hooks.slack.com/fake"}
+        with patch("fleet.notify.urllib.request.urlopen", side_effect=fake_urlopen):
+            notify._slack_notify(cfg, title, message, level)
+        return json.loads(captured["data"].decode("utf-8"))
+
+    def test_slack_attachment_color_and_emoji(self) -> None:
+        payload = self._capture_payload(
+            "error", "fleet myproj: task-abc boot gate", "ack timed out"
+        )
+        self.assertIn("attachments", payload)
+        att = payload["attachments"][0]
+        self.assertEqual(att["color"], "danger")
+        self.assertTrue(att["title"].startswith("❌"))
+        self.assertIn("fleet myproj: task-abc boot gate", att["title"])
+        self.assertEqual(att["text"], "ack timed out")
+
+    def test_slack_color_per_level(self) -> None:
+        for level, color in (
+            ("success", "good"),
+            ("waiting", "warning"),
+            ("error", "danger"),
+        ):
+            payload = self._capture_payload(level, "t", "m")
+            self.assertEqual(payload["attachments"][0]["color"], color)
+
+    def test_slack_context_line_from_title(self) -> None:
+        payload = self._capture_payload(
+            "progress", "fleet myproj: task-abc stage 1 done", "moving on"
+        )
+        footer = payload["attachments"][0].get("footer", "")
+        self.assertIn("myproj", footer)
+        self.assertIn("task-abc", footer)
 
 
 if __name__ == "__main__":

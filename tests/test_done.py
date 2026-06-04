@@ -147,8 +147,8 @@ class DoneNotifyTests(unittest.TestCase):
 
         sent: list[dict] = []
 
-        def _fake_send(sd, *, title, message):  # noqa: ANN001
-            sent.append({"title": title, "message": message})
+        def _fake_send(sd, *, title, message, level="info"):  # noqa: ANN001
+            sent.append({"title": title, "message": message, "level": level})
 
         with (
             unittest.mock.patch("fleet.orchestrator._launch_driver_for_stage"),
@@ -161,6 +161,7 @@ class DoneNotifyTests(unittest.TestCase):
             ret = done_mod.run(argparse.Namespace(task_id=task_id, result=result))
 
         # done.py's notify.send is called last (after the send inside the orchestrator)
+        self._last_level = sent[-1]["level"] if sent else ""
         return ret, sent[-1]["title"] if sent else "", sent[-1]["message"] if sent else ""
 
     def test_notify_completed(self) -> None:
@@ -180,6 +181,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertIn("completed", message)
         self.assertIn("all stages finished", message)
         self.assertIn("c1", message)
+        self.assertEqual(self._last_level, "success")
 
     def test_notify_awaiting_orders(self) -> None:
         """When stopped at the user_approval gate, the 'awaiting_orders' wording is sent."""
@@ -207,6 +209,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertIn("driver", message)
         # stage 1/1 format
         self.assertIn("1/1", message)
+        self.assertEqual(self._last_level, "waiting")
 
     def test_notify_next_stage_running(self) -> None:
         """When advancing to the next stage, the 'stage N done → next stage (role) starting' wording is sent."""
@@ -234,6 +237,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertIn("stage 1 done", message)
         self.assertIn("reviewer", message)
         self.assertIn("starting", message)
+        self.assertEqual(self._last_level, "progress")
 
 
 if __name__ == "__main__":

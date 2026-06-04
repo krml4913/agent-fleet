@@ -7,6 +7,13 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### richer notifications: status emoji + Slack color (Issue #139)
+
+- `notify.send(...)` gained a `level` arg (`success` / `waiting` / `progress` / `error` / `info`, default `info`). Each transport renders from `(title, message, level)` — no per-call-site channel knowledge.
+- Shared: every notification now carries a leading status emoji (✅ / 🟡 / ▶️ / ❌ / ℹ️), so macOS notifications are glanceable.
+- Slack: the flat `{"text": …}` payload is replaced with an attachment carrying a level-keyed color bar, the emoji + bold title, the message, and a `project · task` context footer derived from the title. Still best-effort (never raises) and `FLEET_NO_NOTIFY` still short-circuits; `notify.yaml` is unchanged.
+- Call sites tagged with fitting levels: done → success/waiting/progress, ask → waiting, orchestrator approval waits → waiting, prompt-deliverer ack timeout → error.
+
 ### vendor adapter registry (Issue #116)
 
 - Added `src/fleet/adapters/` with one self-contained file per vendor (`claude.py`, `codex.py`) behind a `VendorAdapter` interface, plus an explicit-import `REGISTRY` in `adapters/__init__.py`.
