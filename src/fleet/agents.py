@@ -1,15 +1,25 @@
 """Agent vendor / model spec resolution.
 
 Specs look like ``vendor:model`` (e.g. ``claude:sonnet``,
-``codex:o4-mini``). MVP supports claude + codex; OpenAI / Gemini /
-local LLMs are out of scope per design doc §13.2.
+``codex:o4-mini``). The supported vendors and everything vendor-specific
+(launch command, pane ready/gate detection) come from the adapter
+registry in :mod:`fleet.adapters` — adding a vendor is one file there, not
+edits scattered across this module.
 """
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
 
-SUPPORTED_VENDORS: frozenset[str] = frozenset({"claude", "codex"})
+from .adapters import REGISTRY
+
+
+def __getattr__(name: str):
+    # ``SUPPORTED_VENDORS`` derives from the registry keys and is computed
+    # live so a vendor registered at runtime (e.g. in tests) is visible.
+    if name == "SUPPORTED_VENDORS":
+        return frozenset(REGISTRY)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def parse_spec(spec: str) -> tuple[str, str]:
@@ -19,9 +29,9 @@ def parse_spec(spec: str) -> tuple[str, str]:
     vendor, _, model = spec.partition(":")
     vendor = vendor.strip()
     model = model.strip()
-    if vendor not in SUPPORTED_VENDORS:
+    if vendor not in REGISTRY:
         raise ValueError(
-            f"unsupported vendor {vendor!r}; supported: {sorted(SUPPORTED_VENDORS)}"
+            f"unsupported vendor {vendor!r}; supported: {sorted(REGISTRY)}"
         )
     if not model:
         raise ValueError(f"empty model in agent spec: {spec!r}")
@@ -31,22 +41,11 @@ def parse_spec(spec: str) -> tuple[str, str]:
 def cli_command(spec: str) -> list[str]:
     """Return the shell argv used to launch this agent inside a tmux pane.
 
-    Both ``claude`` and ``codex`` CLIs accept ``--model``. Higher layers
-    can append further flags (mode toggles, prompt paths) on top.
+    The argv comes from the vendor's adapter. Higher layers can append
+    further flags (mode toggles, prompt paths) on top.
     """
     vendor, model = parse_spec(spec)
-    if vendor == "claude":
-        return ["claude", "--dangerously-skip-permissions", "--model", model]
-    if vendor == "codex":
-        return [
-            "codex",
-            "-c",
-            "check_for_update_on_startup=false",
-            "--dangerously-bypass-approvals-and-sandbox",
-            "-m",
-            model,
-        ]
-    raise AssertionError("unreachable; parse_spec already filtered vendor")
+    return REGISTRY[vendor].cli_command(model)
 
 
 def codex_repo_trusted(repo_root, *, config_path=None) -> bool:

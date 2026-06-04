@@ -7,6 +7,11 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### vendor adapter registry (Issue #116)
+
+- Added `src/fleet/adapters/` with one self-contained file per vendor (`claude.py`, `codex.py`) behind a `VendorAdapter` interface, plus an explicit-import `REGISTRY` in `adapters/__init__.py`.
+- `agents.parse_spec` / `agents.cli_command` / `agents.SUPPORTED_VENDORS` and the prompt deliverer's ready/gate detection now derive from the registry instead of hardcoding claude/codex. Adding a vendor is now one new adapter file plus one registry line. Behavior is unchanged.
+
 ### richer `fleet status` task display (Issue #117)
 
 - `fleet status` now renders each task as a compact aligned row showing the formation and current stage as `stage N/M (role, agent)` (e.g. `stage 1/2 (implementer, codex:gpt-5.5)`) alongside status and last-seen. `awaiting_orders` tasks are marked with a `▸` and highlighted so they stand out.
