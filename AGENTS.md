@@ -23,6 +23,24 @@ After completing work, always run the following steps before calling `fleet-agen
 - The work's git (commit / push / PR) is the responsibility of the driver (AI), not fleet core.
   fleet core never runs git commit / push / PR automatically.
 
+## branching & releases
+
+agent-fleet uses **trunk-based development** with lightweight milestone tags:
+
+- Feature branches → PR → **`main`**. There is no long-lived `develop` branch.
+  Keep `main` green and releasable at all times.
+- Distribution is **clone-from-`main`**: agent-fleet runs by `git clone` + `./fleet`
+  (no `pip install`/published artifact). So merging to `main` immediately reaches
+  anyone who clones — `main` is effectively a continuous release; there is no gate
+  between "merged" and "available".
+- **Tags are bookmarks, not a deploy gate.** Cut a milestone tag (`vX.Y.Z`) plus a
+  GitHub Release only at meaningful checkpoints — not on every merge — to give a
+  pin-able reference point and a CHANGELOG boundary. The leader cuts the tag/Release
+  after the merge; drivers do not tag.
+- **CHANGELOG `## [Unreleased]`** means "merged to `main` but not yet folded into a
+  named milestone tag" (since `main` itself is already available). Add one entry per
+  change; when a milestone tag is cut, move the entries under `## [X.Y.Z] - <date>`.
+
 ## role-specific discipline
 
 Additional discipline specific to each role is documented in `docs/prompts/roles/<role>.md`.
