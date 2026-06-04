@@ -52,6 +52,10 @@ class ApprovalCommandTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("FLEET_TASK_ID", None)
         env["FLEET_STATE_DIR"] = str(self.state_dir)
+        # ``reject`` relaunches the stage driver, which would otherwise spawn a
+        # real ``fleet-demo`` tmux session that no test ever tears down (#130).
+        # This test only asserts state transitions, so keep tmux out of it.
+        env["FLEET_NO_TMUX"] = "1"
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
             capture_output=True,
