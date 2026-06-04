@@ -7,6 +7,11 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### richer `fleet status` task display (Issue #117)
+
+- `fleet status` now renders each task as a compact aligned row showing the formation and current stage as `stage N/M (role, agent)` (e.g. `stage 1/2 (implementer, codex:gpt-5.5)`) alongside status and last-seen. `awaiting_orders` tasks are marked with a `▸` and highlighted so they stand out.
+- Added `fleet status -v` / `--verbose`, which expands each task to list every stage with its role/agent and per-stage state (done / current / pending) plus the last `inbox_seen` / `heartbeat` ack timestamps.
+
 ## [0.1.0] - 2026-06-04
 
 ### prompt delivery ack (Issue #107)
