@@ -8,7 +8,7 @@ target (atomic on POSIX). This combines:
   * **all-or-nothing**    — readers never see a half-written file
   * **partial-update ban** — callers always rewrite the whole file
 
-See design doc §5.4 ("race 対策").
+See design doc §5.4 ("race mitigation").
 """
 from __future__ import annotations
 

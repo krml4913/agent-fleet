@@ -126,7 +126,7 @@ class DoneTests(unittest.TestCase):
 
 
 class DoneNotifyTests(unittest.TestCase):
-    """notify.send の title / message が status ごとに正しく出し分けられるかを検証する。"""
+    """Verify notify.send picks the right title / message for each status."""
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -142,7 +142,7 @@ class DoneNotifyTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _run_done(self, task_id: str, result: str = "approved") -> tuple[int, str, str]:
-        """done.run を呼び出し (notify.send をモック)。done.py が送った最後の send 引数を返す。"""
+        """Call done.run (with notify.send mocked). Return the last send args done.py emitted."""
         from fleet.commands import done as done_mod
 
         sent: list[dict] = []
@@ -160,11 +160,11 @@ class DoneNotifyTests(unittest.TestCase):
         ):
             ret = done_mod.run(argparse.Namespace(task_id=task_id, result=result))
 
-        # done.py の notify.send は最後に呼ばれる (orchestrator 内部の send より後)
+        # done.py's notify.send is called last (after the send inside the orchestrator)
         return ret, sent[-1]["title"] if sent else "", sent[-1]["message"] if sent else ""
 
     def test_notify_completed(self) -> None:
-        """単一 stage タスクが完了したとき 'completed' 文言が送られる。"""
+        """A single-stage task that finishes sends the 'completed' wording."""
         state.save_task(self.state_dir, "c1", {
             "id": "c1", "title": "x", "status": "running",
             "formation": "solo", "workspace": "none",
@@ -177,12 +177,12 @@ class DoneNotifyTests(unittest.TestCase):
         ret, title, message = self._run_done("c1")
 
         self.assertEqual(ret, 0)
-        self.assertIn("完了", message)
-        self.assertIn("全 stage 終了", message)
+        self.assertIn("completed", message)
+        self.assertIn("all stages finished", message)
         self.assertIn("c1", message)
 
     def test_notify_awaiting_orders(self) -> None:
-        """user_approval ゲートで止まったとき 'awaiting_orders' 文言が送られる。"""
+        """When stopped at the user_approval gate, the 'awaiting_orders' wording is sent."""
         state.save_task(self.state_dir, "ua1", {
             "id": "ua1", "title": "x", "status": "running",
             "formation": "solo", "workspace": "none",
@@ -202,14 +202,14 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertEqual(ret, 0)
         task = state.load_task(self.state_dir, "ua1")
         self.assertEqual(task["status"], "awaiting_orders")
-        self.assertIn("承認待ち", message)
+        self.assertIn("awaiting approval", message)
         self.assertIn("ua1", message)
         self.assertIn("driver", message)
-        # stage 1/1 の形式
+        # stage 1/1 format
         self.assertIn("1/1", message)
 
     def test_notify_next_stage_running(self) -> None:
-        """次 stage に進んだとき 'stage N done → 次 stage (role) 開始' 文言が送られる。"""
+        """When advancing to the next stage, the 'stage N done → next stage (role) starting' wording is sent."""
         state.save_task(self.state_dir, "ms1", {
             "id": "ms1", "title": "x", "status": "running",
             "formation": "pair_review", "workspace": "none",
@@ -233,7 +233,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertIn("ms1", message)
         self.assertIn("stage 1 done", message)
         self.assertIn("reviewer", message)
-        self.assertIn("開始", message)
+        self.assertIn("starting", message)
 
 
 if __name__ == "__main__":

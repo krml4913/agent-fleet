@@ -52,7 +52,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"  start it: fleet leader --project {args.project or name}", file=sys.stderr)
         return 1
 
-    # 前回の attach で残った stale な view session を掃除 (best-effort)
+    # Sweep stale view sessions left over from a previous attach (best-effort)
     _sweep_stale_view_sessions(session)
 
     try:
@@ -83,8 +83,8 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # grouped session でアクティブウィンドウを独立させる (Issue #76)
-    # 同一 session に attach した他クライアントのウィンドウに影響しない
+    # Give this client an independent active window via a grouped session (Issue #76)
+    # so it does not affect windows of other clients attached to the same session
     view = f"{session}-view-{os.getpid()}"
     try:
         r = subprocess.run(
@@ -93,7 +93,7 @@ def run(args: argparse.Namespace) -> int:
             text=True,
         )
         if r.returncode != 0:
-            # view session が既に存在する場合は名前に乱数を足してリトライ
+            # If the view session already exists, retry with a random suffix on the name
             import secrets
             view = f"{session}-view-{os.getpid()}-{secrets.token_hex(4)}"
             r2 = subprocess.run(
@@ -123,7 +123,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _sweep_stale_view_sessions(session: str) -> None:
-    """クライアントが attach されていない古い view session を kill する (best-effort)。"""
+    """Kill old view sessions that have no client attached (best-effort)."""
     try:
         r = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name} #{session_attached}"],

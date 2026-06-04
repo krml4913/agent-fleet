@@ -423,7 +423,7 @@ def _handoff_to_stage_driver(
         tmux_mod.send_keys(
             session,
             window,
-            f"[fleet] inbox に新着メッセージ。{fleet_bin} inbox-read で確認しろ",
+            f"[fleet] new message in inbox. run {fleet_bin} inbox-read to check",
         )
     except tmux_mod.TmuxError:
         return

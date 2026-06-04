@@ -10,7 +10,7 @@ Environment:
 Communication:
   - inbox.md   — instructions / turn handoffs; read with `fleet-agent inbox-read`
                  (not cat/Read directly — ack won't fire otherwise).
-                 When woken by a "[fleet] inbox に新着メッセージ" notification,
+                 When woken by a "[fleet] new message in inbox" notification,
                  run `fleet-agent inbox-read` immediately.
   - outbox.md  — append reports here at milestones.
   - `fleet-agent ask "<question>"`           — record awaiting_orders + notify user.

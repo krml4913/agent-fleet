@@ -94,7 +94,7 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
             tmux_mod.send_keys(
                 session,
                 window,
-                f"[fleet] inbox に新着メッセージ。{fleet_bin} inbox-read で確認しろ",
+                f"[fleet] new message in inbox. run {fleet_bin} inbox-read to check",
             )
     except tmux_mod.TmuxError:
         # Pane not found or session gone — warn and continue.

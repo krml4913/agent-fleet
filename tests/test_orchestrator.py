@@ -579,7 +579,7 @@ class UserApprovalGateTests(unittest.TestCase):
 
 
 class WindowCwdTests(unittest.TestCase):
-    """_launch_driver_for_stage が worktree の有無で window_cwd を正しく渡すことを検証。"""
+    """Verify _launch_driver_for_stage passes window_cwd correctly depending on whether a worktree exists."""
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
