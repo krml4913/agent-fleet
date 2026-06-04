@@ -50,6 +50,25 @@ def _load_role_fragment(role: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _memory_index_section(state_dir: Path | str | None) -> str:
+    """Return the ``MEMORY.md`` index wrapped as a prompt section, or ``""``.
+
+    Loads only the index (``<state>/memory/MEMORY.md``) — not every memory body —
+    so any vendor driver sees the accumulated project knowledge at task start.
+    Returns an empty string when no state dir is given or the index is absent,
+    keeping the prompt lightweight (design direction, Issue #114).
+    """
+    if state_dir is None:
+        return ""
+    index_path = Path(state_dir) / "memory" / "MEMORY.md"
+    if not index_path.is_file():
+        return ""
+    content = index_path.read_text(encoding="utf-8").strip()
+    if not content:
+        return ""
+    return "## Project memory (index)\n\n" + content
+
+
 def render(
     *,
     task_id: str,
@@ -58,6 +77,7 @@ def render(
     role: str,
     agent: str,
     fleet_bin: str | None = None,
+    state_dir: Path | str | None = None,
 ) -> str:
     """Return the prompt string to send to the driver.
 
@@ -66,6 +86,11 @@ def render(
     commands regardless of whether ``fleet-agent`` is on ``PATH`` — see
     :func:`fleet_agent_bin` for why a bare ``fleet-agent`` is unreliable. The
     user-supplied ``description`` is left untouched.
+
+    When ``state_dir`` is given and ``<state>/memory/MEMORY.md`` exists, its
+    index is injected so any vendor driver starts with the shared project
+    knowledge (Issue #114). The injected index is project content, so it is not
+    subject to the ``fleet-agent`` path rewrite.
     """
     bin_path = fleet_bin if fleet_bin is not None else fleet_agent_bin()
     base = _load_base()
@@ -75,6 +100,9 @@ def render(
         parts.append(role_fragment)
     body = "\n\n".join(parts)
     body = body.replace("fleet-agent", shlex.quote(bin_path))
+    memory_section = _memory_index_section(state_dir)
+    if memory_section:
+        body = body + "\n\n" + memory_section
     return (
         body
         + "\n---\n"

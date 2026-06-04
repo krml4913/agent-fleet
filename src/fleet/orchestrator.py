@@ -358,6 +358,7 @@ def _launch_driver_for_stage(
         formation_name=formation_name,
         role=role_name,
         agent=agent_spec,
+        state_dir=state_dir,
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
