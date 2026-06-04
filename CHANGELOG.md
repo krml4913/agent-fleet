@@ -1,9 +1,13 @@
 # Changelog
 
-All notable changes to agent-fleet are recorded here. Entries are grouped by
-development **Phase** (per `docs/design.md`) until the first tagged release.
+All notable changes to agent-fleet are recorded here. v0.1.0 is the first tagged
+release. Future changes accumulate under `## [Unreleased]` and then move under a
+tagged version when released. Older entries are grouped by development **Phase**
+(per `docs/design.md`).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-06-04
 
 ### prompt delivery ack (Issue #107)
 
