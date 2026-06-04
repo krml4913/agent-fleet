@@ -74,6 +74,7 @@ def run(args: argparse.Namespace) -> int:
     M = len(stages)
 
     if status == "completed":
+        level = "success"
         title = f"fleet {project_name}: task-{task_id} completed"
         message = f"task-{task_id} completed (all stages finished)"
     elif status == "awaiting_orders":
@@ -82,6 +83,7 @@ def run(args: argparse.Namespace) -> int:
             current_idx = 0
         N = current_idx + 1
         role = stages[current_idx].get("role", "?") if 0 <= current_idx < M else "?"
+        level = "waiting"
         title = f"fleet {project_name}: task-{task_id} stage {N}/{M} awaiting approval"
         message = f"task-{task_id} stage {N}/{M} ({role}) done — awaiting approval"
     else:
@@ -90,10 +92,11 @@ def run(args: argparse.Namespace) -> int:
         if not isinstance(current_idx, int):
             current_idx = 0
         next_role = stages[current_idx].get("role", "?") if 0 <= current_idx < M else "?"
+        level = "progress"
         title = f"fleet {project_name}: task-{task_id} stage {N} done"
         message = f"task-{task_id} stage {N} done → next stage ({next_role}) starting"
 
-    notify.send(state_dir, title=title, message=message)
+    notify.send(state_dir, title=title, message=message, level=level)
 
     print(f"task-{task_id} marked done")
     return 0

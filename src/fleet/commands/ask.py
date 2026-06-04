@@ -67,6 +67,7 @@ def run(args: argparse.Namespace) -> int:
         state_dir,
         title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
         message=args.question,
+        level="waiting",
     )
 
     print(f"recorded awaiting_orders for task-{task_id}")

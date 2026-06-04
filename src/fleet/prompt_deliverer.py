@@ -209,6 +209,7 @@ def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) ->
         state_dir,
         title=f"fleet {project.get('name', '?')}: task-{task_id} boot gate",
         message=question,
+        level="error",
     )
 
 
