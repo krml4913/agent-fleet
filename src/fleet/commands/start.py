@@ -389,6 +389,7 @@ def run(args: argparse.Namespace) -> int:
         formation_name=formation_name,
         role=role_name,
         agent=agent_spec,
+        state_dir=state_dir,
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt)
 

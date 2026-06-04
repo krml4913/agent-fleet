@@ -17,6 +17,12 @@ tagged version when released. Older entries are grouped by development **Phase**
 - `fleet status` now renders each task as a compact aligned row showing the formation and current stage as `stage N/M (role, agent)` (e.g. `stage 1/2 (implementer, codex:gpt-5.5)`) alongside status and last-seen. `awaiting_orders` tasks are marked with a `▸` and highlighted so they stand out.
 - Added `fleet status -v` / `--verbose`, which expands each task to list every stage with its role/agent and per-stage state (done / current / pending) plus the last `inbox_seen` / `heartbeat` ack timestamps.
 
+### vendor-neutral fleet memory entry point (Issue #114)
+
+- Added a `fleet-agent memory` subcommand group (`list` / `read <name>` / `write <name>`) so any vendor driver — claude, codex, or other — can read/write the project-level shared memory at `<state>/memory/` without relying on a vendor's own auto-memory.
+- The driver prompt now injects the `MEMORY.md` index (index only, not every body) when present, so every driver starts with the accumulated project knowledge. Absent `MEMORY.md` injects nothing.
+- `docs/prompts/driver-base.md` now points drivers at `fleet-agent memory …` and `<state>/memory/GUIDE.md`, and spells out that fleet memory is separate from any vendor's own auto-memory (no double management).
+
 ## [0.1.0] - 2026-06-04
 
 ### prompt delivery ack (Issue #107)

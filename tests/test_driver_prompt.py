@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -107,6 +108,48 @@ class DriverPromptTests(unittest.TestCase):
         description_idx = text.index("Task description sentinel.")
         self.assertLess(base_idx, role_idx)
         self.assertLess(role_idx, description_idx)
+
+
+class MemoryIndexInjectionTests(unittest.TestCase):
+    """Issue #114: the MEMORY.md index is injected so any vendor sees it at start."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.state_dir = Path(self._tmp.name)
+        (self.state_dir / "memory").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _render(self, **over: object) -> str:
+        kwargs = dict(
+            task_id="1", description="x", formation_name="solo",
+            role="driver", agent="claude:sonnet",
+        )
+        kwargs.update(over)
+        return driver_prompt.render(**kwargs)
+
+    def test_injects_index_when_present(self) -> None:
+        (self.state_dir / "memory" / "MEMORY.md").write_text(
+            "# Memory Index\n\n- [repo-authority](repo-authority.md) — main 直 push 禁止\n",
+            encoding="utf-8",
+        )
+        text = self._render(state_dir=self.state_dir)
+        self.assertIn("## Project memory (index)", text)
+        self.assertIn("repo-authority", text)
+        self.assertIn("main 直 push 禁止", text)
+        # Injected above the task metadata block, not after it.
+        self.assertLess(text.index("Project memory (index)"), text.index("task id:   task-1"))
+
+    def test_no_injection_when_index_absent(self) -> None:
+        # memory/ exists but no MEMORY.md.
+        text = self._render(state_dir=self.state_dir)
+        self.assertNotIn("## Project memory (index)", text)
+
+    def test_no_injection_when_state_dir_omitted(self) -> None:
+        (self.state_dir / "memory" / "MEMORY.md").write_text("# Memory Index\n", encoding="utf-8")
+        text = self._render()
+        self.assertNotIn("## Project memory (index)", text)
 
 
 class FleetAgentPathInjectionTests(unittest.TestCase):

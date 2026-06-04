@@ -28,5 +28,13 @@ Rules:
     the last stage). Use `--result changes-requested` to signal that the
     current stage needs rework (stage-5 peer_review loop).
 
-Project memory: `$FLEET_STATE_DIR/memory/` — read `MEMORY.md` at task start for stored project
-  knowledge; rules for reading and writing are in `GUIDE.md` in the same directory.
+Project memory (`$FLEET_STATE_DIR/memory/`) — shared across all vendor drivers, read/write it
+  with `fleet-agent memory`:
+  - `fleet-agent memory list`           — index of stored entries + one-line descriptions.
+  - `fleet-agent memory read <name>`     — print one memory's contents.
+  - `fleet-agent memory write <name> [--description D] [--type T]` — body from stdin; also
+    updates the `MEMORY.md` index line. Follow `$FLEET_STATE_DIR/memory/GUIDE.md` for what to
+    save and the frontmatter/index format.
+  - The current `MEMORY.md` index is injected into this prompt when present (look above the
+    `---` block). This is the *project* memory only — it is separate from any vendor's own
+    built-in auto-memory, so don't double-manage the two.
