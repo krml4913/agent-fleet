@@ -18,7 +18,7 @@ class PromptPointerTests(unittest.TestCase):
     def test_load_pointer_buffer_uses_sidecar_without_prompt_body(self) -> None:
         with TemporaryDirectory() as tmp:
             prompt_path = Path(tmp) / "driver-prompt.md"
-            prompt_path.write_text("full prompt body\nmixed: 日本語\n", encoding="utf-8")
+            prompt_path.write_text("full prompt body\nsecond body line\n", encoding="utf-8")
             tmux = MagicMock()
 
             pointer_path = prompt_pointer.load_pointer_buffer(
@@ -34,7 +34,7 @@ class PromptPointerTests(unittest.TestCase):
             self.assertTrue(text.endswith(str(prompt_path.resolve())))
             self.assertEqual(text.count("\n"), 0)
             self.assertNotIn("full prompt body", text)
-            self.assertNotIn("日本語", text)
+            self.assertNotIn("second body line", text)
 
 
 if __name__ == "__main__":

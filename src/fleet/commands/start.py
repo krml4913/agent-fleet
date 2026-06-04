@@ -83,9 +83,9 @@ def _guard_codex_trust(vendor: str, state_dir: Path, project_root: Path | None =
         return None
 
     print(
-        f"error: codex はこの repo ({repo_root}) を信頼していません。\n"
-        "       codex driver を起動する前に、一度このディレクトリで `codex` を起動し\n"
-        "       「1. Yes, continue」で承認してください。その後 start を再実行してください。",
+        f"error: codex does not trust this repo ({repo_root}).\n"
+        "       Before launching the codex driver, run `codex` once in this directory\n"
+        "       and approve it with \"1. Yes, continue\". Then re-run start.",
         file=sys.stderr,
     )
     return 1

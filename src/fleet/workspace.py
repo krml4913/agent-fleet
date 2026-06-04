@@ -1,8 +1,9 @@
-"""workspace 機構 — fleet が持つ唯一の開発フロー機構。
+"""workspace machinery — the only development-flow mechanism fleet owns.
 
-``project.yaml`` の ``workspace:`` フィールド (``worktree`` / ``none``) を
-読み、ライフサイクル境界の git (worktree 作成 / 削除) を実行する。
-作業の git (commit / push / PR) には触らない — それは PJ の責務。
+Reads the ``workspace:`` field (``worktree`` / ``none``) in ``project.yaml``
+and runs the lifecycle-boundary git operations (worktree create / remove).
+It never touches the working git (commit / push / PR) — that is the project's
+responsibility.
 """
 from __future__ import annotations
 
@@ -51,7 +52,7 @@ def on_cleanup(ctx: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# worktree implementation (旧 git_worktree.py からそのまま移植)
+# worktree implementation (ported as-is from the old git_worktree.py)
 # ---------------------------------------------------------------------------
 
 

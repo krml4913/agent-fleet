@@ -67,7 +67,7 @@ class AttachCmdTests(unittest.TestCase):
 
 
 class AttachGroupedSessionTests(unittest.TestCase):
-    """grouped session 経由の attach フローをモックで検証する。"""
+    """Verify the attach flow via a grouped session with mocks."""
 
     def _make_args(self, target: str = "leader", project: str = "testproj") -> MagicMock:
         args = MagicMock()
@@ -106,7 +106,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
     ) -> None:
         mock_resolve.return_value = Path("/fake/state")
         mock_subproc.return_value = self._ok()
-        mock_execvp.side_effect = SystemExit(0)  # execvp でプロセス置換をシミュレート
+        mock_execvp.side_effect = SystemExit(0)  # simulate process replacement by execvp
 
         args = self._make_args(target="leader")
         with self.assertRaises(SystemExit):
@@ -118,7 +118,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
             any("new-session" in str(c) and "-t" in str(c) for c in calls),
             f"new-session not called: {calls}",
         )
-        # 2) set-option destroy-unattached は呼ばれない (PR #77 regression 修正)
+        # 2) set-option destroy-unattached is not called (PR #77 regression fix)
         self.assertFalse(
             any("destroy-unattached" in str(c) for c in calls),
             f"destroy-unattached must not be set: {calls}",
@@ -128,12 +128,12 @@ class AttachGroupedSessionTests(unittest.TestCase):
             any("select-window" in str(c) for c in calls),
             f"select-window not called: {calls}",
         )
-        # 4) execvp で view session に attach
+        # 4) attach to the view session via execvp
         execvp_args = mock_execvp.call_args[0]
         self.assertEqual(execvp_args[0], "tmux")
         tmux_cmd = execvp_args[1]
         self.assertIn("attach", tmux_cmd)
-        # view session 名は "<session>-view-<pid>" の形式
+        # the view session name has the form "<session>-view-<pid>"
         view_name = tmux_cmd[-1]
         self.assertIn("-view-", view_name)
         self.assertNotIn("fleet-testproj:", view_name)
@@ -163,7 +163,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run(args)
 
-        # select-window が task id に対応する role 付き window を対象にしていることを確認
+        # confirm select-window targets the role-tagged window matching the task id
         calls = mock_subproc.call_args_list
         select_calls = [c for c in calls if "select-window" in str(c)]
         self.assertTrue(len(select_calls) > 0)
@@ -208,7 +208,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
         mock_subproc,
     ) -> None:
         mock_resolve.return_value = Path("/fake/state")
-        # 1回目も2回目も失敗 (pid + retry も失敗)
+        # both the first and second attempts fail (pid + retry both fail)
         mock_subproc.return_value = self._fail("duplicate session")
 
         args = self._make_args(target="leader")
@@ -233,7 +233,7 @@ class AttachGroupedSessionTests(unittest.TestCase):
         mock_resolve.return_value = Path("/fake/state")
         ok = self._ok()
         fail = self._fail("select-window failed")
-        # list-sessions (sweep) 成功, new-session 成功, select-window 失敗, kill-session (cleanup)
+        # list-sessions (sweep) ok, new-session ok, select-window fails, kill-session (cleanup)
         mock_subproc.side_effect = [ok, ok, fail, ok]
 
         args = self._make_args(target="leader")
@@ -242,16 +242,16 @@ class AttachGroupedSessionTests(unittest.TestCase):
 
 
 class SweepStaleViewSessionTests(unittest.TestCase):
-    """_sweep_stale_view_sessions の動作をモックで検証する。"""
+    """Verify _sweep_stale_view_sessions behavior with mocks."""
 
     @patch("fleet.commands.attach.subprocess.run")
     def test_kills_unattached_view_sessions(self, mock_subproc: MagicMock) -> None:
         list_ok = MagicMock()
         list_ok.returncode = 0
         list_ok.stdout = (
-            "fleet-proj-view-1234 0\n"   # stale (attached=0) → kill 対象
-            "fleet-proj-view-5678 1\n"   # attached → kill しない
-            "fleet-proj 1\n"              # view session でない → 無視
+            "fleet-proj-view-1234 0\n"   # stale (attached=0) → kill target
+            "fleet-proj-view-5678 1\n"   # attached → do not kill
+            "fleet-proj 1\n"              # not a view session → ignore
         )
         kill_ok = MagicMock()
         kill_ok.returncode = 0
@@ -287,12 +287,12 @@ class SweepStaleViewSessionTests(unittest.TestCase):
         fail.returncode = 1
         mock_subproc.return_value = fail
 
-        # 例外が発生しないことを確認
+        # confirm no exception is raised
         _sweep_stale_view_sessions("fleet-proj")
 
     @patch("fleet.commands.attach.subprocess.run")
     def test_sweep_called_before_grouped_session_creation(self, mock_subproc: MagicMock) -> None:
-        """run() 内で sweep が new-session より前に呼ばれることを確認する。"""
+        """Confirm sweep is called before new-session inside run()."""
         list_ok = MagicMock()
         list_ok.returncode = 0
         list_ok.stdout = ""
@@ -318,7 +318,7 @@ class SweepStaleViewSessionTests(unittest.TestCase):
                 run(args)
 
         calls = mock_subproc.call_args_list
-        # 1番目: list-sessions (sweep), 2番目: new-session
+        # 1st: list-sessions (sweep), 2nd: new-session
         self.assertIn("list-sessions", str(calls[0]))
         self.assertIn("new-session", str(calls[1]))
 

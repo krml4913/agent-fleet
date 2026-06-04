@@ -74,16 +74,16 @@ def run(args: argparse.Namespace) -> int:
     M = len(stages)
 
     if status == "completed":
-        title = f"fleet {project_name}: task-{task_id} 完了"
-        message = f"task-{task_id} 完了 (全 stage 終了)"
+        title = f"fleet {project_name}: task-{task_id} completed"
+        message = f"task-{task_id} completed (all stages finished)"
     elif status == "awaiting_orders":
         current_idx = task.get("current_stage", 0)
         if not isinstance(current_idx, int):
             current_idx = 0
         N = current_idx + 1
         role = stages[current_idx].get("role", "?") if 0 <= current_idx < M else "?"
-        title = f"fleet {project_name}: task-{task_id} stage {N}/{M} 承認待ち"
-        message = f"task-{task_id} stage {N}/{M} ({role}) done — 承認待ち"
+        title = f"fleet {project_name}: task-{task_id} stage {N}/{M} awaiting approval"
+        message = f"task-{task_id} stage {N}/{M} ({role}) done — awaiting approval"
     else:
         N = prev_stage_idx + 1
         current_idx = task.get("current_stage", 0)
@@ -91,7 +91,7 @@ def run(args: argparse.Namespace) -> int:
             current_idx = 0
         next_role = stages[current_idx].get("role", "?") if 0 <= current_idx < M else "?"
         title = f"fleet {project_name}: task-{task_id} stage {N} done"
-        message = f"task-{task_id} stage {N} done → 次 stage ({next_role}) 開始"
+        message = f"task-{task_id} stage {N} done → next stage ({next_role}) starting"
 
     notify.send(state_dir, title=title, message=message)
 
