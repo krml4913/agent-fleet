@@ -99,5 +99,56 @@ class SelectionGuideInjectionTests(unittest.TestCase):
         self.assertNotIn("## Formation selection guide (this project)", text)
 
 
+class FleetAgentPathInjectionTests(unittest.TestCase):
+    """Issue #143: the leader prompt rewrites ``fleet-agent`` to an absolute path,
+    mirroring the driver prompt (Issue #125), so a leader never needs to ``cd``
+    into the agent-fleet clone — the ``cd`` is what made cwd-based resolution land
+    tasks in the wrong project.
+    """
+
+    def test_fleet_agent_bin_is_absolute_and_exists(self) -> None:
+        bin_path = leader_prompt.fleet_agent_bin()
+        self.assertTrue(Path(bin_path).is_absolute(), bin_path)
+        self.assertTrue(Path(bin_path).is_file(), bin_path)
+        self.assertEqual(Path(bin_path).name, "fleet-agent")
+
+    def test_render_rewrites_commands_to_absolute_path(self) -> None:
+        bin_path = "/opt/agent-fleet/fleet-agent"
+        text = leader_prompt.render(
+            project_name="p",
+            state_dir=Path("/tmp/fleet-state/projects/p"),
+            fleet_bin=bin_path,
+        )
+        # The fleet-managed base text uses the absolute path...
+        self.assertIn(f"{bin_path} start", text)
+        # ...and no bare `fleet-agent` command survives (backtick then bare name).
+        # (The abs path legitimately ends in "fleet-agent", so we can't assert on
+        # the substring alone — check the backtick-prefixed command form.)
+        self.assertNotIn("`fleet-agent ", text)
+
+    def test_render_default_uses_resolved_bin(self) -> None:
+        text = leader_prompt.render(
+            project_name="p",
+            state_dir=Path("/tmp/fleet-state/projects/p"),
+        )
+        self.assertIn(f"{leader_prompt.fleet_agent_bin()} start", text)
+
+    def test_render_quotes_path_with_spaces(self) -> None:
+        text = leader_prompt.render(
+            project_name="p",
+            state_dir=Path("/tmp/fleet-state/projects/p"),
+            fleet_bin="/opt/agent fleet/fleet-agent",
+        )
+        self.assertIn("'/opt/agent fleet/fleet-agent' start", text)
+
+    def test_footer_surfaces_project_in_start_hint(self) -> None:
+        text = leader_prompt.render(
+            project_name="myproj",
+            state_dir=Path("/tmp/fleet-state/projects/myproj"),
+            fleet_bin="/opt/agent-fleet/fleet-agent",
+        )
+        self.assertIn("--project myproj", text)
+
+
 if __name__ == "__main__":
     unittest.main()

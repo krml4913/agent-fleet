@@ -243,6 +243,39 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=run)
 
 
+def _cross_project_promptfile_error(prompt_file: str, resolved_name: str) -> str | None:
+    """Return an error message when *prompt_file* lives under a *different* project.
+
+    Guards the cwd-resolution trap (Issue #143): when ``--project`` is omitted, the
+    project is resolved from cwd, but a leader invoking ``fleet-agent`` by absolute
+    path from another repo gets cwd pointing at the wrong project. If the
+    ``--prompt-file`` resolves to a path inside ``fleet_home()/projects/<other>/…``
+    whose ``<other>`` differs from the cwd-resolved project, that is almost
+    certainly the trap — report it and tell the user to pass ``--project``.
+
+    Returns ``None`` (no error) when the prompt-file is outside any project tree or
+    belongs to the same project — only the cross-project case is flagged.
+    """
+    projects_root = state_mod.fleet_home() / state_mod.PROJECTS_SUBDIR
+    pf = Path(prompt_file).resolve()
+    try:
+        rel = pf.relative_to(projects_root)
+    except ValueError:
+        return None  # prompt-file is not under any project tree — fine
+    if not rel.parts:
+        return None
+    other = rel.parts[0]
+    if other == resolved_name:
+        return None
+    return (
+        f"error: cwd resolved the project to {resolved_name!r}, but --prompt-file "
+        f"lives under project {other!r}\n"
+        f"       ({pf}).\n"
+        f"       This is the cwd-resolution trap (Issue #143). Re-run with "
+        f"--project {other} to pick the project explicitly."
+    )
+
+
 def _resolve_description(args: argparse.Namespace) -> str | None:
     description = getattr(args, "description", None)
     prompt_file = getattr(args, "prompt_file", None)
@@ -284,6 +317,16 @@ def run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # Cross-project guard (Issue #143): only when the project was cwd-resolved
+    # (no explicit --project) and a --prompt-file was given. Explicit --project
+    # means the user has chosen — trust it (legit cross-project use is possible).
+    prompt_file = getattr(args, "prompt_file", None)
+    if project_arg == "." and prompt_file is not None:
+        mismatch = _cross_project_promptfile_error(prompt_file, state_dir.name)
+        if mismatch is not None:
+            print(mismatch, file=sys.stderr)
+            return 1
 
     task_dir_path = state_mod.task_dir(state_dir, args.task_id)
     if task_dir_path.exists():
