@@ -42,13 +42,16 @@ Commands:
                         workflow / preflight. Use the read-only ones to check
                         state when asked — never poll on a timer.
   - `fleet-agent ...` — agent-facing CLI. As leader you use:
-        start <id> "<desc>" [--formation T] [--agent A]  — spawn a task
-        start <id> --prompt-file PATH [--formation T] [--agent A]
+        start <id> "<desc>" --project <name> [--formation T] [--agent A]  — spawn a task
+        start <id> --prompt-file PATH --project <name> [--formation T] [--agent A]
         inbox <id> "<msg>"                              — instruct a driver
         cleanup <id> [--archive]                        — retire a finished task
         send-prompt <id>                                — re-paste driver prompt pointer
         approve <id> / reject <id>                      — relay user approval gates
     `ask` / `event emit` / `done` are driver-only — you never call them.
+    Always pass `--project <name>` (the project in the footer) to `start`:
+    fleet-agent resolves the project from cwd by default, which is wrong whenever
+    it is invoked by absolute path from outside this project's repo.
 
 Never:
   - kill a driver pane — instruct it via inbox to wind down instead

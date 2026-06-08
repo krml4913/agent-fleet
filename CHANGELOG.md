@@ -7,6 +7,12 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix leader project mis-resolution (Issue #143)
+
+- `leader_prompt.render` now rewrites `fleet-agent` references in the fleet-managed base text to the absolute `fleet_agent_bin()` path (mirroring `driver_prompt.render`, Issue #125), so a leader never needs to `cd` into the agent-fleet clone — the `cd` was what made cwd-based project resolution silently land a task in the `fleet` project. `fleet_agent_bin()` moved to a neutral `fleet.paths` module shared by both prompt builders (re-exported from `driver_prompt` for compatibility). The injected `SELECTION.md` and the footer are project content / metadata and are not rewritten.
+- `docs/prompts/leader-base.md` now instructs the leader to always pass `--project <name>` (shown in the footer) to `fleet-agent start`, and the footer surfaces a ready-to-use `start cmd:` hint with the absolute bin + `--project <name>`.
+- `start.py` rejects the cwd-resolution trap: when `--project` is omitted (cwd-resolved) and `--prompt-file` lives under a *different* project's `projects/<other>/` subtree, it fails with a message telling the user to pass `--project`. Explicit `--project` bypasses the guard (legit cross-project use); prompt-files outside any project tree and same-project prompt-files pass.
+
 ### per-project formation-selection guide (Issue #118)
 
 - `leader_prompt.render` now injects `<state>/formations/SELECTION.md` into the leader prompt under `## Formation selection guide (this project)` when the file exists, and injects nothing when it is absent — mirroring the MEMORY.md index injection (Issue #114). No new command, no schema change, no mechanism that picks a formation: the leader still decides.

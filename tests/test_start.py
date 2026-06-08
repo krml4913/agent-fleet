@@ -299,6 +299,93 @@ class StartTests(unittest.TestCase):
         self.assertEqual(task_data["title"], "refactor: split into modules")
 
 
+class CrossProjectPromptFileGuardTests(unittest.TestCase):
+    """Issue #143: a cwd-resolved project whose --prompt-file lives under a
+    *different* project's tree is the cwd-resolution trap — reject it unless the
+    user passes --project explicitly."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        # cwd-resolves to "demo" (cwd under demo's repo).
+        self.state_dir = make_project(self.fleet_home, "demo", self.project)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def _other_project_prompt(self) -> Path:
+        """A prompt-file that physically lives under projects/learn-xgboost/."""
+        other_dir = self.fleet_home / "projects" / "learn-xgboost" / "tasks"
+        other_dir.mkdir(parents=True)
+        pf = other_dir / "feature-prompt.md"
+        pf.write_text("Build the feature pipeline.\n")
+        return pf
+
+    def test_guard_fires_when_project_cwd_resolved(self) -> None:
+        pf = self._other_project_prompt()
+        result = run_fleet_agent(
+            "start", "--dry-run", "--prompt-file", str(pf), "feat",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("learn-xgboost", result.stderr)
+        self.assertIn("--project", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-feat").exists())
+
+    def test_explicit_project_bypasses_guard(self) -> None:
+        pf = self._other_project_prompt()
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--prompt-file", str(pf), "feat",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.state_dir / "tasks" / "task-feat").is_dir())
+
+    def test_same_project_prompt_file_passes(self) -> None:
+        own_dir = self.fleet_home / "projects" / "demo" / "tasks"
+        own_dir.mkdir(parents=True, exist_ok=True)
+        pf = own_dir / "own-prompt.md"
+        pf.write_text("Do the demo work.\n")
+        result = run_fleet_agent(
+            "start", "--dry-run", "--prompt-file", str(pf), "ownwork",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.state_dir / "tasks" / "task-ownwork").is_dir())
+
+    def test_prompt_file_outside_any_project_tree_passes(self) -> None:
+        pf = self.project / "local-prompt.md"
+        pf.write_text("Local prompt, not under any project tree.\n")
+        result = run_fleet_agent(
+            "start", "--dry-run", "--prompt-file", str(pf), "localwork",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.state_dir / "tasks" / "task-localwork").is_dir())
+
+    def test_helper_flags_only_cross_project(self) -> None:
+        from fleet.commands import start
+
+        projects_root = self.fleet_home / "projects"
+        other = projects_root / "learn-xgboost" / "tasks" / "p.md"
+        same = projects_root / "demo" / "tasks" / "p.md"
+        outside = self.project / "p.md"
+
+        self.assertIsNotNone(start._cross_project_promptfile_error(str(other), "demo"))
+        self.assertIsNone(start._cross_project_promptfile_error(str(same), "demo"))
+        self.assertIsNone(start._cross_project_promptfile_error(str(outside), "demo"))
+
+
 class StartAutopasteEnterTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
