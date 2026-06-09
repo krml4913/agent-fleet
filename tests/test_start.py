@@ -591,6 +591,64 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         sent = mock_tmux.send_keys.call_args.args[2]
         self.assertIn("check_for_update_on_startup=false", sent)
 
+    def test_claude_launch_sets_session_name(self) -> None:
+        """claude cli gets --name <project>-<task_id>-<role> at launch."""
+        from fleet.commands import start
+
+        task_id = "mytask"
+        task_dir = self._make_task_dir(task_id)
+
+        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+
+            start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "claude:sonnet", "role": "driver"},
+                project_name="demo",
+                auto_paste=False,
+                prompt_delay=0.0,
+            )
+
+        sent = mock_tmux.send_keys.call_args.args[2]
+        self.assertIn("--name demo-mytask-driver", sent)
+
+    def test_auto_paste_threads_session_name_to_deliverer(self) -> None:
+        """The detached deliverer receives the computed session name."""
+        from fleet.commands import start
+
+        task_id = "namethread"
+        task_dir = self._make_task_dir(task_id)
+
+        with (
+            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            unittest.mock.patch(
+                "fleet.commands.start.prompt_deliverer.start_detached",
+                return_value=task_dir / "prompt-deliverer.log",
+            ) as mock_deliverer,
+        ):
+            mock_tmux.session_exists.return_value = True
+            mock_tmux.TmuxError = Exception
+
+            start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "codex:gpt-5.5", "role": "implementer"},
+                project_name="demo",
+                auto_paste=True,
+                prompt_delay=0.0,
+            )
+
+        self.assertEqual(
+            mock_deliverer.call_args.kwargs["session_name"],
+            "demo-namethread-implementer",
+        )
+
     def test_launch_succeeds_even_when_window_already_exists(self) -> None:
         """Simulates stage transition: new_window does not fail even if a stale window exists."""
         from fleet.commands import start

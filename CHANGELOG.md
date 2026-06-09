@@ -7,6 +7,10 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### auto-name agent sessions on spawn (Issue #145)
+
+- Each spawned agent's resumable session display name is now set automatically so the user can tell sessions apart in the picker: `<project>-leader` for the leader, `<project>-<task_id>-<role>` for stage agents (role disambiguates pair_review / multi_stage panes on the same task). The mechanism branches per vendor in the adapter layer: `VendorAdapter` gained `session_name_launch_args` / `session_rename_keys` (default no-op). claude names at launch via `--name`; codex (no launch flag) renames post-ready through its TUI `/rename` popup keystrokes. `start.launch_stage_driver` / `leader.run` append the launch args; `prompt_deliverer.deliver` and the leader send the rename keystrokes before pasting the prompt. No behaviour change for claude beyond the added name.
+
 ### fix leader project mis-resolution (Issue #143)
 
 - `leader_prompt.render` now rewrites `fleet-agent` references in the fleet-managed base text to the absolute `fleet_agent_bin()` path (mirroring `driver_prompt.render`, Issue #125), so a leader never needs to `cd` into the agent-fleet clone — the `cd` was what made cwd-based project resolution silently land a task in the `fleet` project. `fleet_agent_bin()` moved to a neutral `fleet.paths` module shared by both prompt builders (re-exported from `driver_prompt` for compatibility). The injected `SELECTION.md` and the footer are project content / metadata and are not rewritten.

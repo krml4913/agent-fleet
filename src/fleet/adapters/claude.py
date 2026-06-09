@@ -21,3 +21,8 @@ class ClaudeAdapter(VendorAdapter):
     @classmethod
     def cli_command(cls, model: str) -> list[str]:
         return ["claude", "--dangerously-skip-permissions", "--model", model]
+
+    @classmethod
+    def session_name_launch_args(cls, name: str) -> list[str]:
+        # claude has a launch flag for the resumable session display name.
+        return ["--name", name]

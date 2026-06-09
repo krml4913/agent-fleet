@@ -51,6 +51,52 @@ class RegistryDrivesVendorsTests(unittest.TestCase):
         self.assertEqual(agents.cli_command("fake:m1"), ["fake-cli", "--model", "m1"])
 
 
+class SessionNamingTests(unittest.TestCase):
+    """Session-naming branches in the adapter layer (claude vs codex)."""
+
+    def test_claude_names_at_launch(self) -> None:
+        self.assertEqual(
+            adapters.ClaudeAdapter.session_name_launch_args("x"),
+            ["--name", "x"],
+        )
+        self.assertEqual(adapters.ClaudeAdapter.session_rename_keys("x"), [])
+
+    def test_codex_names_via_rename_keys(self) -> None:
+        self.assertEqual(adapters.CodexAdapter.session_name_launch_args("x"), [])
+        self.assertEqual(
+            adapters.CodexAdapter.session_rename_keys("x"),
+            [
+                ("/rename", False),
+                ("", True),
+                ("C-u", False),
+                ("x", False),
+                ("", True),
+            ],
+        )
+
+    def test_base_default_is_noop(self) -> None:
+        self.assertEqual(VendorAdapter.session_name_launch_args("x"), [])
+        self.assertEqual(VendorAdapter.session_rename_keys("x"), [])
+
+    def test_agents_wrappers_resolve_vendor(self) -> None:
+        self.assertEqual(
+            agents.session_name_launch_args("claude:opus", "n"),
+            ["--name", "n"],
+        )
+        self.assertEqual(agents.session_rename_keys("claude:opus", "n"), [])
+        self.assertEqual(agents.session_name_launch_args("codex:gpt-5.5", "n"), [])
+        self.assertEqual(
+            agents.session_rename_keys("codex:gpt-5.5", "n"),
+            [
+                ("/rename", False),
+                ("", True),
+                ("C-u", False),
+                ("n", False),
+                ("", True),
+            ],
+        )
+
+
 class DelivererUsesRegistryTests(unittest.TestCase):
     """The deliverer's readiness detection comes from the registered adapter."""
 

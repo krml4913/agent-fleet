@@ -122,5 +122,26 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertNotIn("You are the leader of a fleet project", pointer)
 
 
+    def test_claude_leader_sets_session_name(self) -> None:
+        from fleet.commands import leader
+
+        args = unittest.mock.MagicMock()
+        args.project = self.project_name
+        args.agent = "claude:opus"
+        args.attach = False
+        args.auto_paste = False
+        args.prompt_delay = 0.0
+
+        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = False
+            mock_tmux.TmuxError = Exception
+            result = leader.run(args)
+
+        self.assertEqual(result, 0)
+        cli_sent = mock_tmux.send_keys.call_args_list[0].args[2]
+        self.assertIn(f"--name {self.project_name}-leader", cli_sent)
+
+
 if __name__ == "__main__":
     unittest.main()
