@@ -107,7 +107,11 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
+    # Session display name so the leader is identifiable in the session picker.
+    session_name = f"{name}-leader"
+
     cli = agents_mod.cli_command(args.agent)
+    cli = cli + agents_mod.session_name_launch_args(args.agent, session_name)
     cli_quoted = " ".join(shlex.quote(p) for p in cli)
 
     project_root = Path(project.get("repo", str(state_dir.parent)))
@@ -144,6 +148,12 @@ def run(args: argparse.Namespace) -> int:
         try:
             prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
             time.sleep(max(0.0, args.prompt_delay))
+            # Name the session BEFORE pasting: vendors with no launch-time flag
+            # (codex) rename via post-ready keystrokes; claude is already named
+            # at launch → session_rename_keys is [] → no-op.
+            for text, enter in agents_mod.session_rename_keys(args.agent, session_name):
+                tmux_mod.send_keys(session, "leader", text, enter=enter)
+                time.sleep(0.6)
             tmux_mod.paste_buffer(session, "leader", buffer_name)
             time.sleep(0.8)
             tmux_mod.send_keys(session, "leader", "", enter=True)

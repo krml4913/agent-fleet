@@ -18,6 +18,9 @@ from .events import append_event, utcnow_iso
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 PASTE_SETTLE_SECONDS = 0.25
+# Settle between each session-rename keystroke step (and after the last) so a
+# TUI rename popup has a beat to open and close before the prompt paste.
+RENAME_SETTLE_SECONDS = 0.6
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,7 @@ def start_detached(
     prompt_path: Path,
     buffer_name: str,
     agent_spec: str,
+    session_name: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
     initial_delay: float = 0.0,
@@ -75,6 +79,8 @@ def start_detached(
         "--initial-delay",
         str(initial_delay),
     ]
+    if session_name:
+        args.extend(["--session-name", session_name])
     with log_path.open("ab") as log:
         subprocess.Popen(  # noqa: S603 - argv is constructed, no shell.
             args,
@@ -106,6 +112,7 @@ def deliver(
     prompt_path: Path,
     buffer_name: str,
     agent_spec: str,
+    session_name: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
     initial_delay: float = 0.0,
@@ -127,6 +134,14 @@ def deliver(
 
         if adapter.ready.search(pane):
             try:
+                # Name the session BEFORE pasting the prompt: for vendors with
+                # no launch-time naming flag (codex), this drives the TUI rename
+                # popup, and codex blocks some ops once a task is running.
+                # claude named itself at launch → session_rename_keys is [] → no-op.
+                if session_name:
+                    for text, enter in adapter.session_rename_keys(session_name):
+                        tmux.send_keys(session, window, text, enter=enter)
+                        time.sleep(RENAME_SETTLE_SECONDS)
                 # Paste a short pointer to the prompt file, not the prompt
                 # body — pasting the full body trips agent-CLI input quirks
                 # (mixed-character corruption, see Issue #90).
@@ -332,6 +347,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prompt-path", required=True, type=Path)
     p.add_argument("--buffer-name", required=True)
     p.add_argument("--agent", required=True)
+    p.add_argument("--session-name", default=None)
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     p.add_argument("--poll-interval", type=float, default=DEFAULT_POLL_INTERVAL_SECONDS)
     p.add_argument("--initial-delay", type=float, default=0.0)
@@ -348,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
         prompt_path=args.prompt_path,
         buffer_name=args.buffer_name,
         agent_spec=args.agent,
+        session_name=args.session_name,
         timeout=args.timeout,
         poll_interval=args.poll_interval,
         initial_delay=args.initial_delay,

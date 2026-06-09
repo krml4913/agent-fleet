@@ -42,3 +42,23 @@ class VendorAdapter:
         paths) on top of the returned list.
         """
         raise NotImplementedError
+
+    @classmethod
+    def session_name_launch_args(cls, name: str) -> list[str]:
+        """argv appended at launch to set the session display name.
+
+        ``[]`` when the vendor has no launch-time naming flag — then the
+        session is named post-boot via :meth:`session_rename_keys` instead.
+        """
+        return []
+
+    @classmethod
+    def session_rename_keys(cls, name: str) -> list[tuple[str, bool]]:
+        """Post-ready keystroke steps to rename the session.
+
+        For vendors with no launch-time naming flag. Each step is
+        ``(text, press_enter)``; the driver sends them in order once the
+        pane is ready. ``[]`` when naming happens at launch (see
+        :meth:`session_name_launch_args`).
+        """
+        return []

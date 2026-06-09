@@ -32,3 +32,24 @@ class CodexAdapter(VendorAdapter):
             "-m",
             model,
         ]
+
+    @classmethod
+    def session_rename_keys(cls, name: str) -> list[tuple[str, bool]]:
+        # codex (cli 0.132) has no launch-time naming flag; it renames the
+        # session via the TUI `/rename` slash command. Each step is
+        # (text, press_enter); the deliverer settles between steps.
+        #
+        # Verified live (see PR #145 / outbox) — two non-obvious findings:
+        #  1. Typing `/rename` and Enter back-to-back does NOT open the popup
+        #     (the Enter is swallowed by the autocomplete menu). The text and
+        #     the Enter must be separate steps so a settle lands between them.
+        #  2. The rename popup pre-fills with the thread's current name, so a
+        #     `C-u` (kill-line) is needed to clear the field before typing —
+        #     otherwise the new name is appended to the old one.
+        return [
+            ("/rename", False),  # type the slash command; let the menu render
+            ("", True),          # Enter opens the rename popup
+            ("C-u", False),      # clear any pre-filled text in the field
+            (name, False),       # type the new name
+            ("", True),          # Enter confirms
+        ]

@@ -98,6 +98,75 @@ class PromptDelivererTests(unittest.TestCase):
         send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
+    def test_codex_session_name_renames_before_paste(self) -> None:
+        calls: list[tuple] = []
+
+        def record(session, window, text, *, enter=True):
+            calls.append(("send_keys", text))
+            self._ack_on_enter()
+
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch(
+                "fleet.prompt_deliverer.tmux.paste_buffer",
+                side_effect=lambda *a, **k: calls.append(("paste", None)),
+            ),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=record),
+        ):
+            result = prompt_deliverer.deliver(
+                state_dir=self.state_dir,
+                task_id=self.task_id,
+                session="fleet-demo",
+                window="1·driver",
+                prompt_path=self.prompt_path,
+                buffer_name="fleet-task-1",
+                agent_spec="codex:o4-mini",
+                session_name="demo-1-driver",
+                timeout=1.0,
+                poll_interval=0.01,
+            )
+
+        self.assertEqual(result, 0)
+        # rename keystrokes come first (open popup, clear field, type name,
+        # confirm), then the paste, then the submit Enter.
+        self.assertEqual(
+            calls,
+            [
+                ("send_keys", "/rename"),
+                ("send_keys", ""),
+                ("send_keys", "C-u"),
+                ("send_keys", "demo-1-driver"),
+                ("send_keys", ""),
+                ("paste", None),
+                ("send_keys", ""),
+            ],
+        )
+
+    def test_claude_session_name_does_not_send_rename_keys(self) -> None:
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
+        ):
+            result = prompt_deliverer.deliver(
+                state_dir=self.state_dir,
+                task_id=self.task_id,
+                session="fleet-demo",
+                window="1·driver",
+                prompt_path=self.prompt_path,
+                buffer_name="fleet-task-1",
+                agent_spec="claude:opus",
+                session_name="demo-1-driver",
+                timeout=1.0,
+                poll_interval=0.01,
+            )
+
+        self.assertEqual(result, 0)
+        # claude is named at launch → only the submit Enter, no rename keys.
+        send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
+
     def test_does_not_retry_enter_while_waiting_for_ack(self) -> None:
         with (
             patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),

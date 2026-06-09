@@ -136,7 +136,13 @@ def launch_stage_driver(
         tmux_mod.new_window(session, window, cwd=str(effective_cwd), env=driver_env)
         prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
 
+        # Session display name so the user can tell resumable sessions apart
+        # in the picker: <project>-<task_id>-<role> (role disambiguates
+        # pair_review / multi_stage panes on the same task).
+        session_name = f"{project_name}-{task_id}-{role_name}"
+
         cli = agents_mod.cli_command(agent_spec)
+        cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
         cli_quoted = " ".join(shlex.quote(p) for p in cli)
         tmux_mod.send_keys(session, window, cli_quoted)
 
@@ -149,6 +155,7 @@ def launch_stage_driver(
                 prompt_path=prompt_path,
                 buffer_name=buffer_name,
                 agent_spec=agent_spec,
+                session_name=session_name,
                 timeout=prompt_timeout,
                 initial_delay=max(0.0, prompt_delay),
             )

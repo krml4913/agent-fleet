@@ -48,6 +48,26 @@ def cli_command(spec: str) -> list[str]:
     return REGISTRY[vendor].cli_command(model)
 
 
+def session_name_launch_args(spec: str, name: str) -> list[str]:
+    """argv to append at launch to set this agent's session display name.
+
+    ``[]`` for vendors with no launch-time naming flag (use
+    :func:`session_rename_keys` post-ready instead).
+    """
+    vendor, _model = parse_spec(spec)
+    return REGISTRY[vendor].session_name_launch_args(name)
+
+
+def session_rename_keys(spec: str, name: str) -> list[tuple[str, bool]]:
+    """Post-ready keystroke steps that rename this agent's session.
+
+    ``[]`` for vendors that name the session at launch (see
+    :func:`session_name_launch_args`).
+    """
+    vendor, _model = parse_spec(spec)
+    return REGISTRY[vendor].session_rename_keys(name)
+
+
 def codex_repo_trusted(repo_root, *, config_path=None) -> bool:
     """Return True if codex trusts ``repo_root`` (read-only check)."""
     config = (
