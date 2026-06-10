@@ -234,6 +234,33 @@ class TeardownHelperTests(unittest.TestCase):
         mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", "1")
         mock_tmux.delete_buffer.assert_called_once_with("fleet-task-1")
 
+    def test_teardown_uses_project_repo_as_project_root(self) -> None:
+        # repo (self.project) differs from state_dir.parent; teardown must hand
+        # on_cleanup the real repo so a non-fleet project's worktree (which lives
+        # in its own repo, not under fleet-state) can actually be removed.
+        self.assertNotEqual(self.project, self.state_dir.parent)
+        task = state.load_task(self.state_dir, "1")
+        with patch("fleet.commands.cleanup.workspace_mod.on_cleanup") as on_cleanup, \
+                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = False
+            cleanup_mod.teardown(self.state_dir, "1", task, archive=False)
+
+        ctx = on_cleanup.call_args.args[0]
+        self.assertEqual(Path(ctx["project_root"]).resolve(), self.project.resolve())
+
+    def test_teardown_explicit_project_root_overrides_repo(self) -> None:
+        other = Path(self._tmp.name) / "elsewhere"
+        task = state.load_task(self.state_dir, "1")
+        with patch("fleet.commands.cleanup.workspace_mod.on_cleanup") as on_cleanup, \
+                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = False
+            cleanup_mod.teardown(
+                self.state_dir, "1", task, archive=False, project_root=other,
+            )
+
+        ctx = on_cleanup.call_args.args[0]
+        self.assertEqual(ctx["project_root"], other)
+
     def test_teardown_without_archive_keeps_dir(self) -> None:
         task = state.load_task(self.state_dir, "1")
         with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:

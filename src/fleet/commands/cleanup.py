@@ -46,12 +46,19 @@ def teardown(
     Does NOT emit an event or rebuild the dashboard; each caller does that
     with its own event type.
     """
-    # workspace cleanup hook
+    project = state_mod.load_project(state_dir)
+
+    # workspace cleanup hook — the worktree lives in the *project repo*
+    # (project.yaml `repo`), which is NOT state_dir.parent for projects whose
+    # state dir lives outside their repo. An explicit project_root arg wins,
+    # then the project repo, then state_dir.parent as a last resort.
+    repo = project.get("repo")
+    resolved_root = project_root or (Path(repo) if repo else state_dir.parent)
     ctx: dict = {
         "state_dir": state_dir,
         "task_id": task_id,
         "task": task,
-        "project_root": project_root or state_dir.parent,
+        "project_root": resolved_root,
     }
     try:
         workspace_mod.on_cleanup(ctx)
@@ -59,7 +66,6 @@ def teardown(
         print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
 
     # Drop tmux artefacts.
-    project = state_mod.load_project(state_dir)
     project_name = project.get("name") or "fleet"
     session = f"fleet-{project_name}"
     buffer_name = f"fleet-task-{task_id}"
