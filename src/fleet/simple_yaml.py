@@ -30,8 +30,32 @@ def load(text: str) -> dict[str, str]:
         key = key.strip()
         if not key:
             raise ValueError(f"simple_yaml: empty key in line: {raw!r}")
-        out[key] = value.strip()
+        out[key] = _parse_value(value)
     return out
+
+
+def _parse_value(value: str) -> str:
+    """Resolve a raw value: unwrap a quoted scalar, else strip an inline comment.
+
+    A fully-quoted value (single or double quotes) keeps its interior verbatim,
+    including any ``#``; only the surrounding quotes are removed. An unquoted
+    value has any trailing ``#`` comment stripped, where the ``#`` must be
+    preceded by whitespace to count as a comment start (a ``#`` glued to a token
+    is kept). Values stay ``str`` — see module docstring; a future PyYAML
+    migration would replace this hand-rolled handling.
+    """
+    value = value.strip()
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        return value[1:-1]
+    return _strip_inline_comment(value)
+
+
+def _strip_inline_comment(value: str) -> str:
+    """Drop a ``whitespace + #`` trailing comment from an unquoted value."""
+    for i, ch in enumerate(value):
+        if ch == "#" and i > 0 and value[i - 1].isspace():
+            return value[:i].strip()
+    return value.strip()
 
 
 def dump(data: Mapping[str, object]) -> str:
