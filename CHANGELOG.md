@@ -7,6 +7,10 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### be lenient when both description and --prompt-file are passed to start (Issue #151)
+
+- `fleet-agent start <id> "<desc>" --prompt-file PATH` no longer hard-fails with "pass either description or --prompt-file, not both" — passing both is a common leader slip, not worth rejecting. Now the `--prompt-file` contents win as the task body (the richer, intentional input) and the stray positional `<desc>` is relegated to the title: with no `--title` it becomes the title (and a `warn:` is printed so the slip is visible, not silent); with `--title T` present, `T` wins and the positional `<desc>` is ignored. `_resolve_description` now returns `(body, fallback_title)` and the title decision lives in one place in `run()` (precedence: `--title` > relegated positional > first line of body), so the prompt-file body never masquerades as the title. The other branches are unchanged: neither given still errors, only one given is unchanged.
+
 ### infer project from --prompt-file path instead of erroring (Issue #150)
 
 - Follow-up to #143. `fleet-agent start` now *infers and proceeds* instead of rejecting: when `--project` is omitted and `--prompt-file` resolves under exactly one `projects/<name>/` tree, it infers `<name>` and resolves that project's state dir BEFORE `resolve_state_dir`, rather than resolving from cwd and erroring on a cross-project mismatch. Since the prompt-file path already names the project unambiguously, a leader spawning by absolute path from another repo no longer hits "re-run with --project" on every start. Explicit `--project` still wins (no inference override); a prompt-file outside any project tree falls back to cwd resolution as before; and an inferred but *unregistered* project fails with a clear error rather than silently landing in the cwd project. The #143 `_cross_project_promptfile_error` helper became `_infer_project_from_promptfile` (same path-parsing, returns the name instead of an error string), and the cross-project guard tests now assert the infer-and-proceed behaviour.

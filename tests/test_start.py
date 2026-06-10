@@ -93,19 +93,44 @@ class StartTests(unittest.TestCase):
         starts = [e for e in lines if e.get("type") == "start"]
         self.assertEqual(starts[-1]["description"], prompt_text)
 
-    def test_prompt_file_and_description_is_error(self) -> None:
+    def test_prompt_file_and_description_relegates_to_title(self) -> None:
+        # Lenient (#151): both given is a common leader slip, not a hard error.
+        # prompt-file wins the body; the positional description becomes the
+        # title; a warn is printed.
         prompt_file = self.project / "task-prompt.md"
-        prompt_file.write_text("File prompt")
+        prompt_text = "File prompt first line\nSecond line from file\n"
+        prompt_file.write_text(prompt_text)
 
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
-            "--prompt-file", str(prompt_file), "both", "Inline prompt",
+            "--prompt-file", str(prompt_file), "both", "Stray inline title",
             fleet_home=self.fleet_home,
         )
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("either description or --prompt-file", result.stderr)
-        self.assertFalse((self.state_dir / "tasks" / "task-both").exists())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("warn:", result.stderr)
+        self.assertIn("treating the positional description as the title", result.stderr)
+        task_data = state.load_task(self.state_dir, "both")
+        self.assertEqual(task_data["description"], prompt_text)
+        self.assertEqual(task_data["title"], "Stray inline title")
+
+    def test_prompt_file_and_description_explicit_title_wins(self) -> None:
+        # --title still wins over the relegated positional description.
+        prompt_file = self.project / "task-prompt.md"
+        prompt_text = "File body\n"
+        prompt_file.write_text(prompt_text)
+
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--prompt-file", str(prompt_file), "--title", "Explicit T",
+            "both-t", "Stray inline title",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task_data = state.load_task(self.state_dir, "both-t")
+        self.assertEqual(task_data["description"], prompt_text)
+        self.assertEqual(task_data["title"], "Explicit T")
 
     def test_missing_description_and_prompt_file_is_error(self) -> None:
         result = run_fleet_agent(
