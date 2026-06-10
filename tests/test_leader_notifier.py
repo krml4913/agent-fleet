@@ -122,6 +122,86 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertIn("pull the diff", block)
         self.assertIn("completed+merged", block)
 
+    # -- inject-time PR-URL re-scan ---------------------------------------
+
+    def test_refill_fills_missing_pr_url_found_at_inject_time(self) -> None:
+        # Enqueued before the PR landed: record carries pr_url=None …
+        self._seed_task("1")
+        rec = self._record("1")
+        self.assertIsNone(rec["pr_url"])
+        # … then the PR is written to outbox.md before the flush.
+        self._seed_task("1", pr_url="https://github.com/o/r/pull/55")
+        leader_notifier._refill_pr_urls(self.state_dir, [rec])
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/55")
+
+    def test_refill_does_not_overwrite_present_pr_url(self) -> None:
+        self._seed_task("1", pr_url="https://github.com/o/r/pull/1")
+        rec = self._record("1")
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/1")
+        # A different URL lands in outbox afterwards — must NOT be re-scanned.
+        self._seed_task("1", pr_url="https://github.com/o/r/pull/999")
+        with patch.object(leader_notifier, "scan_pr_url") as scan:
+            leader_notifier._refill_pr_urls(self.state_dir, [rec])
+            scan.assert_not_called()
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/1")
+
+    def test_refill_leaves_still_missing_pr_url_null(self) -> None:
+        self._seed_task("1")  # no outbox, PR never appeared
+        rec = self._record("1")
+        leader_notifier._refill_pr_urls(self.state_dir, [rec])
+        self.assertIsNone(rec["pr_url"])
+
+    def test_refill_swallows_scan_errors(self) -> None:
+        self._seed_task("1")
+        rec = self._record("1")
+        with patch.object(leader_notifier, "scan_pr_url", side_effect=OSError("boom")):
+            leader_notifier._refill_pr_urls(self.state_dir, [rec])  # must not raise
+        self.assertIsNone(rec["pr_url"])
+
+    def test_flush_injects_pr_url_topped_up_at_inject_time(self) -> None:
+        self._seed_task("1")
+        leader_notifier.enqueue(self.state_dir, self._record("1"))
+        # PR lands after enqueue, before the idle flush.
+        self._seed_task("1", pr_url="https://github.com/o/r/pull/77")
+        with (
+            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
+            patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
+            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+        ):
+            rc = leader_notifier.notify(
+                state_dir=self.state_dir,
+                session="fleet-demo",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.5,
+                poll_interval=0.001,
+            )
+        self.assertEqual(rc, 0)
+        send_keys.assert_called_once()
+        injected = send_keys.call_args[0][2]
+        self.assertIn("https://github.com/o/r/pull/77", injected)
+        self.assertNotIn("(none yet)", injected)
+
+    def test_flush_still_renders_none_yet_when_pr_absent(self) -> None:
+        self._seed_task("1")  # PR never appears
+        leader_notifier.enqueue(self.state_dir, self._record("1"))
+        with (
+            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
+            patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
+            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+        ):
+            rc = leader_notifier.notify(
+                state_dir=self.state_dir,
+                session="fleet-demo",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.5,
+                poll_interval=0.001,
+            )
+        self.assertEqual(rc, 0)
+        send_keys.assert_called_once()
+        self.assertIn("PR=(none yet)", send_keys.call_args[0][2])
+
     # -- inject-only-on-ready ---------------------------------------------
 
     def test_busy_leader_never_injects_keeps_queued(self) -> None:
