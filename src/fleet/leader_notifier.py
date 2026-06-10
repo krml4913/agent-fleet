@@ -301,6 +301,30 @@ def notify(
         _release_lock(lock_fp)
 
 
+def _refill_pr_urls(state_dir: Path, records: list[dict]) -> None:
+    """Top up missing ``pr_url`` fields by re-scanning each task's outbox.
+
+    Best-effort, in place: a record enqueued at ``done`` time can carry a null
+    ``pr_url`` because the driver called ``done`` just before its PR landed in
+    ``outbox.md``. By inject time the PR has usually been written, so re-scan
+    any record still missing a URL. Records that already carry one are left
+    untouched (not re-scanned). ``scan_pr_url`` never raises, but guard anyway
+    so a re-scan hiccup can never block the injection.
+    """
+    for rec in records:
+        if rec.get("pr_url"):
+            continue
+        task_id = rec.get("task_id")
+        if not task_id:
+            continue
+        try:
+            url = scan_pr_url(state_dir, task_id)
+        except Exception:  # noqa: BLE001 - best-effort; never block the flush
+            url = None
+        if url:
+            rec["pr_url"] = url
+
+
 def _flush_once(state_dir: Path, session: str, window: str) -> bool:
     """Inject the current queue once and clear exactly what was flushed.
 
@@ -310,6 +334,7 @@ def _flush_once(state_dir: Path, session: str, window: str) -> bool:
     records = read_queue(state_dir)
     if not records:
         return True
+    _refill_pr_urls(state_dir, records)
     text = render_block(records)
     try:
         time.sleep(INJECT_SETTLE_SECONDS)
