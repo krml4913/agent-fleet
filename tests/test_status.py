@@ -238,6 +238,134 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("fleet rm orphan", result.stdout)
 
 
+class StatusJsonTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def test_json_emits_full_shape(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "feat", {
+            "title": "build the thing",
+            "status": "running",
+            "formation": "multi_stage",
+            "workspace": "worktree",
+            "branch": "fleet/task/feat",
+            "worktree": "/tmp/wt/feat",
+            "current_stage": 1,
+            "stages": [
+                {"role": "plan", "agent": "claude:opus", "status": "done"},
+                {"role": "driver", "agent": "codex:gpt-5.5", "status": "running"},
+                {"role": "review", "agent": "claude:sonnet", "status": "pending"},
+            ],
+        })
+        # PR URL lives in outbox.md; last_event is the most recent for this task.
+        (state.task_dir(sd, "feat") / "outbox.md").write_text(
+            "done\nPR: https://github.com/acme/repo/pull/42\n", encoding="utf-8"
+        )
+        ev_path = sd / "events.jsonl"
+        with open(ev_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": "2026-05-20T14:00:00Z", "type": "start", "task_id": "feat"}) + "\n")
+            f.write(json.dumps({"ts": "2026-05-20T14:05:00Z", "type": "heartbeat", "task_id": "other"}) + "\n")
+            f.write(json.dumps({"ts": "2026-05-20T14:10:00Z", "type": "heartbeat", "task_id": "feat"}) + "\n")
+
+        result = run_fleet("status", "feat", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)  # must parse — nothing else on stdout
+        self.assertEqual(obj["task_id"], "feat")
+        self.assertEqual(obj["title"], "build the thing")
+        self.assertEqual(obj["status"], "running")
+        self.assertEqual(obj["formation"], "multi_stage")
+        self.assertEqual(obj["current_stage"], 1)
+        self.assertEqual(len(obj["stages"]), 3)
+        self.assertEqual(
+            obj["stages"][1],
+            {"role": "driver", "agent": "codex:gpt-5.5", "status": "running"},
+        )
+        self.assertEqual(obj["pr_url"], "https://github.com/acme/repo/pull/42")
+        self.assertEqual(obj["branch"], "fleet/task/feat")
+        self.assertEqual(obj["worktree"], "/tmp/wt/feat")
+        self.assertEqual(obj["workspace"], "worktree")
+        self.assertEqual(obj["last_event"], {"type": "heartbeat", "ts": "2026-05-20T14:10:00Z"})
+        self.assertIsNone(obj["result"])
+
+    def test_json_nulls_when_absent(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "bare", "status": "spawning", "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        result = run_fleet("status", "1", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)
+        self.assertIsNone(obj["pr_url"])
+        self.assertIsNone(obj["branch"])
+        self.assertIsNone(obj["worktree"])
+        self.assertIsNone(obj["last_event"])
+        self.assertIsNone(obj["result"])
+
+    def test_json_reports_gate_result(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "rework", "status": "running", "formation": "pair_review",
+            "current_stage": 0,
+            "stages": [{
+                "role": "driver", "agent": "codex:gpt-5.5", "status": "running",
+                "result": "changes-requested",
+            }],
+        })
+        result = run_fleet("status", "1", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)
+        self.assertEqual(obj["result"], "changes-requested")
+
+    def test_json_resolves_project_from_cwd(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "t", "status": "running", "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        # No --project: resolve from cwd inside the registered repo.
+        result = run_fleet("status", "1", "--json",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)
+        self.assertEqual(obj["task_id"], "1")
+
+    def test_json_nonexistent_task_errors(self) -> None:
+        make_project(self.fleet_home, "demo", self.project)
+        result = run_fleet("status", "ghost", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")  # no half-JSON on stdout
+        self.assertIn("no task-ghost", result.stderr)
+
+    def test_json_unknown_project_errors(self) -> None:
+        make_project(self.fleet_home, "demo", self.project)
+        result = run_fleet("status", "1", "--json", "--project", "nope",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("no registered project", result.stderr)
+
+
 class UnreadTasksTests(unittest.TestCase):
     def test_unread_when_no_ack(self) -> None:
         events = [{"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}]

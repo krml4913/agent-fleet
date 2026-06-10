@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
 from .. import heartbeat
+from .. import leader_notifier
 from .. import state as state_mod
 from ..events import read_events
 from ..state import load_registry, project_state_dir
@@ -49,10 +51,33 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Expand each task: list every stage and the last inbox_seen/heartbeat acks",
     )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help=(
+            "Emit a single task's state as a JSON object instead of the table. "
+            "In this mode the positional argument is the TASK ID; the project is "
+            "resolved from --project or cwd."
+        ),
+    )
+    p.add_argument(
+        "--project",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Project name for --json mode (default: resolved from cwd via "
+            "registry). Lets a leader invoke status by absolute path from "
+            "another repo."
+        ),
+    )
     p.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> int:
+    if getattr(args, "as_json", False):
+        return _run_json(args)
+
     if getattr(args, "all_projects", False):
         return _run_all(args)
 
@@ -184,6 +209,112 @@ def run(args: argparse.Namespace) -> int:
     print("  ".join(legend))
 
     return 0
+
+
+def _run_json(args: argparse.Namespace) -> int:
+    """Emit one task's state as a JSON object on stdout (``--json`` mode).
+
+    In this mode the positional ``name`` is the **task id**, not the project.
+    The project is resolved from ``--project`` or cwd (mirrors ``start``).
+    """
+    task_id = getattr(args, "name", None)
+    if not task_id:
+        print("error: --json requires a task id (positional argument)", file=sys.stderr)
+        return 1
+
+    project_name = getattr(args, "project", None)
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
+    if state_dir is None:
+        print(
+            f"error: no registered project found for {project_name!r}" if project_name
+            else "error: no registered project found for cwd",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        task = state_mod.load_task(state_dir, task_id)
+    except FileNotFoundError:
+        print(
+            f"error: no task-{task_id} in project at {state_dir}",
+            file=sys.stderr,
+        )
+        return 1
+
+    obj = _task_json(state_dir, task_id, task)
+    print(json.dumps(obj, ensure_ascii=False))
+    return 0
+
+
+def _task_json(state_dir: Path, task_id: str, task: dict) -> dict:
+    """Build the machine-readable single-task object for ``--json`` mode."""
+    raw_stages = task.get("stages")
+    stages: list[dict] = []
+    if isinstance(raw_stages, list):
+        for stage in raw_stages:
+            if not isinstance(stage, dict):
+                stages.append({"role": None, "agent": None, "status": None})
+                continue
+            entry = {
+                "role": stage.get("role"),
+                "agent": stage.get("agent"),
+                "status": stage.get("status"),
+            }
+            if stage.get("name") is not None:
+                entry["name"] = stage.get("name")
+            stages.append(entry)
+
+    current_idx = _current_stage_index(task)
+
+    events = read_events(state_dir / "events.jsonl")
+    return {
+        "task_id": task_id,
+        "title": task.get("title"),
+        "status": task.get("status"),
+        "formation": task.get("formation"),
+        "stages": stages,
+        "current_stage": current_idx if current_idx >= 0 else None,
+        "result": _gate_result(task),
+        "pr_url": leader_notifier.scan_pr_url(state_dir, task_id),
+        "branch": task.get("branch"),
+        "worktree": task.get("worktree"),
+        "workspace": task.get("workspace"),
+        "last_event": _last_event(events, task_id),
+    }
+
+
+def _gate_result(task: dict) -> str | None:
+    """Return the current stage's gate/approval result, or ``None``.
+
+    Mirrors the orchestrator's per-stage bookkeeping: a stage carries an
+    explicit ``result`` (e.g. ``changes-requested``) and/or a ``user_approval``
+    gate whose ``status`` settles to ``approved``. Prefer the explicit result,
+    fall back to a settled approval, else ``None``.
+    """
+    idx = _current_stage_index(task)
+    stages = task.get("stages")
+    if idx < 0 or not isinstance(stages, list):
+        return None
+    stage = stages[idx]
+    if not isinstance(stage, dict):
+        return None
+    result = stage.get("result")
+    if result:
+        return str(result)
+    ua = stage.get("user_approval")
+    if isinstance(ua, dict):
+        ua_status = ua.get("status")
+        if ua_status in {"approved", "rejected"}:
+            return str(ua_status)
+    return None
+
+
+def _last_event(events: list[dict], task_id: str) -> dict | None:
+    """Return ``{type, ts}`` of the most recent event for ``task_id``, else None."""
+    for ev in reversed(events):
+        if str(ev.get("task_id", "")) == task_id:
+            return {"type": ev.get("type"), "ts": ev.get("ts")}
+    return None
 
 
 def _run_all(args: argparse.Namespace) -> int:
