@@ -162,11 +162,34 @@ def _delete_remote_branch(project_root: Path, branch: str) -> None:
     if r.returncode == 0:
         return
     msg = (r.stderr or r.stdout).strip()
-    lowered = msg.lower()
-    if "remote ref does not exist" in lowered or "does not exist" in lowered:
+    if _branch_already_gone(msg):
         print(
             f"note: remote branch {branch!r} already deleted",
             file=sys.stderr,
         )
         return
     print(f"warn: git push --delete {branch} failed: {msg}", file=sys.stderr)
+
+
+def _branch_already_gone(msg: str) -> bool:
+    """Does this ``push --delete`` stderr mean the branch is already absent?
+
+    Two shapes both mean "the desired end state (no remote branch) is already
+    true", so the merge fully succeeded and we should not warn:
+
+    - git's own "ref does not exist" phrasings (delete of a missing ref);
+    - GitHub auto-delete-head-branches racing us: the head branch is gone before
+      we push, so the delete fails to *resolve/lock* the ref. That surfaces as
+      ``remote rejected ... cannot lock ref ... unable to resolve reference``.
+
+    A bare ``remote rejected`` (without the can't-resolve/lock signal) is left as
+    a genuine failure — it could mean a protected branch or some other reason the
+    ref is still there.
+    """
+    lowered = msg.lower()
+    return (
+        "remote ref does not exist" in lowered
+        or "does not exist" in lowered
+        or "unable to resolve reference" in lowered
+        or "cannot lock ref" in lowered
+    )

@@ -1,11 +1,13 @@
 """Tests for ``fleet-agent merge``."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -271,6 +273,77 @@ class TeardownHelperTests(unittest.TestCase):
 
         self.assertFalse(archived)
         self.assertTrue((self.state_dir / "tasks" / "task-1").exists())
+
+
+class DeleteRemoteBranchTests(unittest.TestCase):
+    """``_delete_remote_branch`` classifies push --delete failures."""
+
+    def _run_with_stderr(self, returncode: int, stderr: str) -> str:
+        result = subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout="", stderr=stderr,
+        )
+        buf = io.StringIO()
+        with patch("fleet.commands.merge.subprocess.run", return_value=result), \
+                redirect_stderr(buf):
+            merge_mod._delete_remote_branch(Path("/repo"), "demo/task/1")
+        return buf.getvalue()
+
+    def test_success_prints_nothing(self) -> None:
+        self.assertEqual(self._run_with_stderr(0, ""), "")
+
+    def test_already_deleted_phrasings_are_notes_not_warns(self) -> None:
+        # Each of these means "branch already absent = desired end state".
+        already_gone = [
+            # git's own phrasings (delete of a missing ref).
+            "error: unable to delete 'demo/task/1': remote ref does not exist",
+            "error: branch 'demo/task/1' does not exist",
+            # GitHub auto-delete-head-branches raced the delete.
+            (
+                " ! [remote rejected] demo/task/1 (cannot lock ref "
+                "'refs/heads/demo/task/1': unable to resolve reference "
+                "'refs/heads/demo/task/1')\n"
+                "error: failed to push some refs to 'github.com:org/repo'"
+            ),
+        ]
+        for stderr in already_gone:
+            with self.subTest(stderr=stderr):
+                out = self._run_with_stderr(1, stderr)
+                self.assertIn("already deleted", out)
+                self.assertNotIn("warn:", out)
+
+    def test_cannot_lock_ref_alone_is_a_note(self) -> None:
+        out = self._run_with_stderr(
+            1, "error: cannot lock ref 'refs/heads/demo/task/1'"
+        )
+        self.assertIn("already deleted", out)
+        self.assertNotIn("warn:", out)
+
+    def test_unable_to_resolve_reference_alone_is_a_note(self) -> None:
+        out = self._run_with_stderr(
+            1, "fatal: unable to resolve reference 'refs/heads/demo/task/1'"
+        )
+        self.assertIn("already deleted", out)
+        self.assertNotIn("warn:", out)
+
+    def test_genuine_failure_still_warns(self) -> None:
+        out = self._run_with_stderr(
+            1,
+            "remote: Permission to org/repo.git denied.\n"
+            "fatal: Authentication failed",
+        )
+        self.assertIn("warn:", out)
+        self.assertNotIn("already deleted", out)
+
+    def test_bare_remote_rejected_still_warns(self) -> None:
+        # A protected branch (or other reason the ref is still there) must not be
+        # mistaken for "already gone".
+        out = self._run_with_stderr(
+            1,
+            " ! [remote rejected] demo/task/1 (protected branch hook declined)\n"
+            "error: failed to push some refs",
+        )
+        self.assertIn("warn:", out)
+        self.assertNotIn("already deleted", out)
 
 
 if __name__ == "__main__":
