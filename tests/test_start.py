@@ -299,10 +299,11 @@ class StartTests(unittest.TestCase):
         self.assertEqual(task_data["title"], "refactor: split into modules")
 
 
-class CrossProjectPromptFileGuardTests(unittest.TestCase):
-    """Issue #143: a cwd-resolved project whose --prompt-file lives under a
-    *different* project's tree is the cwd-resolution trap — reject it unless the
-    user passes --project explicitly."""
+class InferProjectFromPromptFileTests(unittest.TestCase):
+    """Issue #150 (follow-up to #143): when --project is omitted and the
+    --prompt-file lives under projects/<name>/, infer <name> and proceed instead
+    of erroring on a cwd/prompt-file mismatch. The prompt-file path names the
+    project unambiguously, so the #143 cross-project error is pure friction."""
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -310,10 +311,14 @@ class CrossProjectPromptFileGuardTests(unittest.TestCase):
         self.fleet_home.mkdir()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
+        self.other_repo = Path(self._tmp.name) / "bmweb-repo"
+        self.other_repo.mkdir()
         self._old_fleet_home = os.environ.get("FLEET_HOME")
         os.environ["FLEET_HOME"] = str(self.fleet_home)
         # cwd-resolves to "demo" (cwd under demo's repo).
         self.state_dir = make_project(self.fleet_home, "demo", self.project)
+        # bmweb is a *registered* project whose tree differs from cwd.
+        self.bmweb_dir = make_project(self.fleet_home, "bmweb", self.other_repo)
 
     def tearDown(self) -> None:
         if self._old_fleet_home is None:
@@ -322,27 +327,30 @@ class CrossProjectPromptFileGuardTests(unittest.TestCase):
             os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
-    def _other_project_prompt(self) -> Path:
-        """A prompt-file that physically lives under projects/learn-xgboost/."""
-        other_dir = self.fleet_home / "projects" / "learn-xgboost" / "tasks"
-        other_dir.mkdir(parents=True)
+    def _bmweb_prompt(self) -> Path:
+        """A prompt-file that physically lives under projects/bmweb/."""
+        other_dir = self.fleet_home / "projects" / "bmweb" / "tasks"
+        other_dir.mkdir(parents=True, exist_ok=True)
         pf = other_dir / "feature-prompt.md"
         pf.write_text("Build the feature pipeline.\n")
         return pf
 
-    def test_guard_fires_when_project_cwd_resolved(self) -> None:
-        pf = self._other_project_prompt()
+    def test_infers_project_from_prompt_file_and_proceeds(self) -> None:
+        # Headline case: prompt-file under projects/bmweb/, no --project, run
+        # from a cwd that resolves to "demo" → infer bmweb and land there.
+        pf = self._bmweb_prompt()
         result = run_fleet_agent(
             "start", "--dry-run", "--prompt-file", str(pf), "feat",
             fleet_home=self.fleet_home, cwd=self.project,
         )
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("learn-xgboost", result.stderr)
-        self.assertIn("--project", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.bmweb_dir / "tasks" / "task-feat").is_dir())
+        # Did NOT land in the cwd-resolved "demo" project.
         self.assertFalse((self.state_dir / "tasks" / "task-feat").exists())
 
-    def test_explicit_project_bypasses_guard(self) -> None:
-        pf = self._other_project_prompt()
+    def test_explicit_project_wins_over_inference(self) -> None:
+        # Explicit --project foo wins even when the prompt-file is under bar/.
+        pf = self._bmweb_prompt()
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
             "--prompt-file", str(pf), "feat",
@@ -350,6 +358,7 @@ class CrossProjectPromptFileGuardTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.state_dir / "tasks" / "task-feat").is_dir())
+        self.assertFalse((self.bmweb_dir / "tasks" / "task-feat").exists())
 
     def test_same_project_prompt_file_passes(self) -> None:
         own_dir = self.fleet_home / "projects" / "demo" / "tasks"
@@ -363,7 +372,7 @@ class CrossProjectPromptFileGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.state_dir / "tasks" / "task-ownwork").is_dir())
 
-    def test_prompt_file_outside_any_project_tree_passes(self) -> None:
+    def test_prompt_file_outside_any_project_tree_uses_cwd(self) -> None:
         pf = self.project / "local-prompt.md"
         pf.write_text("Local prompt, not under any project tree.\n")
         result = run_fleet_agent(
@@ -371,19 +380,35 @@ class CrossProjectPromptFileGuardTests(unittest.TestCase):
             fleet_home=self.fleet_home, cwd=self.project,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        # Falls back to cwd resolution → lands in "demo".
         self.assertTrue((self.state_dir / "tasks" / "task-localwork").is_dir())
 
-    def test_helper_flags_only_cross_project(self) -> None:
+    def test_inferred_unregistered_project_errors(self) -> None:
+        # Prompt-file under projects/learn-xgboost/ that is NOT registered →
+        # clear error, not a silent fall-back to the cwd "demo" project.
+        unreg_dir = self.fleet_home / "projects" / "learn-xgboost" / "tasks"
+        unreg_dir.mkdir(parents=True)
+        pf = unreg_dir / "p.md"
+        pf.write_text("Unregistered project prompt.\n")
+        result = run_fleet_agent(
+            "start", "--dry-run", "--prompt-file", str(pf), "feat",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("learn-xgboost", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-feat").exists())
+
+    def test_helper_infers_name_or_none(self) -> None:
         from fleet.commands import start
 
         projects_root = self.fleet_home / "projects"
-        other = projects_root / "learn-xgboost" / "tasks" / "p.md"
+        other = projects_root / "bmweb" / "tasks" / "p.md"
         same = projects_root / "demo" / "tasks" / "p.md"
         outside = self.project / "p.md"
 
-        self.assertIsNotNone(start._cross_project_promptfile_error(str(other), "demo"))
-        self.assertIsNone(start._cross_project_promptfile_error(str(same), "demo"))
-        self.assertIsNone(start._cross_project_promptfile_error(str(outside), "demo"))
+        self.assertEqual(start._infer_project_from_promptfile(str(other)), "bmweb")
+        self.assertEqual(start._infer_project_from_promptfile(str(same)), "demo")
+        self.assertIsNone(start._infer_project_from_promptfile(str(outside)))
 
 
 class StartAutopasteEnterTests(unittest.TestCase):
