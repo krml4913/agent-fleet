@@ -11,11 +11,18 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .. import formation
+from .. import leader_notifier
 from .. import notify
 from .. import orchestrator as orch
 from .. import state as state_mod
 from .. import task_context
+from .. import tmux
 from ..events import append_event
+
+
+def _truthy(value: object) -> bool:
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -98,5 +105,71 @@ def run(args: argparse.Namespace) -> int:
 
     notify.send(state_dir, title=title, message=message, level=level)
 
+    _maybe_notify_leader(
+        state_dir,
+        task_id,
+        task,
+        project,
+        project_name,
+        status=status,
+        result=result,
+        summary=message,
+    )
+
     print(f"task-{task_id} marked done")
     return 0
+
+
+def _maybe_notify_leader(
+    state_dir,
+    task_id: str,
+    task: dict,
+    project: dict,
+    project_name: str,
+    *,
+    status: str,
+    result: str,
+    summary: str,
+) -> None:
+    """Opt-in leader-pane push. Default OFF → zero behaviour change.
+
+    Always enqueues a persisted record (never dropped) when the feature is on,
+    then best-effort spawns the detached notifier. tmux/leader absence only
+    leaves the record queued — it never errors the ``done``.
+    """
+    if not _truthy(project.get("notify_leader_on_driver_done")):
+        return
+    try:
+        record = leader_notifier.build_record(
+            state_dir=state_dir,
+            task_id=task_id,
+            status=status,
+            branch=task.get("branch"),
+            worktree=task.get("worktree"),
+            summary=summary,
+            result=result,
+        )
+        leader_notifier.enqueue(state_dir, record)
+    except Exception:
+        # The queue is the durable path; if even that fails, do not break done.
+        return
+
+    # Spawn the detached notifier only when the leader pane is resolvable.
+    # Otherwise the record stays queued for the next done / re-attach.
+    try:
+        if not tmux.available():
+            return
+        session = f"fleet-{project_name}"
+        if not tmux.session_exists(session):
+            return
+        leader_session = formation.read_leader_session(state_dir)
+        if not leader_session or not leader_session.get("agent"):
+            return
+        leader_notifier.start_detached(
+            state_dir=state_dir,
+            session=session,
+            window="leader",
+            agent_spec=leader_session["agent"],
+        )
+    except Exception:
+        return
