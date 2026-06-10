@@ -852,3 +852,174 @@ The repo owner adopted the lightweight prompt-guidance step from §12.7, made
   (§12.7) stands; this adopts only the prompt-guidance escape hatch it called out.
 
 This closes Issue #118.
+
+---
+
+## 13. Design Study: Shared / Inherited Driver Context
+
+> **Status: study — NOT adopted.** This chapter reasons through Issue #152
+> ("is a shared/warm-context mechanism worth it for fleet?"). It is a balanced
+> study, not finalized design: unlike §12, no decision section follows, because
+> the adopt / not-adopt call is explicitly left to the repo owner. Everything
+> below §13.6 is a recommendation, not a settled mechanism. The rest of
+> `docs/design.md` holds confirmed design only — do not read this chapter as
+> such.
+
+### 13.1 The Question
+
+Raised by the image-gallery leader (re-mapped from Claude-harness vocabulary
+onto fleet): every driver is a fresh CLI that re-reads the same large context
+(CLAUDE.md, big source files) from scratch, so N parallel or serial drivers
+re-pay the same token cost to load it. fleet has no shared- or
+inherited-context mechanism; today the leader hand-embeds summaries into the
+task description when context matters — a lossy, manual workaround.
+
+The honest first move (§1.3 principle 3: question the premise) is to separate
+two claims bundled in that framing:
+
+1. *Drivers re-read shared context from scratch.* — True, and largely **by
+   design**. A driver is an independent CLI in its own pane (§3.1, §4.2); its
+   freshness is the isolation that lets the user attach and converse with it as a
+   standalone agent (§1.3 principle 8). "Re-pays context" is the cost side of the
+   isolation the mission buys on purpose.
+2. *That re-payment is a problem worth a mechanism.* — This is the part to test
+   against real harm (§1.3 principle 2), not to assume.
+
+### 13.2 What "Re-pay Context" Actually Costs
+
+Be precise about the cost before weighing fixes.
+
+- **CLAUDE.md / AGENTS.md** are deliberately small (this repo's are a few
+  hundred lines combined) and are loaded by the *vendor CLI's own* project-file
+  mechanism, not by a fleet prompt. fleet does not pay to inject them; the CLI
+  does, once per process.
+- **The driver base prompt is intentionally short** (§8.2, §6: "the base prompt
+  is not fattened"). Dynamic prompt injection was explicitly dropped from
+  claude-forge and is listed implicitly under §9 anti-scope. So the part fleet
+  *controls* is already minimized — there is little fleet-side bloat left to
+  amortize.
+- **Big source files** are re-read by each driver, but a driver reads the files
+  *its task touches*, which differ per task. The genuinely shared, re-read-
+  identically payload across drivers is narrower than the framing implies —
+  mostly the project docs, which are already small.
+
+So the measured harm is: each driver spends some input tokens re-reading a
+modest, mostly-small shared context. For fleet's actual usage — a handful of
+drivers per project, rarely many in tight parallel (§9: parallel execution is
+not a core capability) — this is a real but **small, bounded** cost. The
+dogfooding signal to date (memory: `dogfooding-value-signal`) is that the value
+fleet delivered was "light multi-session task handling," and no recorded
+intervention has cited context re-payment as a pain point. That is weak evidence
+that this is *fine*, not that it *hurts*.
+
+### 13.3 Options Weighed
+
+| Option | What it is | Assessment |
+|---|---|---|
+| **1. Injected pre-read snippet** | A curated context snippet the leader / structure injects into each driver prompt once. | Cuts directly against "base prompts are short" (§8.2) and re-introduces the dynamic prompt injection dropped from claude-forge. It also needs an **owner**: someone keeps the snippet accurate, and a stale injected summary is *worse* than no summary (it misleads with authority). This is the lossy hand-embed, promoted to a standing mechanism — it makes the workaround permanent instead of removing the need for it. |
+| **2. Rely on each vendor CLI's prompt cache** | Let claude / codex CLIs cache their own context across invocations; fleet adds nothing. | Zero fleet machinery, which is attractive. But the behavior is **vendor-specific and not fleet-controlled**, and multi-vendor is a fixed pillar (§1.2) — fleet must not assume one vendor's caching. I will not assert specifics of what each CLI caches across separate process invocations; that is the vendor's domain and varies by version. Framed correctly: any cross-invocation caching is the **vendor's responsibility**, an opportunistic win where it exists, never a guarantee fleet designs around. fleet stays correct whether or not it happens. |
+| **3. Do nothing (status quo)** | Drivers re-read; the leader hand-embeds a summary into the task description when a specific task needs it. | The cheapest option and the current one. Its cost is §13.2's small bounded re-read plus occasional manual leader effort. Its virtue: it adds no mechanism, no second source of truth, no staleness surface, and keeps each driver's context honest (it reads the live files, not a possibly-stale snippet). The leader's hand-embed is lossy but **targeted** — it carries exactly the task-relevant context, decided in-context, which is §1.3 principle 4 ("AI decides") working as intended. |
+| **4. Pointer, not payload** *(added)* | A shared read-only artifact the driver is *pointed at* and reads itself, rather than *injected with*. | This is the option that actually fits "drivers are independent." Crucially, **fleet already has it** — see §13.4. It is not a new mechanism to build; it is the pattern fleet already uses, and the recommendation is to recognize it as the answer rather than add Option 1 on top. |
+
+### 13.4 Pointer vs Payload — fleet Already Chose Pointer
+
+The decisive observation: fleet's existing design already answers this question,
+and it answered "pointer."
+
+- **Fleet memory (§6)** is a per-project, vendor-neutral, read-only shared
+  artifact. The driver base prompt carries "only a 1–2 line entry point… the
+  driver reads them itself. The base prompt is not fattened" (§6, Delivery to
+  the driver). That is precisely a pointer-not-payload shared-context mechanism —
+  shared across all drivers, outside the worktree, read on demand.
+- **The startup handshake (§4.1)** pastes "a single pointer line, not the full
+  prompt" referencing `driver-prompt.md`. Again: point the driver at a file,
+  let it read.
+- **CLAUDE.md / AGENTS.md** are themselves pointer-shaped — CLAUDE.md in this
+  repo is a *pointer* to AGENTS.md, not an embedded copy.
+
+The pattern is consistent and principled: fleet shares context by **pointing
+independent drivers at small, vendor-neutral, read-on-demand artifacts**, never
+by injecting payloads into prompts. A driver re-reading a pointed-at file is not
+a defect to amortize away — it is the isolation working. The token cost of a
+driver reading a small shared file it was pointed at is the price of that
+file being *live and vendor-neutral* rather than a cached, possibly-stale,
+possibly-vendor-specific blob.
+
+This also reframes the original feedback. The leader's hand-embedded summary is
+lossy specifically *because* it is a payload (a frozen paraphrase). The
+mission-consistent improvement, where one is wanted, is not to inject a better
+payload (Option 1) but to **point at a better artifact** — e.g. ensure the
+shared, re-read context a project cares about lives in a small file (a doc, a
+fleet-memory entry) the driver is already pointed at, so the leader does not
+need to paraphrase it into the prompt at all.
+
+### 13.5 Mission Consistency — the Tension
+
+Hold each option against the pillars and principles:
+
+- **§1.2 multi-vendor pillar.** Option 2 (vendor cache) cannot be a *designed*
+  mechanism without assuming a vendor; it can only be an opportunistic, unowned
+  win. Options 3 and 4 are vendor-neutral by construction.
+- **§8.2 / §6 short base prompt; claude-forge dropped dynamic injection.**
+  Option 1 violates this head-on. Options 3 and 4 honor it — 4 is *how* fleet
+  keeps the prompt short while still sharing context.
+- **§1.3 principle 1 (cutting scope) + principle 2 (real harm).** A new
+  injection/caching mechanism must clear "the workflow cannot run without it."
+  The workflow runs today; the harm is small and bounded (§13.2). The bar is
+  not met.
+- **§1.3 principle 6 (no second source of truth).** An injected snippet (Option
+  1) is a curated paraphrase of context that *also* lives in the real files — a
+  second source of truth that can drift. The pointer pattern (Option 4) has one
+  source: the file itself.
+- **§1.3 principle 8 (human can intervene).** A driver carrying live,
+  self-read context is a coherent agent for the user to attach to. A driver
+  carrying an injected summary that disagrees with the live files is a confusing
+  one.
+
+Every principle points the same way: away from injection, toward
+pointer-and-read, which fleet already does.
+
+### 13.6 Recommendation
+
+**Recommended: do not build a shared/warm-context injection mechanism. Keep the
+status quo (Option 3), and treat fleet's existing pointer-not-payload pattern
+(Option 4, §13.4) as the sanctioned way to share context** — extending it only
+by making sure the context a project re-reads lives in a small, pointed-at
+artifact, never by injecting payloads.
+
+Concretely:
+
+1. **Reject Option 1 (injected snippet).** It violates the short-base-prompt
+   pillar, revives the dropped dynamic injection, and creates a staleness-prone
+   second source of truth (§13.5). It promotes the lossy workaround into
+   permanent machinery instead of removing the need for it.
+2. **Treat Option 2 (vendor cache) as the vendor's responsibility, not fleet's
+   design.** Where a CLI caches across invocations, fleet benefits for free;
+   fleet must stay correct and vendor-neutral whether or not it does, and must
+   not build around any specific caching behavior (multi-vendor pillar). Do not
+   assume specifics not verified per vendor/version.
+3. **Keep Option 3 (status quo) as the baseline.** The re-read cost is small and
+   bounded for fleet's real usage (§13.2), and no dogfooding signal marks it as
+   harm (§1.3 principle 2). The leader's in-context hand-embed remains the right
+   tool for the occasional task that needs targeted context — that is "AI
+   decides" working, not a gap.
+4. **Recognize Option 4 as already-present, and prefer it for any real need.**
+   If a project finds itself re-embedding the same context into many task
+   descriptions, the mission-consistent fix is to move that context into a small
+   pointed-at artifact (a doc or a fleet-memory entry, §6) the driver already
+   reads — fixing it at the *pointer* layer, with no new mechanism.
+
+The thread tying this together: **"drivers re-pay context" is partly by design.**
+Isolation is the point (§3.1, §4.2), and any shared-context mechanism trades
+against the lightweight-leader and short-prompt pillars. fleet already resolved
+this tension with the pointer-not-payload pattern; this study recommends leaning
+on that rather than adding injection or caching machinery on top.
+
+**Owner decision.** The adopt / not-adopt call is left to the repo owner.
+Adopting this study means: no new mechanism, status quo retained, with the
+pointer pattern acknowledged as the sanctioned context-sharing route. If the
+owner later observes a *measured* re-read cost that does cross the real-harm bar
+— e.g. genuinely many parallel drivers on a large shared context — this chapter
+should be revisited; the option that would earn its keep first is still Option 4
+(a richer pointed-at artifact), not Option 1's injection. Issue #152 stays open
+for that decision.
