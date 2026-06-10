@@ -250,37 +250,31 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(func=run)
 
 
-def _cross_project_promptfile_error(prompt_file: str, resolved_name: str) -> str | None:
-    """Return an error message when *prompt_file* lives under a *different* project.
+def _infer_project_from_promptfile(prompt_file: str) -> str | None:
+    """Infer the project name from a ``--prompt-file`` path (Issue #150).
 
-    Guards the cwd-resolution trap (Issue #143): when ``--project`` is omitted, the
-    project is resolved from cwd, but a leader invoking ``fleet-agent`` by absolute
-    path from another repo gets cwd pointing at the wrong project. If the
-    ``--prompt-file`` resolves to a path inside ``fleet_home()/projects/<other>/…``
-    whose ``<other>`` differs from the cwd-resolved project, that is almost
-    certainly the trap — report it and tell the user to pass ``--project``.
+    When ``--project`` is omitted, the prompt-file path already names the project
+    unambiguously: fleet state lives at ``fleet_home()/projects/<name>/…``. If
+    *prompt_file* resolves to a path under exactly one such tree, return
+    ``<name>`` so the caller can use it instead of resolving from cwd.
 
-    Returns ``None`` (no error) when the prompt-file is outside any project tree or
-    belongs to the same project — only the cross-project case is flagged.
+    This replaces the #143 cross-project *error*: a leader invoking ``fleet-agent``
+    by absolute path from another repo gets cwd pointing at the wrong project, but
+    the prompt-file path names the intended project directly, so we infer and
+    proceed rather than rejecting.
+
+    Returns ``None`` when the prompt-file is outside any project tree, in which
+    case the caller falls back to cwd resolution exactly as before.
     """
     projects_root = state_mod.fleet_home() / state_mod.PROJECTS_SUBDIR
     pf = Path(prompt_file).resolve()
     try:
         rel = pf.relative_to(projects_root)
     except ValueError:
-        return None  # prompt-file is not under any project tree — fine
+        return None  # prompt-file is not under any project tree
     if not rel.parts:
         return None
-    other = rel.parts[0]
-    if other == resolved_name:
-        return None
-    return (
-        f"error: cwd resolved the project to {resolved_name!r}, but --prompt-file "
-        f"lives under project {other!r}\n"
-        f"       ({pf}).\n"
-        f"       This is the cwd-resolution trap (Issue #143). Re-run with "
-        f"--project {other} to pick the project explicitly."
-    )
+    return rel.parts[0]
 
 
 def _resolve_description(args: argparse.Namespace) -> str | None:
@@ -317,23 +311,34 @@ def run(args: argparse.Namespace) -> int:
 
     project_arg = getattr(args, "project", ".")
     project_name = project_arg if project_arg != "." else None
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-    if state_dir is None:
-        print(
-            f"error: no registered project found for {project_arg!r}",
-            file=sys.stderr,
-        )
-        return 1
 
-    # Cross-project guard (Issue #143): only when the project was cwd-resolved
-    # (no explicit --project) and a --prompt-file was given. Explicit --project
-    # means the user has chosen — trust it (legit cross-project use is possible).
+    # Project inference from --prompt-file (Issue #150, follow-up to #143).
+    # When --project is omitted and --prompt-file lives under projects/<name>/,
+    # the path names the project unambiguously — infer <name> and use it BEFORE
+    # resolve_state_dir, instead of resolving from cwd and erroring on mismatch.
+    # Explicit --project always wins (legit cross-project use is possible).
     prompt_file = getattr(args, "prompt_file", None)
-    if project_arg == "." and prompt_file is not None:
-        mismatch = _cross_project_promptfile_error(prompt_file, state_dir.name)
-        if mismatch is not None:
-            print(mismatch, file=sys.stderr)
-            return 1
+    inferred_name: str | None = None
+    if project_name is None and prompt_file is not None:
+        inferred_name = _infer_project_from_promptfile(prompt_file)
+
+    resolve_name = project_name or inferred_name
+    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=resolve_name)
+    if state_dir is None:
+        if inferred_name is not None:
+            # Inferred a project from the prompt-file path that isn't registered.
+            # Fail loudly rather than silently falling back to the cwd project.
+            print(
+                f"error: --prompt-file names project {inferred_name!r}, but it is "
+                f"not a registered project",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"error: no registered project found for {project_arg!r}",
+                file=sys.stderr,
+            )
+        return 1
 
     task_dir_path = state_mod.task_dir(state_dir, args.task_id)
     if task_dir_path.exists():
