@@ -277,26 +277,42 @@ def _infer_project_from_promptfile(prompt_file: str) -> str | None:
     return rel.parts[0]
 
 
-def _resolve_description(args: argparse.Namespace) -> str | None:
+def _resolve_description(args: argparse.Namespace) -> tuple[str, str | None] | None:
+    """Resolve the task body and an optional fallback title.
+
+    Returns ``(body, fallback_title)``, or ``None`` on error. ``fallback_title``
+    is non-``None`` only in the lenient both-passed case: when a positional
+    ``description`` and ``--prompt-file`` are *both* given, the prompt-file wins
+    the body (richer, intentional input) and the stray positional description is
+    relegated to the title. ``--title`` still wins downstream in every path.
+    """
     description = getattr(args, "description", None)
     prompt_file = getattr(args, "prompt_file", None)
     has_description = description is not None
     has_prompt_file = prompt_file is not None
 
-    if has_description and has_prompt_file:
-        print("error: pass either description or --prompt-file, not both", file=sys.stderr)
-        return None
     if not has_description and not has_prompt_file:
         print("error: pass either description or --prompt-file", file=sys.stderr)
         return None
     if has_prompt_file:
         path = Path(prompt_file)
         try:
-            return path.read_text()
+            body = path.read_text()
         except OSError as e:
             print(f"error: cannot read --prompt-file {path}: {e}", file=sys.stderr)
             return None
-    return description
+        if has_description:
+            # Lenient: both given is a common leader slip, not a hard error.
+            # prompt-file wins the body; the positional description becomes the
+            # title fallback. Surface the slip so it is visible, not silent.
+            print(
+                "warn: both description and --prompt-file given; using --prompt-file "
+                "as the body and treating the positional description as the title",
+                file=sys.stderr,
+            )
+            return body, description
+        return body, None
+    return description, None
 
 
 def run(args: argparse.Namespace) -> int:
@@ -305,9 +321,10 @@ def run(args: argparse.Namespace) -> int:
         print(task_id_error, file=sys.stderr)
         return 1
 
-    description = _resolve_description(args)
-    if description is None:
+    resolved = _resolve_description(args)
+    if resolved is None:
         return 1
+    description, fallback_title = resolved
 
     project_arg = getattr(args, "project", ".")
     project_name = project_arg if project_arg != "." else None
@@ -400,7 +417,14 @@ def run(args: argparse.Namespace) -> int:
     # Mark current stage as running
     expanded_stages[current_stage_idx]["status"] = "running"
 
-    title = args.title or (description.splitlines() or [""])[0][:80]
+    # Title precedence: explicit --title > relegated positional (both-passed
+    # case) > first line of the body. Derive the implicit title from the right
+    # source so the prompt-file body never masquerades as the title.
+    if args.title:
+        title = args.title
+    else:
+        title_source = fallback_title if fallback_title is not None else description
+        title = (title_source.splitlines() or [""])[0][:80]
 
     # workspace: on_pre_start hook can attach extra task fields and/or
     # override the window cwd (workspace=worktree creates the worktree here).
