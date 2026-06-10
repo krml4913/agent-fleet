@@ -7,6 +7,10 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### `fleet-agent merge <id>` — atomic PR merge + teardown + archive (Issue #148)
+
+- New subcommand that retires a finished task in one correct-ordered pass: merge the task's PR (`gh pr merge <branch>` — merge commit by default, `--squash` to switch; never `--delete-branch`), then run cleanup's teardown (worktree remove + local `branch -D`, kill the tmux window, drop the prompt buffer), then delete the remote branch (`git push origin --delete`, "already gone" is success), then archive the task dir by default (`--keep` opts out). A failed merge (conflict / not mergeable / no PR) stops before any teardown so the worktree survives for conflict resolution — the merge-then-cleanup ordering is now structurally enforced, fixing the dogfooded race where `gh pr merge --delete-branch` then `fleet-agent cleanup` collided over a branch still held by the worktree. Guarded to terminal statuses like `cleanup` (`--force` overrides). The teardown body of `cleanup.run` was refactored into a shared `cleanup.teardown(...)` helper that both commands call (no copy-paste); `cleanup` behaviour is unchanged.
+
 ### auto-name agent sessions on spawn (Issue #145)
 
 - Each spawned agent's resumable session display name is now set automatically so the user can tell sessions apart in the picker: `<project>-leader` for the leader, `<project>-<task_id>-<role>` for stage agents (role disambiguates pair_review / multi_stage panes on the same task). The mechanism branches per vendor in the adapter layer: `VendorAdapter` gained `session_name_launch_args` / `session_rename_keys` (default no-op). claude names at launch via `--name`; codex (no launch flag) renames post-ready through its TUI `/rename` popup keystrokes. `start.launch_stage_driver` / `leader.run` append the launch args; `prompt_deliverer.deliver` and the leader send the rename keystrokes before pasting the prompt. No behaviour change for claude beyond the added name.

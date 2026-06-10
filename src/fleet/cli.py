@@ -28,6 +28,7 @@ from .commands import init as init_cmd
 from .commands import leader as leader_cmd
 from .commands import log as log_cmd
 from .commands import memory as memory_cmd
+from .commands import merge as merge_cmd
 from .commands import preflight as preflight_cmd
 from .commands import rm as rm_cmd
 from .commands import send_prompt as send_prompt_cmd
@@ -79,6 +80,7 @@ def build_parser_agent() -> argparse.ArgumentParser:
     inbox_read_cmd.add_parser(sub)
     send_prompt_cmd.add_parser(sub)
     cleanup_cmd.add_parser(sub)
+    merge_cmd.add_parser(sub)
     ask_cmd.add_parser(sub)
     event_cmd.add_parser(sub)
     memory_cmd.add_parser(sub)
