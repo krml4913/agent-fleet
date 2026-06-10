@@ -857,13 +857,14 @@ This closes Issue #118.
 
 ## 13. Design Study: Shared / Inherited Driver Context
 
-> **Status: study — NOT adopted.** This chapter reasons through Issue #152
-> ("is a shared/warm-context mechanism worth it for fleet?"). It is a balanced
-> study, not finalized design: unlike §12, no decision section follows, because
-> the adopt / not-adopt call is explicitly left to the repo owner. Everything
-> below §13.6 is a recommendation, not a settled mechanism. The rest of
-> `docs/design.md` holds confirmed design only — do not read this chapter as
-> such.
+> **Status: study — outcome: not adopted, status quo retained.** This chapter
+> reasons through Issue #152 ("is a shared/warm-context mechanism worth it for
+> fleet?"). It is a balanced study, not finalized design. The owner has since
+> ruled on the recommendation below: **no mechanism — status quo kept** (Issue
+> #152 closed as resolved). The chapter stays as the durable record of *why*;
+> everything below §13.6 is the reasoning behind that call, not a settled
+> mechanism to build. The rest of `docs/design.md` holds confirmed design only —
+> do not read this chapter as such.
 
 ### 13.1 The Question
 
@@ -1015,11 +1016,11 @@ against the lightweight-leader and short-prompt pillars. fleet already resolved
 this tension with the pointer-not-payload pattern; this study recommends leaning
 on that rather than adding injection or caching machinery on top.
 
-**Owner decision.** The adopt / not-adopt call is left to the repo owner.
-Adopting this study means: no new mechanism, status quo retained, with the
-pointer pattern acknowledged as the sanctioned context-sharing route. If the
-owner later observes a *measured* re-read cost that does cross the real-harm bar
-— e.g. genuinely many parallel drivers on a large shared context — this chapter
-should be revisited; the option that would earn its keep first is still Option 4
-(a richer pointed-at artifact), not Option 1's injection. Issue #152 stays open
-for that decision.
+**Owner decision (made).** The owner accepted this study: **no new mechanism,
+status quo retained**, with the pointer pattern acknowledged as the sanctioned
+context-sharing route. Issue #152 is closed as resolved — the answer to the open
+question is "no mechanism." If the owner later observes a *measured* re-read cost
+that does cross the real-harm bar — e.g. genuinely many parallel drivers on a
+large shared context — this chapter should be revisited; the option that would
+earn its keep first is still Option 4 (a richer pointed-at artifact), not Option
+1's injection.
