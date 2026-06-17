@@ -34,12 +34,27 @@ REGISTRY_NAME = "projects.yaml"
 PROJECTS_SUBDIR = "projects"
 REGISTRY_VERSION = 1
 
+# Reserved cross-project namespace under fleet-state/ (design doc §5.3, §6).
+# ``global/`` holds concerns that span projects: the GLOBAL tier of two-tier
+# leader memory (``global/leader-memory/``) and — reserved for later phases of
+# Issue #166 — per-session leader state (``global/sessions/<label>/``).
+GLOBAL_SUBDIR = "global"
+LEADER_MEMORY_SUBDIR = "leader-memory"
+SESSIONS_SUBDIR = "sessions"
+
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "prompts"
 
 _MEMORY_INDEX_TEMPLATE = """\
 # Memory Index
 
 - *(no entries yet — add one when a task reveals something worth keeping)*
+"""
+
+_GLOBAL_MEMORY_INDEX_TEMPLATE = """\
+# Leader Memory Index (global)
+
+- *(no entries yet — add one when something worth keeping spans projects: how the \
+leader relates to the user, or a router operating rule)*
 """
 
 
@@ -66,6 +81,43 @@ def fleet_home() -> Path:
 def registry_path() -> Path:
     """Return the path to the global ``projects.yaml`` registry."""
     return fleet_home() / REGISTRY_NAME
+
+
+# ---------------------------------------------------------------------------
+# Global (cross-project) namespace — design doc §5.3, §6
+# ---------------------------------------------------------------------------
+
+
+def global_dir() -> Path:
+    """Return ``fleet-state/global/`` — the reserved cross-project namespace.
+
+    A sibling of ``projects/`` inside the same self-contained state tree, so it
+    honors ``$FLEET_HOME`` / clone-root resolution exactly like the per-project
+    paths (it derives from :func:`fleet_home`). It does not violate the
+    "nothing under the home directory" non-goal: "global" here means
+    cross-project-within-the-tree (design doc §5.3).
+    """
+    return fleet_home() / GLOBAL_SUBDIR
+
+
+def global_leader_memory_dir() -> Path:
+    """Return ``global/leader-memory/`` — the GLOBAL tier of leader memory.
+
+    The user-global / router-rule layer of the two-tier leader memory, loaded at
+    every session start (design doc §6). May not exist yet; scaffold it with
+    :func:`ensure_global_leader_memory`.
+    """
+    return global_dir() / LEADER_MEMORY_SUBDIR
+
+
+def global_sessions_dir() -> Path:
+    """Return ``global/sessions/`` — reserved for per-session leader state.
+
+    Keyed by ``owner_session`` (the session label) in later phases of Issue #166
+    (session record + notification queue per session). Phase 1 only reserves the
+    path constant; it does **not** build any session state here.
+    """
+    return global_dir() / SESSIONS_SUBDIR
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +313,38 @@ def _init_memory(state_dir: Path) -> None:
         guide_src = _PROMPTS_DIR / "fleet-memory-guide.md"
         if guide_src.exists():
             guide_dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def ensure_global_leader_memory() -> Path:
+    """Idempotently scaffold ``global/leader-memory/`` with MEMORY.md + GUIDE.md.
+
+    The GLOBAL tier of two-tier leader memory (design doc §6) — the same shape
+    and discipline as the per-project store (:func:`_init_memory`), one tier up.
+    It is **project-independent**: it lives under ``fleet-state/global/`` (the
+    reserved cross-project namespace, design doc §5.3), not under any project's
+    state, so it is created from a project-agnostic call site (``fleet init``).
+
+    Idempotent: safe to call on every init. Existing ``MEMORY.md`` / ``GUIDE.md``
+    content is never clobbered — only missing files are written, so an operator's
+    edits and saved memories survive repeated calls. Mirrors ``_init_memory``'s
+    plain-``write_text``-under-``not exists`` convention.
+
+    Returns the ``leader-memory`` directory path.
+    """
+    memory_dir = global_leader_memory_dir()
+    memory_dir.mkdir(parents=True, exist_ok=True)
+
+    memory_index = memory_dir / "MEMORY.md"
+    if not memory_index.exists():
+        memory_index.write_text(_GLOBAL_MEMORY_INDEX_TEMPLATE, encoding="utf-8")
+
+    guide_dest = memory_dir / "GUIDE.md"
+    if not guide_dest.exists():
+        guide_src = _PROMPTS_DIR / "leader-memory-guide.md"
+        if guide_src.exists():
+            guide_dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    return memory_dir
 
 
 # ---------------------------------------------------------------------------

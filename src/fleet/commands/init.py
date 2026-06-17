@@ -6,7 +6,13 @@ import shutil
 import sys
 from pathlib import Path
 
-from ..state import fleet_home, init_state, project_state_dir, register_project
+from ..state import (
+    ensure_global_leader_memory,
+    fleet_home,
+    init_state,
+    project_state_dir,
+    register_project,
+)
 from .. import formation as formation_mod
 
 
@@ -220,6 +226,14 @@ def run(args: argparse.Namespace) -> int:
             pass
         print(f"error: failed to create state directory: {e}", file=sys.stderr)
         return 1
+
+    # Scaffold the GLOBAL tier of two-tier leader memory (design §6). It is
+    # project-independent (lives under fleet-state/global/, the reserved
+    # cross-project namespace, §5.3), so it is wired here at the project-agnostic
+    # `fleet init` entrypoint rather than off any one project's state — `fleet
+    # leader` does not exist until Issue #166 Phase 2. Idempotent: never clobbers
+    # existing content, so initializing further projects re-affirms it harmlessly.
+    ensure_global_leader_memory()
 
     # Ensure formations/ exists
     formations_dir = state_dir / "formations"
