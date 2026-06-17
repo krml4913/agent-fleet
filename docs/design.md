@@ -4,7 +4,7 @@
 > **settled design decisions**. Open questions and unresolved design
 > issues are tracked in GitHub Issues.
 >
-> Last updated: 2026-05-29
+> Last updated: 2026-06-17
 
 ---
 
@@ -21,7 +21,7 @@
 
 | Pillar | Description |
 |---|---|
-| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both on tmux) |
+| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both on tmux). A leader is a project-agnostic **session** — one conversational counterpart that may serve one or several projects (§5.6) |
 | **2. Multi-vendor agents** | claude / codex can be combined (MVP supports 2 vendors; OpenAI / Gemini come later) |
 | **3. Team formation definitions** | Per-project team formation (single driver / driver + reviewer / multi-stage) selected via YAML |
 
@@ -109,6 +109,9 @@ these principles (see §9 anti-scope).
 
 - **The leader is light**: conversation and `fleet-agent start` only. It does
   not poll state or detect `awaiting_orders`.
+- **The leader is project-agnostic**: a leader session is not bound to one
+  project. It takes task requests for any project and routes each `start` with an
+  explicit `--project`; the **task** carries the binding (`owner_session`, §5.6).
 - **The driver reaches the user directly**: via events.jsonl + notifications +
   dashboard, without relaying through the leader.
 - **The user can talk to the driver directly**: a tmux attach lets them
@@ -121,6 +124,10 @@ these principles (see §9 anti-scope).
 ## 4. Responsibilities
 
 ### 4.1 Leader Responsibilities
+
+A leader is a **project-agnostic session** (Issue #166, resolved 2026-06-17). It
+is not bound to one project: it takes task requests for any project, and the user
+may run one or several leader sessions (§5.6). The leader's responsibilities:
 
 - Task-delegation conversation with the user
 - Starting tasks with `fleet-agent start` (deciding which agent vendor / model /
@@ -149,6 +156,34 @@ these principles (see §9 anti-scope).
 The leader does **not** poll driver state or detect `awaiting_orders`.
 Structure (events / dashboard / notifications) delivers those to the user
 directly.
+
+**Project-agnostic discipline.** Because a leader session is not bound to a
+project, it does not resolve the project from cwd:
+
+- **`--project` is mandatory** on every leader dispatch (`fleet-agent start
+  … --project <name>`, `fleet status --all` / `--project <name>`). There is no
+  persisted "active project" pointer — the conversational active project is focus
+  only (consistent with #67 sub-point 4); every dispatch names its project
+  explicitly. cwd is pinned to the **agent-fleet clone root**, not a project repo
+  (this retires the cwd-based project resolution for leaders; see §5.6 and the
+  `leader-cwd-discipline` memory).
+- **First-touch project load.** A session starts with only its code-delivered
+  protocol (this base prompt) plus the **global leader memory** (§6) loaded. The
+  first time the session acts on project X, it reads X's discipline — per-project
+  memory (`projects/X/memory/MEMORY.md`) and the formation-selection guide
+  (`formations/SELECTION.md`) — **once** and retains it for the session; it does
+  not reload on a later project-switch. This is the pointer-not-payload pattern
+  (§13.4) applied to leader project context: the leader is *pointed at* the
+  per-project files and reads them on demand, rather than having them injected at
+  startup. It keeps the base prompt short (§8.2) and keeps weak / non-Opus models
+  viable (the multi-vendor pillar), since context is paid once per session, not
+  per dispatch.
+- **Contamination guard.** Per-project operating policy differs (e.g. fleet
+  delegates PR merge to the leader; another project has the user review/merge).
+  A project-agnostic leader must always act **under the active project's policy**.
+  The guard is structural: acting on project X requires having loaded X's
+  discipline, which first-touch load guarantees. The durable policy lives in
+  per-project memory (§6), so it is identical for a leader of any vendor.
 
 Because the codex driver shows a directory trust prompt on first launch,
 `fleet-agent start` checks read-only whether the git repo root is trusted in
@@ -197,7 +232,15 @@ State is centralized under **`<agent-fleet clone>/fleet-state/`**.
   `$FLEET_HOME` environment variable can override the location.
 - The fleet resolves the clone root from `__file__` (three levels above
   `src/fleet/state.py`). If `$FLEET_HOME` is set, it takes precedence.
-- **Per-project leaders are kept.** A shared-leader scheme was rejected.
+- **Leaders are project-agnostic sessions** (Issue #166, resolved 2026-06-17).
+  This **overturns the earlier "per-project leaders are kept / shared-leader
+  rejected" decision** (#67). The unit bound to a project is the **task**, which
+  records its `owner_session`; a leader session may serve one or several
+  projects. The original rejection rationale ("N projects in one leader = forge
+  bloat") conflated codebase context with on-demand project discipline — today's
+  leader holds no codebase, and per-project discipline is loaded first-touch and
+  bounded by the per-session context dial (§5.6), so the real cost (context size)
+  is handled without forbidding the model.
 
 ### 5.2 Concurrent Multi-Project Startup
 
@@ -205,17 +248,23 @@ A global registry (`fleet-state/projects.yaml`) manages all projects centrally.
 
 - The project identifier is **name** only. The registry enforces uniqueness.
 - Omitting `--name` in `fleet init` uses the repo directory basename.
-- Because the registry guarantees name uniqueness, the tmux session name
-  `fleet-<name>` structurally eliminates the same-name collision footgun.
+
+**Sessions are launched by label, not by project.** `fleet leader [--name
+<label>]` starts a project-agnostic leader session in tmux `fleet-<label>`
+(default label `main`). The label is free-form, so the operational style falls
+out of how you name sessions (§5.6). A driver window the session spawns is
+opened **in that session's tmux** (`fleet-<label>`) — the owner session holds
+both the leader window and the driver windows it started.
 
 ```bash
 fleet init /path/to/image-gallery        # name is the basename "image-gallery"
 fleet init --name api /path/to/api-repo  # explicit
-fleet status --all                       # cross-project summary
-# tmux ls
-#   fleet-image-gallery: 1 windows
-#   fleet-api: 1 windows
-fleet leader --project image-gallery     # go to a specific project's leader
+fleet leader                             # one project-agnostic session, tmux fleet-main
+fleet leader --name migration            # a second session for a workstream
+fleet sessions                           # live leader sessions + their in-flight tasks
+fleet status --all                       # cross-project task summary
+# inside a leader session, every dispatch names its project:
+#   fleet-agent start <id> --project image-gallery --formation <name>
 ```
 
 A project that is no longer needed can be removed from the registry with
@@ -229,25 +278,46 @@ A project that is no longer needed can be removed from the registry with
   fleet-state/                         ← gitignored. not a dotfolder
     projects.yaml                      ← global registry (name → repo map)
     projects.yaml.lock                 ← for flock
+    global/                            ← reserved namespace for cross-project concerns (§6, §5.6)
+      leader-memory/                   ← two-tier leader memory: GLOBAL layer (loaded every session)
+        MEMORY.md      # index
+        GUIDE.md       # discipline
+        *.md           # user-global prefs (tone) + router operating rules
+      sessions/
+        <label>/                       ← per-session leader state (one dir per live/known session)
+          session.json          # label / agent spec / started_at / tmux pane
+          leader-pending.jsonl  # queued driver done/gate notifications for this session
+          leader-notifier.lock  # flock: one notifier per session at a time
     projects/
       <name>/                          ← state_dir for one project
         project.yaml     # name / repo / created_at / version / workspace
         events.jsonl     # append-only audit log
         dashboard.md     # read-only view (auto-generated, do not edit directly)
         notify.yaml      # notification settings
-        memory/
+        memory/                        ← PER-PROJECT layer (loaded first-touch, §6)
           MEMORY.md      # knowledge index (drivers append as they go)
           GUIDE.md       # fleet memory discipline
           *.md           # individual memory files
+        formations/
+          SELECTION.md   # per-project formation-selection guide (read first-touch, §12.8)
+          *.yaml         # project formations
         tasks/
           task-<id>/
-            task.yaml         # task state
+            task.yaml         # task state (incl. owner_session — the spawning session's label)
             inbox.md          # leader → driver instructions
             outbox.md         # driver → leader reports
             driver-prompt.md  # prompt expanded at spawn (the agent reads it itself)
         worktrees/
           task-<id>/     # only when workspace: worktree
 ```
+
+`fleet-state/global/` is a reserved namespace for cross-project concerns. It is
+still inside the self-contained state tree (under the clone, or `$FLEET_HOME`),
+so it does not violate the "nothing under the home directory" non-goal (§9) —
+"global" here means cross-project-within-the-tree, not a home-dir store. The
+per-session state under `global/sessions/<label>/` is keyed by `owner_session`
+(the session label), since a session spans projects: its notification queue and
+its leader agent spec belong to the session, not to any one project (§10.3).
 
 #### Project Resolution Logic
 
@@ -265,6 +335,12 @@ A project that is no longer needed can be removed from the registry with
 The `FLEET_STATE_DIR` environment variable (always injected into the driver
 pane) takes precedence over `resolve_state_dir` (only for the driver-facing
 `task_context.resolve`).
+
+For a **leader**, only priority 1 applies: a project-agnostic leader always
+passes `--project` explicitly (§4.1) and its cwd is the clone root, so the
+cwd-based fallbacks (2, 3) never resolve a project for it. Those fallbacks remain
+for drivers (running inside a task dir / worktree) and for ad-hoc human
+invocations — not for leader dispatch.
 
 ### 5.4 Race Protection
 
@@ -291,6 +367,48 @@ interval.
 - If frequent rebuilds become a problem under many concurrent drivers,
   debounce (collapse successive updates within 100 ms to just the last one)
   can be introduced later
+
+### 5.6 Session = Context-Scope Unit
+
+> Issue #166, resolved 2026-06-17. This is the foundational shift behind §4.1,
+> §5.1, §5.2, §6's two-tier memory, and §10.3's routing.
+
+A **session** is the unit of context scope and the binding key for
+notifications. It replaces the old "1 project = 1 leader" coupling.
+
+**Entrypoint and naming.** `fleet leader [--name <label>]` starts a
+project-agnostic session as tmux `fleet-<label>` (default label `main`). The
+label is free-form, so the operational style is expressed by how you name
+sessions:
+
+| Style | How | Who it suits |
+|---|---|---|
+| everything in one | `fleet leader` (`main`) | casual / strong model (Opus) — many projects : 1 session |
+| workstream split | `fleet leader --name migration` | grouping related work across projects |
+| clean 1 : 1 | `fleet leader --name fleet` (mirror the project) | clean operator / weak model — minimal context, full isolation |
+
+**Storage stays per-project; only load-scope is per-session.** The durable source
+of truth (memory, formations, task state) remains per-project under
+`projects/<name>/` and persists across sessions (resolved: per-session *load
+scope*, not per-session *storage*). What is per-session is only **what a session
+has loaded into context**: a session loads a project's discipline on **first
+touch** and retains it for the session (§4.1), so the same durable files serve
+every session, loaded on demand.
+
+**Context size is a user-tunable dial.** Because partitioning projects across
+sessions is just a naming choice, "too much context in one session" stops being a
+hard architectural limit and becomes a dial the user turns: load fewer projects
+per session (toward 1 : 1) for a weak model or a clean operator, more (toward
+many : 1) for a strong model. This is consistent with fleet's "mechanism gives a
+dial, the user picks" ethos, and it is what **protects the multi-vendor pillar**
+— a non-Opus leader runs 1 project : 1 session with minimal context.
+
+**The session binds notifications, not a persisted active project.** Each task
+records `owner_session` = the label of the session that spawned it (§10.3).
+There is no persisted "active project" pointer; the conversational active project
+is focus only, and every dispatch passes `--project` explicitly (§4.1). The
+session→pane mapping and each session's in-flight tasks are surfaced by `fleet
+sessions` (§10.3), the cross-session CLI view.
 
 ---
 
@@ -326,6 +444,40 @@ real-harm-based requirement for making multi-vendor work (design principle
   point. The index, discipline, and memory body live under the memory
   directory and the driver reads them itself. The base prompt is not fattened
   (consistent with §8.2).
+
+### Two-Tier Leader Memory
+
+> Issue #166, resolved 2026-06-17. The per-project memory above is shared by
+> drivers and leaders; a project-agnostic leader additionally needs a durable,
+> user-editable store for knowledge that spans projects. So leader memory is
+> **two-tier**.
+
+| Layer | Location | Loaded | Holds |
+|---|---|---|---|
+| **Global** | `fleet-state/global/leader-memory/` (new) | every session start | user-global preferences — *how the leader relates to the user* (e.g. tone) — and router operating rules |
+| **Per-project** | `projects/<name>/memory/` (the §6 store, unchanged) | first-touch, retained for the session (§5.6) | per-project operating policy — *how a project's output should be* (e.g. merge authority, "English docs/issues" convention) |
+
+- **Split axis.** *How the leader relates to the user → global; how a project's
+  output should be → per-project.* Tone is global; "English docs/issues" is
+  per-project. This finally gives the cross-project, user-spanning knowledge a
+  home: §6's "the `user` type is excluded because fleet memory is per-project" was
+  the right call *for the per-project store* — that knowledge now lives one tier
+  up, in `global/leader-memory/`, instead of being filed against an arbitrary
+  project.
+- **Same shape, same discipline.** The global layer is the same markdown +
+  frontmatter + `MEMORY.md` index + `GUIDE.md` as the per-project store, just at
+  a different scope. It is vendor-neutral, so a leader of any vendor reads it.
+- **Loading is pointer-not-payload.** The base leader **protocol** stays
+  code-delivered (`leader-base.md`) — it is already the project-independent layer.
+  Only the durable, user-editable global knowledge needs this new store. The
+  global index is injected at session start (like the driver's `MEMORY.md` index,
+  Issue #114); the bodies are read on demand. The per-project layer is read
+  first-touch (§4.1) — not injected at startup, which is the leader-prompt
+  assembly change (§12.8).
+- **Migration.** User-global bits currently filed under fleet's *per-project*
+  memory (e.g. the `leader-tone` entry) move up to the global layer. This is a
+  one-time data move in `fleet-state/` performed by the operator/leader, not by
+  fleet core (fleet core never edits memory content).
 
 ### "Do Not Save" Discipline
 
@@ -566,7 +718,7 @@ line against scope expansion.
 | Full autonomy (minimizing human intervention) | contrary to the mission; being able to intervene is the essence |
 | Cost-based routing | not needed for MVP; add later if needed |
 | OpenAI / Gemini / local LLM support | MVP is claude + codex only |
-| Centralized global metadata management | nothing under the home directory; self-contained |
+| Global metadata **under the home directory** (`~/.fleet/` etc.) | self-contained: all state lives under the clone's `fleet-state/` (or `$FLEET_HOME`). Cross-project state that the model genuinely needs (the registry, `global/leader-memory/`, `global/sessions/`, §5.3) lives **inside** that self-contained tree, not in a home-dir store |
 | Driver-state polling by the leader | replaced by structure (events / dashboard / notifications) |
 | No-code / GUI-based | terminal native, for power users |
 
@@ -598,6 +750,46 @@ alone.
 The path driver → events / dashboard / notifications → user does **not** go
 through the leader. The leader is structurally kept to conversation and
 `fleet-agent start` only, so it stays unburdened.
+
+### 10.3 Notification Routing by `owner_session`
+
+> Issue #166, resolved 2026-06-17. This concerns the **opt-in** leader-pane push
+> (`notify_leader_on_driver_done`), where a driver `done` / approval gate is
+> injected into the *owning leader's* pane for review. The always-on user
+> notification path (§10.1, §10.2) is unchanged and never routes through a leader.
+
+With leaders decoupled from projects (§5.1), "the project's leader" is no longer
+a well-defined push target — a project may be served by several sessions, or a
+session by several projects. The routing key therefore changes from **project**
+to **`owner_session`**:
+
+- **Record at spawn.** `fleet-agent start` stamps the spawning session's label
+  onto the task as `owner_session` (the leader pane carries its label in the
+  environment, e.g. `FLEET_SESSION`, so `start` knows who it is). The same label
+  also decides **which tmux session the driver window opens in** (`fleet-<label>`,
+  §5.2) — `owner_session` governs both window placement and notification routing,
+  so a session sees its own drivers' panes and gets its own drivers' notifications.
+- **Resolve at `done`.** When the gated event fires, the notifier resolves
+  `owner_session` → the `fleet-<label>` pane (via `global/sessions/<label>/`) and
+  injects the coalesced summary there, reading that session's agent spec to pick
+  the vendor idle (`ready`) regex.
+- **Queue when absent, flush on reattach.** If the owning session is dead or
+  detached, the record stays in that **session's** queue
+  (`global/sessions/<label>/leader-pending.jsonl`) and is flushed by the next
+  `done` or re-attach. This reuses the existing notifier machinery (persisted
+  never-drop queue + non-blocking flock + detached idle-poll injection) — **only
+  the routing key and the queue's home change** (project → session). The queue and
+  the leader agent record move from per-project (`projects/<name>/`) to per-session
+  (`global/sessions/<label>/`) because a session spans projects: a single notifier
+  can then flush all of a session's pending notifications regardless of which
+  project produced them, and reattach finds the session's queue directly instead
+  of scanning every project.
+
+**`fleet sessions`** is the cross-session CLI view: live leader sessions (label →
+pane, agent) and each session's in-flight tasks (task.yaml across projects where
+`owner_session == label` and status is non-terminal). It reads state on demand
+(no polling, consistent with principle 7) and is the CLI ancestor of the future
+cross-project web view (Issue #166 facet A).
 
 ---
 
@@ -653,7 +845,8 @@ agent-fleet/
 
 - Two entrypoint scripts (both with shebang `#!/usr/bin/env python3`):
   - `./fleet`       — typed by humans (users): `init` / `preflight` / `leader` /
-                      `attach` / `status` / `log` / `formation` / `workspace`
+                      `sessions` / `attach` / `status` / `log` / `formation` /
+                      `workspace`
   - `./fleet-agent` — invoked automatically by the system (leader / driver
                       agents): `start` / `inbox` / `inbox-read` / `send-prompt` /
                       `cleanup` / `ask` / `event` / `approve` / `reject` / `done`
@@ -831,12 +1024,19 @@ The repo owner adopted the lightweight prompt-guidance step from §12.7, made
 - **Where.** A plain-markdown guide at `<state>/formations/SELECTION.md`,
   alongside the project's actual formation files. It is per-project because
   formations are per-project (§12.7 correction).
-- **How it reaches the leader.** `leader_prompt.render` injects the file's
-  contents into the rendered leader prompt under the heading
-  `## Formation selection guide (this project)` when it exists, and injects
-  nothing when it is absent. This mirrors the MEMORY.md index injection added for
-  Issue #114 (`driver_prompt._memory_index_section`): load one named file, wrap
-  it under a clear heading, no-op if missing — no new command, no schema change.
+- **How it reaches the leader.** The guide is read on **first touch** of its
+  project (§4.1, §5.6) — the leader is pointed at
+  `projects/<name>/formations/SELECTION.md` and reads it (with the real formation
+  files) the first time it acts on that project, retaining it for the session.
+  - *Superseded delivery (≤ #166):* originally `leader_prompt.render` injected
+    the file at **startup** under the heading `## Formation selection guide (this
+    project)`, mirroring the MEMORY.md index injection (Issue #114). That worked
+    when a leader was bound to one project at launch. With project-agnostic
+    sessions (#166) there is no single project to inject at startup, so the guide
+    moves to first-touch read. **The artifact, its path, and its co-authoring flow
+    are unchanged** — only the delivery shifts from startup-injection to
+    first-touch read. This delivery shift is the "leader-prompt assembly change"
+    called out as a highest-risk surface in the implementation plan.
 - **How it is authored.** Co-authored by the leader and user: when the user
   wants to define or refine the project's selection criteria, the leader proposes
   a draft from the project's real formations, refines it in chat, and saves it to
