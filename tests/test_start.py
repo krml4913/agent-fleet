@@ -572,6 +572,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "claude:sonnet", "role": "driver"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
@@ -609,11 +610,13 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "claude:sonnet", "role": "implementer"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
 
-        mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", task_id)
+        # tmux session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
+        mock_tmux.kill_task_windows.assert_called_once_with("fleet-main", task_id)
         new_args = mock_tmux.new_window.call_args[0]
         self.assertEqual(new_args[1], f"{task_id}·implementer")
 
@@ -634,6 +637,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "codex:gpt-5.5", "role": "implementer"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
@@ -659,6 +663,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "claude:sonnet", "role": "driver"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
@@ -690,6 +695,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "codex:gpt-5.5", "role": "implementer"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=True,
                 prompt_delay=0.0,
             )
@@ -721,12 +727,14 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=1,
                 stage={"agent": "claude:sonnet", "role": "implementer"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
             )
 
         self.assertEqual(result, 0)
-        mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", task_id)
+        # tmux session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
+        mock_tmux.kill_task_windows.assert_called_once_with("fleet-main", task_id)
         mock_tmux.new_window.assert_called_once()
 
     def test_launch_can_preserve_existing_task_windows(self) -> None:
@@ -746,6 +754,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 stage_idx=0,
                 stage={"agent": "claude:sonnet", "role": "code-reviewer"},
                 project_name="demo",
+                owner_session="main",
                 auto_paste=False,
                 prompt_delay=0.0,
                 replace_task_windows=False,
@@ -754,6 +763,88 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_tmux.kill_task_windows.assert_not_called()
         mock_tmux.new_window.assert_called_once()
+
+
+class ResolveOwnerSessionTests(unittest.TestCase):
+    """Pure ``_resolve_owner_session``: --session > FLEET_SESSION env > 'main'."""
+
+    def _args(self, session=None) -> argparse.Namespace:
+        return argparse.Namespace(session=session)
+
+    def test_default_main_when_nothing_set(self) -> None:
+        from fleet.commands import start
+
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FLEET_SESSION", None)
+            self.assertEqual(start._resolve_owner_session(self._args()), "main")
+
+    def test_env_fleet_session_used(self) -> None:
+        from fleet.commands import start
+
+        with unittest.mock.patch.dict(os.environ, {"FLEET_SESSION": "migration"}, clear=False):
+            self.assertEqual(start._resolve_owner_session(self._args()), "migration")
+
+    def test_explicit_session_overrides_env(self) -> None:
+        from fleet.commands import start
+
+        with unittest.mock.patch.dict(os.environ, {"FLEET_SESSION": "migration"}, clear=False):
+            self.assertEqual(
+                start._resolve_owner_session(self._args(session="hotfix")), "hotfix"
+            )
+
+    def test_empty_env_falls_back_to_main(self) -> None:
+        from fleet.commands import start
+
+        with unittest.mock.patch.dict(os.environ, {"FLEET_SESSION": ""}, clear=False):
+            self.assertEqual(start._resolve_owner_session(self._args()), "main")
+
+
+class StampOwnerSessionTests(unittest.TestCase):
+    """``fleet-agent start`` stamps ``owner_session`` onto task.yaml."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "demo", self.project)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def test_default_main(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run", "o1", "work",
+            fleet_home=self.fleet_home, env_extra={"FLEET_SESSION": ""},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(state.load_task(self.state_dir, "o1")["owner_session"], "main")
+
+    def test_from_env_fleet_session(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run", "o2", "work",
+            fleet_home=self.fleet_home, env_extra={"FLEET_SESSION": "migration"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            state.load_task(self.state_dir, "o2")["owner_session"], "migration"
+        )
+
+    def test_session_flag_overrides_env(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run", "--session", "hotfix",
+            "o3", "work",
+            fleet_home=self.fleet_home, env_extra={"FLEET_SESSION": "migration"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(state.load_task(self.state_dir, "o3")["owner_session"], "hotfix")
 
 
 class ValidateTaskIdTests(unittest.TestCase):

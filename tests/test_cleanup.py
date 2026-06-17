@@ -48,6 +48,7 @@ class CleanupCmdTests(unittest.TestCase):
         state.save_task(self.state_dir, task_id, {
             "id": task_id, "title": f"t{task_id}", "status": status,
             "agent": "claude:sonnet", "workspace": "none",
+            "owner_session": "demo",
         })
 
     def test_refuses_non_terminal_without_force(self) -> None:

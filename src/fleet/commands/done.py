@@ -131,14 +131,23 @@ def _maybe_notify_leader(
     result: str,
     summary: str,
 ) -> None:
-    """Opt-in leader-pane push. Default OFF → zero behaviour change.
+    """Opt-in leader-pane push, routed by the task's ``owner_session``.
 
-    Always enqueues a persisted record (never dropped) when the feature is on,
-    then best-effort spawns the detached notifier. tmux/leader absence only
-    leaves the record queued — it never errors the ``done``.
+    Default OFF → zero behaviour change. Always enqueues a persisted record
+    (never dropped) into the owner session's queue when the feature is on, then
+    best-effort spawns the detached notifier against the ``fleet-<label>`` pane.
+    tmux/leader absence only leaves the record queued — it never errors ``done``.
+
+    Routing is keyed by ``owner_session`` (Issue #166 §10.3): the queue lives under
+    that session's dir and the agent ``ready`` regex is read from its record. A
+    missing ``owner_session`` is treated as ``main`` (:func:`state.task_owner_session`).
     """
     if not _truthy(project.get("notify_leader_on_driver_done")):
         return
+
+    label = state_mod.task_owner_session(task)
+    session_dir = state_mod.session_dir(label)
+
     try:
         record = leader_notifier.build_record(
             state_dir=state_dir,
@@ -149,7 +158,7 @@ def _maybe_notify_leader(
             summary=summary,
             result=result,
         )
-        leader_notifier.enqueue(state_dir, record)
+        leader_notifier.enqueue(session_dir, record)
     except Exception:
         # The queue is the durable path; if even that fails, do not break done.
         return
@@ -159,14 +168,14 @@ def _maybe_notify_leader(
     try:
         if not tmux.available():
             return
-        session = f"fleet-{project_name}"
+        session = f"fleet-{label}"
         if not tmux.session_exists(session):
             return
-        leader_session = formation.read_leader_session(state_dir)
+        leader_session = formation.read_leader_session(label)
         if not leader_session or not leader_session.get("agent"):
             return
         leader_notifier.start_detached(
-            state_dir=state_dir,
+            session_dir=session_dir,
             session=session,
             window="leader",
             agent_spec=leader_session["agent"],

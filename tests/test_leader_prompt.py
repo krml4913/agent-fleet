@@ -1,6 +1,7 @@
-"""Tests for ``fleet.leader_prompt.render``."""
+"""Tests for ``fleet.leader_prompt.render`` (project-agnostic since Issue #166)."""
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -8,41 +9,69 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import leader_prompt  # noqa: E402
+from fleet import leader_prompt, state  # noqa: E402
 
 
-class LeaderPromptTests(unittest.TestCase):
+class _FleetHomeBase(unittest.TestCase):
+    """Isolate FLEET_HOME so the injected global index is controlled, not the
+    operator's live store."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+
+class LeaderPromptTests(_FleetHomeBase):
     def _render(self) -> str:
-        return leader_prompt.render(
-            project_name="test-project",
-            state_dir=Path("/tmp/fleet-state/projects/test-project"),
-        )
+        return leader_prompt.render()
+
+    def test_render_requires_no_project(self) -> None:
+        # The headline of the decouple: render takes no project_name / state_dir.
+        text = leader_prompt.render()
+        self.assertIn("You are a fleet leader session", text)
 
     def test_includes_leader_role_marker(self) -> None:
-        text = self._render()
-        self.assertIn("You are the leader of a fleet project", text)
+        self.assertIn("You are a fleet leader session", self._render())
 
-    def test_footer_contains_project_name(self) -> None:
+    def test_is_project_agnostic(self) -> None:
         text = self._render()
-        self.assertIn("project:    test-project", text)
+        self.assertIn("project-agnostic", text)
+        # No startup-injected per-project SELECTION guide heading any more.
+        self.assertNotIn("Formation selection guide (this project)", text)
 
-    def test_footer_contains_state_dir(self) -> None:
+    def test_mentions_first_touch_and_project_flag(self) -> None:
         text = self._render()
-        self.assertIn("state dir:  /tmp/fleet-state/projects/test-project", text)
+        self.assertIn("First-touch", text)
+        self.assertIn("--project", text)
 
-    def test_footer_contains_memory_path(self) -> None:
+    def test_footer_points_at_global_memory(self) -> None:
         text = self._render()
-        self.assertIn("memory:     /tmp/fleet-state/projects/test-project/memory/MEMORY.md", text)
+        expected = str(state.global_leader_memory_dir() / "MEMORY.md")
+        self.assertIn(f"global memory:  {expected}", text)
         self.assertIn("read this first", text)
 
-    def test_mentions_fleet_agent_start(self) -> None:
+    def test_footer_start_hint_has_project_placeholder(self) -> None:
         text = self._render()
-        self.assertIn("fleet-agent start", text)
+        self.assertIn("start <id> --project <name> --formation <name>", text)
+        self.assertIn("always pass --project", text)
+
+    def test_mentions_fleet_agent_start(self) -> None:
+        self.assertIn("fleet-agent start", self._render())
 
     def test_mentions_primary_maintainer(self) -> None:
-        text = self._render()
-        self.assertIn("PRIMARY maintainer", text)
+        self.assertIn("PRIMARY maintainer", self._render())
 
     def test_keeps_prompt_under_budget(self) -> None:
         """Guard against leader-prompt bloat regression (symmetric with driver-prompt guard)."""
@@ -56,50 +85,41 @@ class LeaderPromptTests(unittest.TestCase):
         self.assertGreater(path.stat().st_size, 0, "leader-base.md is empty")
 
 
-class SelectionGuideInjectionTests(unittest.TestCase):
-    """Issue #118: ``formations/SELECTION.md`` is injected so the leader consults
-    the project's own formation-selection criteria at ``start``.
+class GlobalMemoryInjectionTests(_FleetHomeBase):
+    """Issue #166: render injects the GLOBAL leader-memory index, mirroring the
+    driver prompt's MEMORY.md injection (Issue #114)."""
 
-    Mirrors the driver prompt's MEMORY.md injection tests (Issue #114).
-    """
+    def _memory_dir(self) -> Path:
+        d = state.global_leader_memory_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
-    def setUp(self) -> None:
-        self._tmp = TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name)
-        (self.state_dir / "formations").mkdir()
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
-
-    def _render(self) -> str:
-        return leader_prompt.render(project_name="p", state_dir=self.state_dir)
-
-    def test_injects_guide_when_present(self) -> None:
-        (self.state_dir / "formations" / "SELECTION.md").write_text(
-            "# Selection\n\n- tiny doc fix → solo\n- risky change → pair_review\n",
+    def test_injects_global_index_when_present(self) -> None:
+        (self._memory_dir() / "MEMORY.md").write_text(
+            "# Leader Memory Index (global)\n\n- [Tone](user_tone.md) — terse, hard-boiled\n",
             encoding="utf-8",
         )
-        text = self._render()
-        self.assertIn("## Formation selection guide (this project)", text)
-        self.assertIn("risky change → pair_review", text)
+        text = leader_prompt.render()
+        self.assertIn("## Leader memory (global index)", text)
+        self.assertIn("terse, hard-boiled", text)
         # Injected above the metadata footer, not after it.
         self.assertLess(
-            text.index("Formation selection guide (this project)"),
-            text.index("project:    p"),
+            text.index("Leader memory (global index)"),
+            text.index("global memory:"),
         )
 
-    def test_no_injection_when_guide_absent(self) -> None:
-        # formations/ exists but no SELECTION.md.
-        text = self._render()
-        self.assertNotIn("## Formation selection guide (this project)", text)
+    def test_no_injection_when_index_absent(self) -> None:
+        # global/leader-memory/ not scaffolded at all.
+        text = leader_prompt.render()
+        self.assertNotIn("## Leader memory (global index)", text)
 
-    def test_no_injection_when_guide_empty(self) -> None:
-        (self.state_dir / "formations" / "SELECTION.md").write_text("   \n", encoding="utf-8")
-        text = self._render()
-        self.assertNotIn("## Formation selection guide (this project)", text)
+    def test_no_injection_when_index_empty(self) -> None:
+        (self._memory_dir() / "MEMORY.md").write_text("   \n", encoding="utf-8")
+        text = leader_prompt.render()
+        self.assertNotIn("## Leader memory (global index)", text)
 
 
-class FleetAgentPathInjectionTests(unittest.TestCase):
+class FleetAgentPathInjectionTests(_FleetHomeBase):
     """Issue #143: the leader prompt rewrites ``fleet-agent`` to an absolute path,
     mirroring the driver prompt (Issue #125), so a leader never needs to ``cd``
     into the agent-fleet clone — the ``cd`` is what made cwd-based resolution land
@@ -114,40 +134,23 @@ class FleetAgentPathInjectionTests(unittest.TestCase):
 
     def test_render_rewrites_commands_to_absolute_path(self) -> None:
         bin_path = "/opt/agent-fleet/fleet-agent"
-        text = leader_prompt.render(
-            project_name="p",
-            state_dir=Path("/tmp/fleet-state/projects/p"),
-            fleet_bin=bin_path,
-        )
+        text = leader_prompt.render(fleet_bin=bin_path)
         # The fleet-managed base text uses the absolute path...
         self.assertIn(f"{bin_path} start", text)
         # ...and no bare `fleet-agent` command survives (backtick then bare name).
-        # (The abs path legitimately ends in "fleet-agent", so we can't assert on
-        # the substring alone — check the backtick-prefixed command form.)
         self.assertNotIn("`fleet-agent ", text)
 
     def test_render_default_uses_resolved_bin(self) -> None:
-        text = leader_prompt.render(
-            project_name="p",
-            state_dir=Path("/tmp/fleet-state/projects/p"),
-        )
+        text = leader_prompt.render()
         self.assertIn(f"{leader_prompt.fleet_agent_bin()} start", text)
 
     def test_render_quotes_path_with_spaces(self) -> None:
-        text = leader_prompt.render(
-            project_name="p",
-            state_dir=Path("/tmp/fleet-state/projects/p"),
-            fleet_bin="/opt/agent fleet/fleet-agent",
-        )
+        text = leader_prompt.render(fleet_bin="/opt/agent fleet/fleet-agent")
         self.assertIn("'/opt/agent fleet/fleet-agent' start", text)
 
-    def test_footer_surfaces_project_in_start_hint(self) -> None:
-        text = leader_prompt.render(
-            project_name="myproj",
-            state_dir=Path("/tmp/fleet-state/projects/myproj"),
-            fleet_bin="/opt/agent-fleet/fleet-agent",
-        )
-        self.assertIn("--project myproj", text)
+    def test_footer_surfaces_project_flag_in_start_hint(self) -> None:
+        text = leader_prompt.render(fleet_bin="/opt/agent-fleet/fleet-agent")
+        self.assertIn("--project <name>", text)
 
 
 if __name__ == "__main__":

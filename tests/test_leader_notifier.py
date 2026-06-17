@@ -20,10 +20,16 @@ BUSY_PANE = "✻ Thinking… (esc to interrupt)\n"  # mid-turn, no ❯ prompt
 
 
 class LeaderNotifierTests(unittest.TestCase):
+    """The notifier queue is keyed by SESSION (global/sessions/<label>/), not by
+    project (Issue #166 §10.3). ``state_dir`` here is the project the task lives in
+    (for outbox scanning); ``session_dir`` is where the queue / lock / events live."""
+
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
-        self.state_dir = Path(self._tmp.name) / "state"
+        self.state_dir = Path(self._tmp.name) / "state"      # project state dir
         state.init_state(self.state_dir, name="demo")
+        self.session_dir = Path(self._tmp.name) / "session"  # owner session dir
+        self.session_dir.mkdir()
         self._old_no_notify = os.environ.get("FLEET_NO_NOTIFY")
         os.environ["FLEET_NO_NOTIFY"] = "1"
         self._sleep_patch = patch("fleet.leader_notifier.time.sleep", return_value=None)
@@ -58,7 +64,7 @@ class LeaderNotifierTests(unittest.TestCase):
         return leader_notifier.build_record(**defaults)
 
     def _events(self) -> list[dict]:
-        path = self.state_dir / "events.jsonl"
+        path = self.session_dir / "events.jsonl"
         if not path.exists():
             return []
         return [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -68,19 +74,21 @@ class LeaderNotifierTests(unittest.TestCase):
     def test_build_record_idempotent_payload_shape(self) -> None:
         self._seed_task("7", pr_url="https://github.com/o/r/pull/42")
         rec = self._record("7", result="approved")
-        for key in ("nonce", "ts", "task_id", "status", "branch", "worktree", "pr_url", "summary"):
+        for key in ("nonce", "ts", "task_id", "status", "branch", "worktree",
+                    "state_dir", "pr_url", "summary"):
             self.assertIn(key, rec)
         self.assertEqual(rec["task_id"], "7")
         self.assertEqual(rec["status"], "completed")
         self.assertEqual(rec["branch"], "fleet/task/7")
         self.assertEqual(rec["worktree"], "/wt/7")
+        # The record carries its PROJECT state dir for flush-time outbox re-scan.
+        self.assertEqual(rec["state_dir"], str(self.state_dir))
         self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/42")
         self.assertEqual(rec["summary"], "task-7 done")
         self.assertEqual(rec["result"], "approved")
 
     def test_scan_pr_url_uses_last_match_and_handles_missing(self) -> None:
         self._seed_task("8", pr_url="https://github.com/o/r/pull/1")
-        # Append a later PR URL — the most recent should win.
         outbox = state.task_dir(self.state_dir, "8") / "outbox.md"
         outbox.write_text(
             outbox.read_text() + "\nhttps://github.com/o/r/pull/99\n", encoding="utf-8"
@@ -92,23 +100,24 @@ class LeaderNotifierTests(unittest.TestCase):
         self._seed_task("9")  # no outbox
         self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "9"))
 
-    # -- queue append + persistence ---------------------------------------
+    # -- queue append + persistence (under the SESSION dir) ----------------
 
-    def test_enqueue_persists_and_survives_reload(self) -> None:
+    def test_enqueue_persists_under_session_dir_and_survives_reload(self) -> None:
         self._seed_task("1")
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
-        self.assertTrue(leader_notifier.queue_path(self.state_dir).exists())
-        # A fresh read (mimics a re-spawned notifier) still sees the record.
-        recs = leader_notifier.read_queue(self.state_dir)
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        qpath = leader_notifier.queue_path(self.session_dir)
+        self.assertTrue(qpath.exists())
+        self.assertEqual(qpath.parent, self.session_dir)  # lives under the session
+        recs = leader_notifier.read_queue(self.session_dir)
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["task_id"], "1")
 
     def test_clear_records_removes_only_flushed_nonces(self) -> None:
         r1, r2 = self._record("1"), self._record("2")
-        leader_notifier.enqueue(self.state_dir, r1)
-        leader_notifier.enqueue(self.state_dir, r2)
-        leader_notifier.clear_records(self.state_dir, {r1["nonce"]})
-        remaining = leader_notifier.read_queue(self.state_dir)
+        leader_notifier.enqueue(self.session_dir, r1)
+        leader_notifier.enqueue(self.session_dir, r2)
+        leader_notifier.clear_records(self.session_dir, {r1["nonce"]})
+        remaining = leader_notifier.read_queue(self.session_dir)
         self.assertEqual([r["task_id"] for r in remaining], ["2"])
 
     # -- render / coalesce -------------------------------------------------
@@ -122,46 +131,42 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertIn("pull the diff", block)
         self.assertIn("completed+merged", block)
 
-    # -- inject-time PR-URL re-scan ---------------------------------------
+    # -- inject-time PR-URL re-scan (per-record project) ------------------
 
     def test_refill_fills_missing_pr_url_found_at_inject_time(self) -> None:
-        # Enqueued before the PR landed: record carries pr_url=None …
         self._seed_task("1")
         rec = self._record("1")
         self.assertIsNone(rec["pr_url"])
-        # … then the PR is written to outbox.md before the flush.
         self._seed_task("1", pr_url="https://github.com/o/r/pull/55")
-        leader_notifier._refill_pr_urls(self.state_dir, [rec])
+        leader_notifier._refill_pr_urls([rec])
         self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/55")
 
     def test_refill_does_not_overwrite_present_pr_url(self) -> None:
         self._seed_task("1", pr_url="https://github.com/o/r/pull/1")
         rec = self._record("1")
         self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/1")
-        # A different URL lands in outbox afterwards — must NOT be re-scanned.
         self._seed_task("1", pr_url="https://github.com/o/r/pull/999")
         with patch.object(leader_notifier, "scan_pr_url") as scan:
-            leader_notifier._refill_pr_urls(self.state_dir, [rec])
+            leader_notifier._refill_pr_urls([rec])
             scan.assert_not_called()
         self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/1")
 
     def test_refill_leaves_still_missing_pr_url_null(self) -> None:
         self._seed_task("1")  # no outbox, PR never appeared
         rec = self._record("1")
-        leader_notifier._refill_pr_urls(self.state_dir, [rec])
+        leader_notifier._refill_pr_urls([rec])
         self.assertIsNone(rec["pr_url"])
 
     def test_refill_swallows_scan_errors(self) -> None:
         self._seed_task("1")
         rec = self._record("1")
         with patch.object(leader_notifier, "scan_pr_url", side_effect=OSError("boom")):
-            leader_notifier._refill_pr_urls(self.state_dir, [rec])  # must not raise
+            leader_notifier._refill_pr_urls([rec])  # must not raise
         self.assertIsNone(rec["pr_url"])
 
     def test_flush_injects_pr_url_topped_up_at_inject_time(self) -> None:
         self._seed_task("1")
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
-        # PR lands after enqueue, before the idle flush.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
         self._seed_task("1", pr_url="https://github.com/o/r/pull/77")
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
@@ -169,8 +174,8 @@ class LeaderNotifierTests(unittest.TestCase):
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
         ):
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.5,
@@ -184,15 +189,15 @@ class LeaderNotifierTests(unittest.TestCase):
 
     def test_flush_still_renders_none_yet_when_pr_absent(self) -> None:
         self._seed_task("1")  # PR never appears
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
             patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
         ):
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.5,
@@ -205,15 +210,15 @@ class LeaderNotifierTests(unittest.TestCase):
     # -- inject-only-on-ready ---------------------------------------------
 
     def test_busy_leader_never_injects_keeps_queued(self) -> None:
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
             patch("fleet.leader_notifier.tmux.capture_pane", return_value=BUSY_PANE),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
         ):
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.05,
@@ -221,50 +226,48 @@ class LeaderNotifierTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         send_keys.assert_not_called()  # never mid-turn
-        self.assertEqual(len(leader_notifier.read_queue(self.state_dir)), 1)  # still queued
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # still queued
 
     def test_idle_leader_injects_once_coalesced_and_clears(self) -> None:
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
-        leader_notifier.enqueue(self.state_dir, self._record("2"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("2"))
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
             patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
         ):
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.5,
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        # One injection (coalesced), submitted with Enter.
         send_keys.assert_called_once()
         args, kwargs = send_keys.call_args
-        self.assertEqual(args[0], "fleet-demo")
+        self.assertEqual(args[0], "fleet-main")
         self.assertEqual(args[1], "leader")
         self.assertIn("task-1", args[2])
         self.assertIn("task-2", args[2])
         self.assertTrue(kwargs.get("enter"))
-        # Queue cleared after flush.
-        self.assertEqual(leader_notifier.read_queue(self.state_dir), [])
-        # leader_notified event emitted for observability.
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        # leader_notified event lands in the SESSION's events.jsonl.
         last = self._events()[-1]
         self.assertEqual(last["type"], "leader_notified")
         self.assertEqual(last["count"], 2)
         self.assertEqual(sorted(last["task_ids"]), ["1", "2"])
 
     def test_leader_detached_leaves_records_queued(self) -> None:
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=False),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
         ):
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.05,
@@ -272,13 +275,13 @@ class LeaderNotifierTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         send_keys.assert_not_called()
-        self.assertEqual(len(leader_notifier.read_queue(self.state_dir)), 1)
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
 
     def test_empty_queue_is_noop(self) -> None:
         with patch("fleet.leader_notifier.tmux.session_exists") as exists:
             rc = leader_notifier.notify(
-                state_dir=self.state_dir,
-                session="fleet-demo",
+                session_dir=self.session_dir,
+                session="fleet-main",
                 window="leader",
                 agent_spec="claude:opus",
                 timeout=0.05,
@@ -287,8 +290,8 @@ class LeaderNotifierTests(unittest.TestCase):
         exists.assert_not_called()  # bailed before touching tmux
 
     def test_second_notifier_noops_while_lock_held(self) -> None:
-        leader_notifier.enqueue(self.state_dir, self._record("1"))
-        fp = leader_notifier._acquire_lock(self.state_dir)
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        fp = leader_notifier._acquire_lock(self.session_dir)
         self.assertIsNotNone(fp)
         try:
             with (
@@ -296,8 +299,8 @@ class LeaderNotifierTests(unittest.TestCase):
                 patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
             ):
                 rc = leader_notifier.notify(
-                    state_dir=self.state_dir,
-                    session="fleet-demo",
+                    session_dir=self.session_dir,
+                    session="fleet-main",
                     window="leader",
                     agent_spec="claude:opus",
                     timeout=0.05,
@@ -307,28 +310,41 @@ class LeaderNotifierTests(unittest.TestCase):
             send_keys.assert_not_called()
         finally:
             leader_notifier._release_lock(fp)
-        # Record untouched for the holder to flush.
-        self.assertEqual(len(leader_notifier.read_queue(self.state_dir)), 1)
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
 
 
 class DoneHookTests(unittest.TestCase):
-    """The done.py wiring: default OFF means zero behaviour change."""
+    """done.py wiring, now routed by ``owner_session`` (Issue #166 §10.3).
+
+    Default OFF means zero behaviour change. The queue + leader record live under
+    the owner session's dir (``global/sessions/<label>/``); a missing
+    ``owner_session`` is treated as ``main``."""
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo")
         self.task_id = "1"
         tdir = state.task_dir(self.state_dir, self.task_id)
         tdir.mkdir(parents=True, exist_ok=True)
+        # No owner_session on the task → defaults to "main".
         self.task = {
             "id": self.task_id,
             "status": "completed",
             "branch": "fleet/task/1",
             "worktree": "/wt/1",
         }
+        self.session_dir = state.session_dir("main")
 
     def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
     def test_truthy_parsing(self) -> None:
@@ -345,9 +361,9 @@ class DoneHookTests(unittest.TestCase):
                 status="completed", result="approved", summary="done",
             )
         spawn.assert_not_called()
-        self.assertFalse(leader_notifier.queue_path(self.state_dir).exists())
+        self.assertFalse(leader_notifier.queue_path(self.session_dir).exists())
 
-    def test_on_enqueues_then_skips_spawn_when_no_leader_session(self) -> None:
+    def test_on_enqueues_to_session_dir_then_skips_spawn_when_no_record(self) -> None:
         project = {"name": "demo", "notify_leader_on_driver_done": "true"}
         with (
             patch("fleet.commands.done.tmux.available", return_value=True),
@@ -358,16 +374,20 @@ class DoneHookTests(unittest.TestCase):
                 self.state_dir, self.task_id, self.task, project, "demo",
                 status="completed", result="approved", summary="done",
             )
-        # No leader-session.json → no spawn, but record is durably queued.
+        # No session.json record for "main" → no spawn, but record durably queued
+        # under the SESSION dir (not the project state dir).
         spawn.assert_not_called()
-        recs = leader_notifier.read_queue(self.state_dir)
+        recs = leader_notifier.read_queue(self.session_dir)
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["task_id"], "1")
+        self.assertEqual(recs[0]["state_dir"], str(self.state_dir))
 
-    def test_on_with_leader_session_enqueues_and_spawns(self) -> None:
+    def test_on_with_session_record_enqueues_and_spawns(self) -> None:
         project = {"name": "demo", "notify_leader_on_driver_done": "true"}
-        (self.state_dir / "leader-session.json").write_text(
-            json.dumps({"agent": "claude:opus"}), encoding="utf-8"
+        rec_path = state.session_record_path("main")
+        rec_path.parent.mkdir(parents=True, exist_ok=True)
+        rec_path.write_text(
+            json.dumps({"label": "main", "agent": "claude:opus"}), encoding="utf-8"
         )
         with (
             patch("fleet.commands.done.tmux.available", return_value=True),
@@ -380,10 +400,40 @@ class DoneHookTests(unittest.TestCase):
             )
         spawn.assert_called_once()
         kwargs = spawn.call_args.kwargs
-        self.assertEqual(kwargs["session"], "fleet-demo")
+        self.assertEqual(kwargs["session_dir"], self.session_dir)
+        self.assertEqual(kwargs["session"], "fleet-main")
         self.assertEqual(kwargs["window"], "leader")
         self.assertEqual(kwargs["agent_spec"], "claude:opus")
-        self.assertEqual(len(leader_notifier.read_queue(self.state_dir)), 1)
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+    def test_owner_session_routes_to_named_session(self) -> None:
+        # A task spawned by a non-default session routes to fleet-<label>.
+        project = {"name": "demo", "notify_leader_on_driver_done": "true"}
+        task = dict(self.task, owner_session="migration")
+        rec_path = state.session_record_path("migration")
+        rec_path.parent.mkdir(parents=True, exist_ok=True)
+        rec_path.write_text(
+            json.dumps({"label": "migration", "agent": "codex:gpt-5.5"}), encoding="utf-8"
+        )
+        with (
+            patch("fleet.commands.done.tmux.available", return_value=True),
+            patch("fleet.commands.done.tmux.session_exists", return_value=True),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            done_cmd._maybe_notify_leader(
+                self.state_dir, self.task_id, task, project, "demo",
+                status="completed", result="approved", summary="done",
+            )
+        spawn.assert_called_once()
+        kwargs = spawn.call_args.kwargs
+        self.assertEqual(kwargs["session"], "fleet-migration")
+        self.assertEqual(kwargs["session_dir"], state.session_dir("migration"))
+        self.assertEqual(kwargs["agent_spec"], "codex:gpt-5.5")
+        # Record queued under the migration session, not main.
+        self.assertEqual(
+            len(leader_notifier.read_queue(state.session_dir("migration"))), 1
+        )
+        self.assertFalse(leader_notifier.queue_path(state.session_dir("main")).exists())
 
 
 if __name__ == "__main__":

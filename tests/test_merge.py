@@ -215,6 +215,7 @@ class TeardownHelperTests(unittest.TestCase):
         state.save_task(self.state_dir, "1", {
             "id": "1", "title": "t1", "status": "completed",
             "agent": "claude:sonnet", "workspace": "none",
+            "owner_session": "demo",
         })
 
     def tearDown(self) -> None:

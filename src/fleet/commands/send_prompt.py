@@ -56,15 +56,21 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: no driver-prompt.md at {prompt_path}", file=sys.stderr)
         return 1
 
-    project = state_mod.load_project(state_dir)
-    name = project.get("name") or "fleet"
-    session = f"fleet-{name}"
+    try:
+        task = state_mod.load_task(state_dir, args.task_id)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    # The driver window lives in the task's owner session (Issue #166 §5.2).
+    label = state_mod.task_owner_session(task)
+    session = f"fleet-{label}"
     buffer_name = f"fleet-task-{args.task_id}"
 
     if not tmux_mod.session_exists(session):
         print(
             f"error: session not running: {session}\n"
-            f"  start it:  fleet leader --project {project_name or args.project}",
+            f"  start it:  fleet leader --name {label}",
             file=sys.stderr,
         )
         return 1
@@ -86,11 +92,6 @@ def run(args: argparse.Namespace) -> int:
         return 1
     window = matches[0]
 
-    try:
-        task = state_mod.load_task(state_dir, args.task_id)
-    except FileNotFoundError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
     agent_spec = _current_agent(task)
     if agent_spec is None:
         print(f"error: no current agent in task-{args.task_id}", file=sys.stderr)

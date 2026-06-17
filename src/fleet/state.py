@@ -41,6 +41,7 @@ REGISTRY_VERSION = 1
 GLOBAL_SUBDIR = "global"
 LEADER_MEMORY_SUBDIR = "leader-memory"
 SESSIONS_SUBDIR = "sessions"
+SESSION_RECORD_NAME = "session.json"
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "prompts"
 
@@ -111,13 +112,33 @@ def global_leader_memory_dir() -> Path:
 
 
 def global_sessions_dir() -> Path:
-    """Return ``global/sessions/`` — reserved for per-session leader state.
+    """Return ``global/sessions/`` — the per-session leader state namespace.
 
-    Keyed by ``owner_session`` (the session label) in later phases of Issue #166
-    (session record + notification queue per session). Phase 1 only reserves the
-    path constant; it does **not** build any session state here.
+    Keyed by ``owner_session`` (the session label, Issue #166): each live/known
+    leader session owns one ``<label>/`` dir holding its record, notification
+    queue, and lock (design §5.3, §10.3). A session spans projects, so this state
+    belongs to the session — not to any one project's ``state_dir``.
     """
     return global_dir() / SESSIONS_SUBDIR
+
+
+def session_dir(label: str) -> Path:
+    """Return ``global/sessions/<label>/`` — one leader session's state dir.
+
+    Holds ``session.json`` (the leader record), ``leader-pending.jsonl`` (the
+    notification queue), and ``leader-notifier.lock`` for the session labelled
+    *label* (design §5.3). May not exist until ``fleet leader`` creates it.
+    """
+    return global_sessions_dir() / label
+
+
+def session_record_path(label: str) -> Path:
+    """Return ``global/sessions/<label>/session.json`` — the per-session record.
+
+    The relocated successor of the old per-project ``leader-session.json``
+    (Issue #166): label / agent spec / started_at / tmux pane for one session.
+    """
+    return session_dir(label) / SESSION_RECORD_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +394,20 @@ def save_project(state_dir: Path, data: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 # Tasks (`tasks/task-<id>/task.yaml`)
 # ---------------------------------------------------------------------------
+
+
+def task_owner_session(task: dict) -> str:
+    """Return a task's owner-session label, defaulting to ``"main"`` when absent.
+
+    The owner session is the leader session that spawned the task — stamped onto
+    ``task.yaml`` by ``fleet-agent start`` from ``FLEET_SESSION`` (design §10.3).
+    It keys both driver-window placement (``fleet-<label>``, §5.2) and leader
+    notification routing (§10.3). A missing / empty value is treated as ``"main"``
+    — the defensive default for tasks in flight at the Issue #166 cutover (``main``
+    is the default session label), so routing never dead-ends.
+    """
+    label = task.get("owner_session")
+    return label if isinstance(label, str) and label else "main"
 
 
 def task_dir(state_dir: Path, task_id: str) -> Path:

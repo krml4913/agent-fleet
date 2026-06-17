@@ -65,9 +65,9 @@ def teardown(
     except Exception as e:  # noqa: BLE001 — workspace errors warn, don't block
         print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
 
-    # Drop tmux artefacts.
-    project_name = project.get("name") or "fleet"
-    session = f"fleet-{project_name}"
+    # Drop tmux artefacts. The driver window lives in the task's owner session
+    # (``fleet-<owner_session>``, Issue #166 §5.2), not a per-project session.
+    session = f"fleet-{state_mod.task_owner_session(task)}"
     buffer_name = f"fleet-task-{task_id}"
     if tmux_mod.available():
         if tmux_mod.session_exists(session):
