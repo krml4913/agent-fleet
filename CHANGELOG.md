@@ -7,6 +7,24 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: recover dropped codex submit Enter so prompt delivery doesn't time out
+
+Spawning a `codex` driver could fail prompt delivery: the deliverer pasted the
+driver-prompt pointer but codex intermittently swallowed the bare submit Enter
+(the same TUI quirk the `/rename` dance already works around), leaving the
+pointer sitting in the composer unsubmitted until the 600s timeout fired and the
+task was marked `failed` (Issue #179).
+
+- The submit Enter is now re-pressed until the `inbox_seen` ack lands. A bare
+  Enter on an already-submitted (empty) composer is a no-op — codex ignores it
+  whether idle or mid-turn (verified live) — so a resubmit never double-submits.
+- The retry policy lives on the vendor adapter (`submit_retries` /
+  `submit_retry_interval_seconds`), so the deliverer stays vendor-agnostic. Only
+  codex opts in; claude keeps its single reliable Enter (`submit_retries=0`), so
+  the claude path is unchanged.
+- Regression tests cover the codex resubmit-until-ack path, the claude
+  no-resubmit guarantee, and the adapter defaults.
+
 ### fix: suppress noisy intermediate-handoff notifications to the leader pane
 
 `notify_leader_on_driver_done` fired on every `fleet-agent done`, including

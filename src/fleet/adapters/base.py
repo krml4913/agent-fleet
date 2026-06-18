@@ -34,6 +34,19 @@ class VendorAdapter:
     #: launch command suppresses (folded into :meth:`cli_command`).
     suppress_update_check: bool = False
 
+    #: Extra submit-Enter retries the prompt deliverer makes while waiting for
+    #: the ``inbox_seen`` ack. Some TUIs intermittently drop a bare Enter sent
+    #: right after a paste or a menu/popup transition, leaving the pasted prompt
+    #: sitting in the composer unsubmitted; re-pressing Enter recovers it.
+    #: ``0`` means submit exactly once — the right value when a single Enter
+    #: reliably submits (claude). A vendor that needs the safety net overrides
+    #: this with a positive count (codex).
+    submit_retries: int = 0
+
+    #: Seconds between submit-Enter retries (only consulted when
+    #: :attr:`submit_retries` is positive).
+    submit_retry_interval_seconds: float = 2.0
+
     @classmethod
     def cli_command(cls, model: str) -> list[str]:
         """Return the argv used to launch this vendor's CLI for ``model``.

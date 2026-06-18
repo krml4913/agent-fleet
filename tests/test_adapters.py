@@ -78,6 +78,15 @@ class SessionNamingTests(unittest.TestCase):
         self.assertEqual(VendorAdapter.session_name_launch_args("x"), [])
         self.assertEqual(VendorAdapter.session_rename_keys("x"), [])
 
+    def test_submit_retries_live_only_in_the_codex_adapter(self) -> None:
+        # The submit-Enter retry is a codex quirk (it drops the bare submit
+        # Enter); the policy lives in the adapter so the deliverer stays
+        # vendor-agnostic. claude and the base submit exactly once.
+        self.assertEqual(VendorAdapter.submit_retries, 0)
+        self.assertEqual(adapters.ClaudeAdapter.submit_retries, 0)
+        self.assertGreater(adapters.CodexAdapter.submit_retries, 0)
+        self.assertGreater(adapters.CodexAdapter.submit_retry_interval_seconds, 0)
+
     def test_agents_wrappers_resolve_vendor(self) -> None:
         self.assertEqual(
             agents.session_name_launch_args("claude:opus", "n"),

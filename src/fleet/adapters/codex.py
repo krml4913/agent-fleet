@@ -22,6 +22,17 @@ class CodexAdapter(VendorAdapter):
     # suppresses it via ``check_for_update_on_startup=false``.
     suppress_update_check = True
 
+    # codex intermittently drops a bare Enter sent right after a paste (the
+    # same swallow the /rename dance works around — see session_rename_keys),
+    # so a single submit Enter can leave the pasted pointer in the composer,
+    # unsubmitted, until the deliverer times out and the task is marked failed
+    # (Issue #179). Re-pressing Enter until the inbox_seen ack lands recovers
+    # it. Pressing Enter again once the prompt has already submitted is a
+    # harmless no-op — codex ignores a bare Enter on an empty composer whether
+    # idle or mid-turn (verified live) — so this never double-submits.
+    submit_retries = 6
+    submit_retry_interval_seconds = 2.0
+
     @classmethod
     def cli_command(cls, model: str) -> list[str]:
         return [

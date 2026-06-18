@@ -6,13 +6,14 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import prompt_deliverer, prompt_pointer, state  # noqa: E402
+from fleet.adapters import CodexAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
 
 
@@ -167,7 +168,9 @@ class PromptDelivererTests(unittest.TestCase):
         # claude is named at launch → only the submit Enter, no rename keys.
         send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
 
-    def test_does_not_retry_enter_while_waiting_for_ack(self) -> None:
+    def test_submits_once_when_ack_lands_on_first_enter(self) -> None:
+        # When the ack arrives on the first submit Enter, no resubmit fires —
+        # the retry path is only walked while the ack is still missing.
         with (
             patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
             patch("fleet.prompt_deliverer.tmux.load_buffer"),
@@ -180,6 +183,49 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(send_keys.call_count, 1)
         send_keys.assert_called_with("fleet-demo", "1·driver", "", enter=True)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    def test_codex_resubmits_enter_until_ack(self) -> None:
+        # codex intermittently drops the first submit Enter; the deliverer must
+        # re-press it until the inbox_seen ack lands (Issue #179). The ack here
+        # only fires on the third send_keys, proving the retry path runs.
+        calls = {"n": 0}
+
+        def ack_on_third_enter(*_args, **_kwargs) -> None:
+            calls["n"] += 1
+            if calls["n"] >= 3:
+                self._ack_on_enter()
+
+        with (
+            patch.object(CodexAdapter, "submit_retry_interval_seconds", 0.0),
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=ack_on_third_enter) as send_keys,
+        ):
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertGreaterEqual(send_keys.call_count, 3)
+        # Every resubmit is the same bare Enter — never a duplicate paste.
+        for c in send_keys.call_args_list:
+            self.assertEqual(c, call("fleet-demo", "1·driver", "", enter=True))
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    def test_claude_does_not_resubmit_enter(self) -> None:
+        # claude submits with a single reliable Enter (submit_retries=0): a
+        # missing ack must never trigger a resubmit (which would inject a stray
+        # Enter into a working claude pane).
+        with (
+            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
+            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
+        ):
+            result = self._deliver(agent="claude:opus", timeout=0.05)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(send_keys.call_count, 1)
+        self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
 
     def test_ack_from_other_task_does_not_confirm_delivery(self) -> None:
         def ack_other_task(*_args, **_kwargs) -> None:
