@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import agents, notify, prompt_pointer, state as state_mod, tmux
-from .adapters import REGISTRY
+from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 
 
@@ -156,6 +156,7 @@ def deliver(
                     checkpoint=checkpoint,
                     deadline=deadline,
                     poll_interval=poll_interval,
+                    adapter=adapter,
                 )
             except tmux.TmuxError as e:
                 _fail(state_dir, task_id, f"prompt deliverer cannot paste prompt: {e}", window)
@@ -264,17 +265,32 @@ def _submit_and_wait_for_inbox_seen(
     checkpoint: EventCheckpoint,
     deadline: float,
     poll_interval: float,
+    adapter: type[VendorAdapter],
 ) -> bool:
-    """Press Enter after paste settles, then wait for the driver inbox-read ack."""
+    """Press Enter after paste settles, then wait for the driver inbox-read ack.
+
+    Some vendors (codex) intermittently drop the bare submit Enter, leaving
+    the pasted pointer in the composer unsubmitted. When ``adapter`` asks for
+    submit retries, the Enter is re-pressed every
+    ``submit_retry_interval_seconds`` until the ack lands — a no-op once the
+    prompt has already submitted, so it never double-submits. claude sets
+    ``submit_retries=0`` and keeps the single-Enter behaviour.
+    """
     time.sleep(PASTE_SETTLE_SECONDS)
     tmux.send_keys(session, window, "", enter=True)
 
     events_path = state_dir / "events.jsonl"
     offset = checkpoint.offset
+    retries_left = adapter.submit_retries
+    next_retry_at = time.monotonic() + adapter.submit_retry_interval_seconds
     while time.monotonic() <= deadline:
         matched, offset = _scan_for_inbox_seen_ack(events_path, task_id, checkpoint, offset)
         if matched:
             return True
+        if retries_left > 0 and time.monotonic() >= next_retry_at:
+            tmux.send_keys(session, window, "", enter=True)
+            retries_left -= 1
+            next_retry_at = time.monotonic() + adapter.submit_retry_interval_seconds
         time.sleep(max(0.1, poll_interval))
 
     return False
