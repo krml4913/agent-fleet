@@ -35,18 +35,20 @@ class SessionsCmdTests(unittest.TestCase):
             os.environ["FLEET_HOME"] = self._old
         self._tmp.cleanup()
 
-    def _write_session(self, label: str, agent: str = "claude:opus") -> None:
+    def _write_session(
+        self, label: str, agent: str = "claude:opus", scope: list[str] | None = None
+    ) -> None:
         rec = state.session_record_path(label)
         rec.parent.mkdir(parents=True, exist_ok=True)
-        rec.write_text(
-            json.dumps({
-                "label": label,
-                "agent": agent,
-                "started_at": "2026-06-18T09:00:00+00:00",
-                "pane": f"fleet-{label}:leader",
-            }),
-            encoding="utf-8",
-        )
+        data: dict = {
+            "label": label,
+            "agent": agent,
+            "started_at": "2026-06-18T09:00:00+00:00",
+            "pane": f"fleet-{label}:leader",
+        }
+        if scope is not None:
+            data["scope"] = scope
+        rec.write_text(json.dumps(data), encoding="utf-8")
 
     def _save_task(self, task_id: str, status: str, owner_session: str | None = None) -> None:
         data = {
@@ -107,6 +109,19 @@ class SessionsCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("idle", r.stdout)
         self.assertIn("(no in-flight tasks)", r.stdout)
+
+    def test_scope_line_shown_when_set(self) -> None:
+        self._write_session("main", scope=["demo"])
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("scope:", r.stdout)
+        self.assertIn("demo", r.stdout)
+
+    def test_scope_all_projects_when_unset(self) -> None:
+        self._write_session("main")
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("all projects", r.stdout)
 
 
 if __name__ == "__main__":

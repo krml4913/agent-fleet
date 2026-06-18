@@ -231,7 +231,8 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | leader ペインを起動 / アタッチする（デフォルトエージェント `claude:opus`）。 |
 | `fleet attach [target] [--project P]` | leader（デフォルト）またはタスク driver ペインにアタッチする。 |
-| `fleet status [name] [--all] [--events N]` | プロジェクト情報、タスク一覧、直近のイベントを表示する。 |
+| `fleet status [name] [--all] [--unscoped] [--events N]` | プロジェクト情報、タスク一覧、直近のイベントを表示する。`--all` 時はセッションの scope 内 project のみ表示（`--unscoped` で全件）。 |
+| `fleet scope [label] [--set/--add/--rm/--clear]` | leader セッションが担当する project の集合（scope）を確認・編集する。 |
 | `fleet log [task_id] [-n N] [--type T]` | `events.jsonl` を tail し、任意でタスク / タイプでフィルタする。 |
 | `fleet formation list \| show <name> \| init --from <template>` | formation を確認または作成する。 |
 | `fleet workspace list \| set <mode>` | workspace モード（`worktree` / `none`）を表示または設定する。 |

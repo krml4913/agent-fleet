@@ -75,6 +75,13 @@ def run(args: argparse.Namespace) -> int:
             header += _style("  [no session record]", _YELLOW, use_color)
         print(header)
 
+        # Show scope line
+        scope = state_mod.session_scope(label)
+        if scope is not None:
+            print(f"    scope: {', '.join(scope)}")
+        else:
+            print("    scope: (all projects)")
+
         if not tasks:
             print(_style("    (no in-flight tasks)", _DIM, use_color))
             continue
@@ -82,16 +89,21 @@ def run(args: argparse.Namespace) -> int:
         proj_width = max(len(t["project"]) for t in tasks)
         status_width = max(len(t["status"]) for t in tasks)
         for t in tasks:
+            out_of_scope = scope is not None and t["project"] not in scope
+            suffix = _style("  (out of scope)", _YELLOW, use_color) if out_of_scope else ""
             print(
-                "    {proj:<{pw}}  {tid:<{iw}}  {status:<{sw}}  {title}".format(
-                    proj=t["project"],
-                    pw=proj_width,
-                    tid=f"task-{t['id']}",
-                    iw=id_width,
-                    status=t["status"],
-                    sw=status_width,
-                    title=t["title"],
-                ).rstrip()
+                (
+                    "    {proj:<{pw}}  {tid:<{iw}}  {status:<{sw}}  {title}".format(
+                        proj=t["project"],
+                        pw=proj_width,
+                        tid=f"task-{t['id']}",
+                        iw=id_width,
+                        status=t["status"],
+                        sw=status_width,
+                        title=t["title"],
+                    ).rstrip()
+                )
+                + suffix
             )
 
     return 0

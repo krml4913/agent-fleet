@@ -9,6 +9,11 @@ Environment:
   - Your cwd is the agent-fleet **clone root**, not any project repo. Do NOT
     `cd` into a project — that is what made dispatch land in the wrong project.
 
+Session scope vs focus: **scope** = projects this session owns (`fleet scope`
+  / `fleet leader --scope`; injected above; `fleet status --all` filters to it;
+  dispatch outside is blocked unless `--allow-out-of-scope`). **Focus** = the
+  project currently discussed — volatile, not persisted. `--project` still required.
+
 Project-agnostic discipline:
   - **`--project <name>` is mandatory on every dispatch** (`fleet-agent start …
     --project <name>`, `fleet status --project <name>` / `--all`). There is no

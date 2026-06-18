@@ -24,6 +24,36 @@ _PROMPTS_DIR = Path(__file__).parent.parent.parent / "docs" / "prompts"
 _TEMPLATE_PATH = _PROMPTS_DIR / "leader-base.md"
 
 
+def _scope_roster_section(session_label: str) -> str:
+    """Return a prompt section listing the session's scoped projects, or ``""``.
+
+    When the session has a declared scope, injects a short roster so the leader
+    knows which projects it is responsible for without needing to run a command.
+    Unscoped sessions get a brief note listing all registered projects.
+    Empty / unresolvable registry: section omitted.
+    """
+    from . import state as _state
+    reg = _state.load_registry()
+    all_projects = sorted(reg.get("projects", {}).keys())
+    if not all_projects:
+        return ""
+
+    scope = _state.session_scope(session_label)
+    if scope is not None:
+        items = "\n".join(f"- {p}" for p in scope)
+        return (
+            "## Projects in scope\n\n"
+            + items
+            + "\n\nDispatch only to these unless the user explicitly asks otherwise."
+        )
+    else:
+        listed = ", ".join(all_projects)
+        return (
+            "## Projects\n\n"
+            f"This session is unscoped (serves all registered projects): {listed}."
+        )
+
+
 def _global_memory_index_section() -> str:
     """Return the GLOBAL leader-memory index wrapped as a prompt section, or ``""``.
 
@@ -42,7 +72,7 @@ def _global_memory_index_section() -> str:
     return "## Leader memory (global index)\n\n" + content
 
 
-def render(*, fleet_bin: str | None = None) -> str:
+def render(*, fleet_bin: str | None = None, session_label: str | None = None) -> str:
     """Return the prompt string to paste into a leader pane.
 
     Project-agnostic (Issue #166): there is no project to name at startup, so the
@@ -65,6 +95,10 @@ def render(*, fleet_bin: str | None = None) -> str:
     memory_section = _global_memory_index_section()
     if memory_section:
         parts.append(memory_section)
+    if session_label:
+        roster_section = _scope_roster_section(session_label)
+        if roster_section:
+            parts.append(roster_section)
     body = "\n\n".join(parts)
 
     global_index = state_mod.global_leader_memory_dir() / "MEMORY.md"

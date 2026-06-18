@@ -7,6 +7,50 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: session scope — restrict a leader session's project set (Issue #172)
+
+Adds the concept of a **session scope**: the set of projects a leader session is
+responsible for. A session without a declared scope remains unscoped and behaves
+exactly as before (backward-compatible).
+
+- **`fleet scope [<label>] [--set/--add/--rm/--clear]`** — new user command to
+  view and edit a session's scope. Label defaults to `$FLEET_SESSION`, then
+  `main`. `--set a,b,c` replaces the scope; `--add`/`--rm` edit it incrementally;
+  `--clear` removes the key (session becomes unscoped). All mutating forms
+  validate project names against the registry.
+- **`fleet leader --scope a,b,c`** — optionally sets the scope at session launch
+  time. The scope is written to `session.json` before the leader prompt is pasted.
+  The leader prompt now injects a **Projects in scope** section listing the
+  session's assigned projects (or an "unscoped" note when no scope is set).
+- **`fleet-agent start` scope guard** — dispatching to a project outside the
+  owner session's scope is now a hard error (exit 1). The error message includes
+  the current scope and instructions to bypass with `--allow-out-of-scope` or add
+  the project via `fleet scope`. Unscoped sessions are unaffected. The guard runs
+  even with `--dry-run` so tests can exercise it without tmux.
+- **`fleet status --all` scope filter** — now defaults to showing only the current
+  session's scoped projects. `--unscoped` shows all registered projects. `--session
+  <label>` selects a specific session's scope. `$FLEET_SESSION` is used when
+  `--session` is omitted. No filter applied when session is unscoped or unknown.
+- **`fleet sessions` scope line** — each session block now shows its scope (or
+  `(all projects)` when unscoped). In-flight tasks from projects outside the scope
+  are tagged `(out of scope)` for visibility.
+- **Storage**: scope is the optional `scope` field in
+  `global/sessions/<label>/session.json`. Missing field or missing record → unscoped
+  → all projects. `[]` is never persisted (`--clear` deletes the key).
+- Refs #172
+
+### fix: unify `--project` resolution and fix silent-fleet no-arg default (Refs #171)
+
+- Introduced `task_context.resolve_project_state_dir` / `_resolve_state_dir_core`
+  as the unified `--project` resolver across all commands. Explicit `--project
+  <name>` resolves from the registry regardless of `FLEET_STATE_DIR`/cwd (the
+  leader path); cwd / `FLEET_STATE_DIR` fallbacks remain for drivers and ad-hoc
+  terminal use. Commands with a stray positional name or a previous cwd-only path
+  argument were migrated to use the unified resolver.
+- Fixed the footgun where `fleet` (no subcommand) would silently apply to an
+  unintended project when run without arguments from an unrelated directory.
+- Refs #171
+
 ### fix: leader notifier delivery — survive a busy leader, clear pending on retire
 
 - **Busy leader stranded the queue.** The detached notifier (`src/fleet/leader_notifier.py`) was a one-shot poller: it waited for the leader pane to go idle and, if the leader stayed busy past its timeout, exited "leave queued" without retrying. With nothing else watching, the implementation-gate (`awaiting_orders`) notification observed on a bmweb multi_stage task was recorded in `global/sessions/<owner>/leader-pending.jsonl` (routing was fine) but never injected into the leader pane. Fix: on a busy-timeout with records still pending and the leader session still alive, the notifier now **re-arms** — it spawns a fresh successor poller (after releasing the session lock) so the next idle boundary is always caught. Each poller stays short-lived; the chain ends when the queue drains or the leader detaches. The poll loop moved into a `_poll_until_idle` helper that reports whether a re-arm is needed.

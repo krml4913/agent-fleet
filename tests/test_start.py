@@ -959,6 +959,74 @@ class StartTaskIdValidationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.state_dir / "tasks" / "task-valid-task-id").is_dir())
 
+    # --- scope guard ---
+
+    def test_scope_guard_blocks_out_of_scope_project(self) -> None:
+        other = Path(self._tmp.name) / "other"
+        other.mkdir()
+        make_project(self.fleet_home, "other", other)
+        # Set scope to only "demo"; dispatch to "other" should fail
+        from fleet import state
+        state.set_session_scope("main", ["demo"], mode="set")
+        result = run_fleet_agent(
+            "start", "--project", "other", "--dry-run",
+            "t1", "blocked",
+            fleet_home=self.fleet_home,
+            env_extra={"FLEET_SESSION": "main"},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("outside", result.stderr.lower())
+
+    def test_scope_guard_allows_in_scope_project(self) -> None:
+        from fleet import state
+        state.set_session_scope("main", ["demo"], mode="set")
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "t2", "allowed",
+            fleet_home=self.fleet_home,
+            env_extra={"FLEET_SESSION": "main"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_scope_guard_unscoped_no_effect(self) -> None:
+        # No scope set; dispatch should pass
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "t3", "no scope check",
+            fleet_home=self.fleet_home,
+            env_extra={"FLEET_SESSION": "main"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_scope_guard_allow_out_of_scope_flag(self) -> None:
+        other = Path(self._tmp.name) / "other2"
+        other.mkdir()
+        make_project(self.fleet_home, "other2", other)
+        from fleet import state
+        state.set_session_scope("main", ["demo"], mode="set")
+        result = run_fleet_agent(
+            "start", "--project", "other2", "--dry-run", "--allow-out-of-scope",
+            "t4", "override",
+            fleet_home=self.fleet_home,
+            env_extra={"FLEET_SESSION": "main"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_scope_guard_runs_in_dry_run(self) -> None:
+        other = Path(self._tmp.name) / "other3"
+        other.mkdir()
+        make_project(self.fleet_home, "other3", other)
+        from fleet import state
+        state.set_session_scope("main", ["demo"], mode="set")
+        result = run_fleet_agent(
+            "start", "--project", "other3", "--dry-run",
+            "t5", "dry-run guard",
+            fleet_home=self.fleet_home,
+            env_extra={"FLEET_SESSION": "main"},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("scope", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

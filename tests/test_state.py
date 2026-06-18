@@ -225,6 +225,100 @@ class CurrentStageIndexTests(unittest.TestCase):
         self.assertEqual(state.get_current_stage_index(stages), 1)
 
 
+class SessionScopeTests(_FleetHomeBase):
+    """Tests for session-scope helpers (Issue #172)."""
+
+    def _make_session_dir(self, label: str = "main") -> Path:
+        sdir = state.session_dir(label)
+        sdir.mkdir(parents=True, exist_ok=True)
+        return sdir
+
+    def test_session_scope_no_record_is_none(self) -> None:
+        result = state.session_scope("nosuchsession")
+        self.assertIsNone(result)
+
+    def test_session_scope_no_scope_field_is_none(self) -> None:
+        import json
+        sdir = self._make_session_dir("main")
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main"}), encoding="utf-8"
+        )
+        self.assertIsNone(state.session_scope("main"))
+
+    def test_session_scope_returns_list(self) -> None:
+        import json
+        sdir = self._make_session_dir("main")
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main", "scope": ["a", "b"]}), encoding="utf-8"
+        )
+        self.assertEqual(state.session_scope("main"), ["a", "b"])
+
+    def test_session_scope_empty_list_normalised_to_none(self) -> None:
+        import json
+        sdir = self._make_session_dir("main")
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main", "scope": []}), encoding="utf-8"
+        )
+        self.assertIsNone(state.session_scope("main"))
+
+    def test_in_scope_unscoped_always_true(self) -> None:
+        self.assertTrue(state.in_scope("nosession", "anything"))
+
+    def test_in_scope_scoped_match(self) -> None:
+        import json
+        self._make_session_dir()
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main", "scope": ["fleet", "bmweb"]}), encoding="utf-8"
+        )
+        self.assertTrue(state.in_scope("main", "fleet"))
+        self.assertFalse(state.in_scope("main", "other"))
+
+    def test_set_session_scope_set(self) -> None:
+        state.register_project("alpha", self.project)
+        beta = Path(self._tmp.name) / "beta"
+        beta.mkdir()
+        state.register_project("beta", beta)
+        new = state.set_session_scope("main", ["alpha", "beta"], mode="set")
+        self.assertEqual(sorted(new), ["alpha", "beta"])
+
+    def test_set_session_scope_add(self) -> None:
+        state.register_project("alpha", self.project)
+        beta = Path(self._tmp.name) / "beta"
+        beta.mkdir()
+        state.register_project("beta", beta)
+        state.set_session_scope("main", ["alpha"], mode="set")
+        new = state.set_session_scope("main", ["beta"], mode="add")
+        self.assertIn("alpha", new)
+        self.assertIn("beta", new)
+
+    def test_set_session_scope_rm(self) -> None:
+        state.register_project("alpha", self.project)
+        beta = Path(self._tmp.name) / "beta"
+        beta.mkdir()
+        state.register_project("beta", beta)
+        state.set_session_scope("main", ["alpha", "beta"], mode="set")
+        new = state.set_session_scope("main", ["alpha"], mode="rm")
+        self.assertNotIn("alpha", new)
+        self.assertIn("beta", new)
+
+    def test_set_session_scope_clear(self) -> None:
+        state.register_project("alpha", self.project)
+        state.set_session_scope("main", ["alpha"], mode="set")
+        result = state.set_session_scope("main", None, mode="clear")
+        self.assertIsNone(result)
+        self.assertIsNone(state.session_scope("main"))
+
+    def test_set_session_scope_unknown_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            state.set_session_scope("main", ["notregistered"], mode="set")
+
+    def test_set_session_scope_creates_minimal_record_when_no_session_dir(self) -> None:
+        state.register_project("alpha", self.project)
+        result = state.set_session_scope("orphan", ["alpha"], mode="set")
+        self.assertIn("alpha", result)
+        self.assertTrue(state.session_record_path("orphan").exists())
+
+
 class DashboardTests(_FleetHomeBase):
     def test_dashboard_rebuilt_on_task_save(self) -> None:
         state_dir = self._make_project()

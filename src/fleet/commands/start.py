@@ -277,6 +277,15 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         metavar="SEC",
         help="Hard timeout for detached prompt delivery (default: 600)",
     )
+    p.add_argument(
+        "--allow-out-of-scope",
+        action="store_true",
+        dest="allow_out_of_scope",
+        help=(
+            "Allow dispatching to a project outside the owner session's scope. "
+            "Bypasses the scope guard; use when cross-scope dispatch is intentional."
+        ),
+    )
     p.set_defaults(func=run)
 
 
@@ -391,6 +400,26 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     owner_session = _resolve_owner_session(args)
+
+    # Scope guard: block dispatch to projects outside the owner session's scope.
+    # Only applies when the session has a declared scope (unscoped ⇒ no-op).
+    # The guard runs even in --dry-run so unit tests can exercise it without tmux.
+    if not getattr(args, "allow_out_of_scope", False):
+        try:
+            _project_meta = state_mod.load_project(state_dir)
+            target_name = _project_meta.get("name") or state_dir.name
+        except FileNotFoundError:
+            target_name = state_dir.name
+        if not state_mod.in_scope(owner_session, target_name):
+            scope = state_mod.session_scope(owner_session)
+            scope_str = ", ".join(scope) if scope else ""
+            print(
+                f"error: project {target_name!r} is outside session {owner_session!r} scope "
+                f"({scope_str}); pass --allow-out-of-scope to override or run "
+                f"`fleet scope {owner_session} --add {target_name}`",
+                file=sys.stderr,
+            )
+            return 1
 
     # Load and validate formation
     try:
