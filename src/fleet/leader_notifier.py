@@ -232,8 +232,8 @@ def render_block(records: list[dict]) -> str:
         summary = (r.get("summary") or "").strip()
         if summary:
             parts.append(summary)
-        if r.get("result"):
-            parts.append(f"result={r['result']}")
+        # result= is the driver's self-reported flag, not a gate decision — omit to
+        # avoid confusion with a user_approval outcome.
         if r.get("branch"):
             parts.append(f"branch={r['branch']}")
         if r.get("worktree"):

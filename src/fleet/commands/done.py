@@ -145,6 +145,13 @@ def _maybe_notify_leader(
     if not _truthy(project.get("notify_leader_on_driver_done")):
         return
 
+    # Only notify the leader for events that require action: task completed or
+    # awaiting_orders (user_approval gate). Intermediate peer_review / multi_stage
+    # handoffs are internal driver-to-driver transfers — the leader has nothing to
+    # do until the whole stage chain reaches a terminal state.
+    if status not in ("completed", "awaiting_orders"):
+        return
+
     label = state_mod.task_owner_session(task)
     session_dir = state_mod.session_dir(label)
 
