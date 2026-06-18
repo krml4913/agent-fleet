@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from .. import dashboard as dashboard_mod
+from .. import leader_notifier
 from .. import workspace as workspace_mod
 from .. import state as state_mod
 from .. import task_context
@@ -67,7 +68,8 @@ def teardown(
 
     # Drop tmux artefacts. The driver window lives in the task's owner session
     # (``fleet-<owner_session>``, Issue #166 §5.2), not a per-project session.
-    session = f"fleet-{state_mod.task_owner_session(task)}"
+    label = state_mod.task_owner_session(task)
+    session = f"fleet-{label}"
     buffer_name = f"fleet-task-{task_id}"
     if tmux_mod.available():
         if tmux_mod.session_exists(session):
@@ -76,6 +78,15 @@ def teardown(
             except tmux_mod.TmuxError as e:
                 print(f"warn: kill_window failed: {e}", file=sys.stderr)
         tmux_mod.delete_buffer(buffer_name)
+
+    # Stale-pending guard: evict this task's queued leader notifications so a
+    # post-retirement notifier can't inject an "awaiting approval" for a task
+    # that's already merged/cleaned. The queue lives under the owner session
+    # (Issue #166 §10.3). Best-effort — a queue hiccup must not block teardown.
+    try:
+        leader_notifier.clear_task_records(state_mod.session_dir(label), task_id)
+    except Exception as e:  # noqa: BLE001 — queue errors warn, don't block
+        print(f"warn: clearing leader pending failed: {e}", file=sys.stderr)
 
     archived = False
     if archive:
