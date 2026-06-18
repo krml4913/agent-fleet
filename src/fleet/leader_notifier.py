@@ -16,6 +16,14 @@ flushes them. A non-blocking flock (`global/sessions/<label>/leader-notifier.loc
 keeps only one notifier per session live at a time so we never double-inject.
 Routing is keyed by session, not project (Issue #166 §10.3): one notifier flushes
 a session's pending notifications across every project that session spawned.
+
+A leader that stays busy past one poller's lifetime must not strand the queue.
+When the poll loop hits its deadline with records still pending and the leader
+session still alive, it re-arms: it hands off to a fresh detached notifier that
+keeps watching for the next idle boundary. Each poller stays short-lived (daemon-
+less), but the chain guarantees a busy leader is eventually caught — the queue is
+only dropped from a *retirement* path (``merge`` / ``cleanup`` call
+:func:`clear_task_records`), never silently on timeout.
 """
 from __future__ import annotations
 
@@ -161,6 +169,46 @@ def clear_records(session_dir: Path, nonces: set[str]) -> None:
     atomic_update(queue_path(session_dir), _mutate)
 
 
+def clear_task_records(session_dir: Path, task_id: str) -> int:
+    """Drop every queued record for ``task_id``; return how many were removed.
+
+    Called from the retirement path (``merge`` / ``cleanup`` teardown) so a
+    retired task can never leave a stale "awaiting approval" record that a later
+    notifier would inject. Unlike :func:`clear_records` (matched by ``nonce`` to
+    flush exactly what was injected), this matches by ``task_id`` to evict *all*
+    of a task's records at once — a multi_stage task may have several queued.
+
+    No-op when the queue is absent (returns 0, creates nothing) so teardown of a
+    task that never enqueued anything leaves no empty queue file behind.
+    """
+    path = queue_path(session_dir)
+    if not path.exists():
+        return 0
+
+    removed = 0
+
+    def _mutate(old: str) -> str:
+        nonlocal removed
+        kept: list[str] = []
+        for raw in old.splitlines():
+            stripped = raw.strip()
+            if not stripped:
+                continue
+            try:
+                rec = json.loads(stripped)
+            except json.JSONDecodeError:
+                kept.append(stripped)
+                continue
+            if rec.get("task_id") == task_id:
+                removed += 1
+                continue
+            kept.append(stripped)
+        return ("\n".join(kept) + "\n") if kept else ""
+
+    atomic_update(path, _mutate)
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Coalesced injection text
 # ---------------------------------------------------------------------------
@@ -279,9 +327,11 @@ def notify(
 ) -> int:
     """Poll the leader pane; inject the coalesced queue on the next idle boundary.
 
-    Returns 0 on a clean exit (flushed, queue empty, or leader absent/busy at
-    timeout — records stay queued for the next spawn). Never raises on tmux
-    trouble; a missing pane just leaves records queued.
+    Returns 0 on a clean exit (flushed, queue empty, or leader absent). Never
+    raises on tmux trouble; a missing pane just leaves records queued. If the
+    leader stays busy through our whole lifetime but the session is still alive
+    and records remain, we *re-arm* a successor notifier (after releasing the
+    lock) so a busy leader can never strand the queue.
     """
     session_dir = Path(session_dir)
     lock_fp = _acquire_lock(session_dir)
@@ -290,30 +340,78 @@ def notify(
         return 0
 
     try:
-        vendor, _model = agents.parse_spec(agent_spec)
-        adapter = REGISTRY[vendor]
-        deadline = time.monotonic() + max(0.0, timeout)
-
-        while time.monotonic() <= deadline:
-            if not read_queue(session_dir):
-                return 0  # nothing pending → done
-            if not tmux.session_exists(session):
-                return 0  # leader detached → leave queued, re-spawn later
-            try:
-                pane = tmux.capture_pane(session, window)
-            except tmux.TmuxError:
-                return 0  # window gone → leave queued
-
-            if adapter.ready.search(pane):
-                if _flush_once(session_dir, session, window):
-                    # Loop again: a record may have been enqueued mid-flush.
-                    continue
-                return 0  # flush failed (tmux) → leave queued
-            time.sleep(max(0.1, poll_interval))
-
-        return 0  # timed out waiting for idle → leave queued
+        rearm = _poll_until_idle(
+            session_dir=session_dir,
+            session=session,
+            window=window,
+            agent_spec=agent_spec,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
     finally:
         _release_lock(lock_fp)
+
+    if rearm:
+        # Hand off to a fresh notifier that keeps watching for the next idle
+        # boundary. Spawn only AFTER releasing the lock, or the successor would
+        # fail to acquire it and no-op immediately — leaving nothing watching.
+        try:
+            start_detached(
+                session_dir=session_dir,
+                session=session,
+                window=window,
+                agent_spec=agent_spec,
+                timeout=timeout,
+                poll_interval=poll_interval,
+            )
+        except Exception:  # noqa: BLE001 - re-arm is best-effort; queue persists
+            pass
+    return 0
+
+
+def _poll_until_idle(
+    *,
+    session_dir: Path,
+    session: str,
+    window: str,
+    agent_spec: str,
+    timeout: float,
+    poll_interval: float,
+) -> bool:
+    """Poll until the queue drains, the leader goes away, or the deadline expires.
+
+    Returns ``True`` iff the deadline expired with records still pending and the
+    leader session still alive — i.e. the leader was busy the whole time and the
+    caller should re-arm a successor. Returns ``False`` on every other terminal:
+    queue drained, leader detached, window gone, or a flush that failed on tmux
+    (left queued for the next ``done`` to re-spawn). Holds no lock itself; the
+    caller owns the session lock for our lifetime.
+    """
+    vendor, _model = agents.parse_spec(agent_spec)
+    adapter = REGISTRY[vendor]
+    deadline = time.monotonic() + max(0.0, timeout)
+
+    while time.monotonic() <= deadline:
+        if not read_queue(session_dir):
+            return False  # nothing pending → done
+        if not tmux.session_exists(session):
+            return False  # leader detached → leave queued, re-spawn later
+        try:
+            pane = tmux.capture_pane(session, window)
+        except tmux.TmuxError:
+            return False  # window gone → leave queued
+
+        if adapter.ready.search(pane):
+            if _flush_once(session_dir, session, window):
+                # Loop again: a record may have been enqueued mid-flush.
+                continue
+            return False  # flush failed (tmux) → leave queued
+        time.sleep(max(0.1, poll_interval))
+
+    # Deadline hit while still busy. Re-arm only if there is pending work AND the
+    # leader session is still alive: a dead session needs no successor (the next
+    # done / re-attach re-spawns) and an empty queue is already delivered.
+    return bool(read_queue(session_dir)) and tmux.session_exists(session)
 
 
 def _refill_pr_urls(records: list[dict]) -> None:

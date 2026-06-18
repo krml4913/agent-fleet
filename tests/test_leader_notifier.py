@@ -207,14 +207,37 @@ class LeaderNotifierTests(unittest.TestCase):
         send_keys.assert_called_once()
         self.assertIn("PR=(none yet)", send_keys.call_args[0][2])
 
+    # -- queue eviction on retirement (stale-pending guard) ----------------
+
+    def test_clear_task_records_removes_all_for_one_task(self) -> None:
+        # A multi_stage task can leave several records; retirement evicts them all
+        # at once (matched by task_id), leaving unrelated tasks untouched.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("2"))
+        removed = leader_notifier.clear_task_records(self.session_dir, "1")
+        self.assertEqual(removed, 2)
+        remaining = leader_notifier.read_queue(self.session_dir)
+        self.assertEqual([r["task_id"] for r in remaining], ["2"])
+
+    def test_clear_task_records_noop_when_queue_absent(self) -> None:
+        # No queue yet → no-op, returns 0, creates no empty queue file.
+        removed = leader_notifier.clear_task_records(self.session_dir, "1")
+        self.assertEqual(removed, 0)
+        self.assertFalse(leader_notifier.queue_path(self.session_dir).exists())
+
     # -- inject-only-on-ready ---------------------------------------------
 
-    def test_busy_leader_never_injects_keeps_queued(self) -> None:
+    def test_busy_leader_rearms_and_keeps_queued(self) -> None:
+        # A leader busy for the notifier's whole lifetime must not strand the
+        # queue: we never inject mid-turn, but we hand off to a successor so the
+        # next idle boundary is still caught.
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
             patch("fleet.leader_notifier.tmux.capture_pane", return_value=BUSY_PANE),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            patch("fleet.leader_notifier.start_detached") as rearm,
         ):
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
@@ -226,7 +249,33 @@ class LeaderNotifierTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         send_keys.assert_not_called()  # never mid-turn
+        rearm.assert_called_once()  # handed off to a successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # still queued
+
+    def test_busy_then_idle_eventually_injects(self) -> None:
+        # The strand bug fixed: a leader busy at first still gets the queue once
+        # it goes idle. Within one process, polling rides through busy turns and
+        # flushes on the first idle boundary — no successor needed.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        panes = [BUSY_PANE, BUSY_PANE, READY_PANE]
+        with (
+            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
+            patch("fleet.leader_notifier.tmux.capture_pane", side_effect=panes),
+            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            rc = leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=5.0,
+                poll_interval=0.001,
+            )
+        self.assertEqual(rc, 0)
+        send_keys.assert_called_once()  # flushed on the idle boundary
+        rearm.assert_not_called()  # delivered → no successor
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
 
     def test_idle_leader_injects_once_coalesced_and_clears(self) -> None:
         leader_notifier.enqueue(self.session_dir, self._record("1"))
@@ -264,6 +313,7 @@ class LeaderNotifierTests(unittest.TestCase):
         with (
             patch("fleet.leader_notifier.tmux.session_exists", return_value=False),
             patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            patch("fleet.leader_notifier.start_detached") as rearm,
         ):
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
@@ -275,6 +325,7 @@ class LeaderNotifierTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         send_keys.assert_not_called()
+        rearm.assert_not_called()  # dead session needs no successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
 
     def test_empty_queue_is_noop(self) -> None:

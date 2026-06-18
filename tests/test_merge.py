@@ -329,6 +329,32 @@ class TeardownHelperTests(unittest.TestCase):
         self.assertFalse(archived)
         self.assertTrue((self.state_dir / "tasks" / "task-1").exists())
 
+    def test_teardown_clears_pending_leader_notifications(self) -> None:
+        # Retiring a task evicts its queued leader notifications (stale-pending
+        # guard) so a later notifier can't inject an "awaiting approval" for an
+        # already-merged task. Shared by both merge and cleanup via teardown.
+        from fleet import leader_notifier
+
+        fleet_home = Path(self._tmp.name) / "fleet-home"
+        with patch.dict(os.environ, {"FLEET_HOME": str(fleet_home)}, clear=False):
+            session_dir = state.session_dir("demo")  # owner_session on the task
+            for tid in ("1", "1", "2"):  # task 1 may have several queued records
+                leader_notifier.enqueue(
+                    session_dir,
+                    leader_notifier.build_record(
+                        state_dir=self.state_dir, task_id=tid, status="completed",
+                        branch=f"demo/task/{tid}", worktree=f"/wt/{tid}",
+                        summary=f"task-{tid} done",
+                    ),
+                )
+            task = state.load_task(self.state_dir, "1")
+            with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
+                mock_tmux.available.return_value = False
+                cleanup_mod.teardown(self.state_dir, "1", task, archive=False)
+
+            remaining = leader_notifier.read_queue(session_dir)
+        self.assertEqual([r["task_id"] for r in remaining], ["2"])  # unrelated survives
+
 
 class DeleteRemoteBranchTests(unittest.TestCase):
     """``_delete_remote_branch`` classifies push --delete failures."""
