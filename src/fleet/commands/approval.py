@@ -40,6 +40,15 @@ def _add_task_id(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Task id (default: derived from cwd or FLEET_TASK_ID)",
     )
+    p.add_argument(
+        "--project",
+        default=".",
+        metavar="NAME",
+        help=(
+            "Project name (registry). Required from a project-agnostic leader "
+            "session; defaults to cwd / FLEET_STATE_DIR resolution otherwise."
+        ),
+    )
 
 
 def run_approve(args: argparse.Namespace) -> int:
@@ -51,8 +60,13 @@ def run_reject(args: argparse.Namespace) -> int:
 
 
 def _run(args: argparse.Namespace, *, approved: bool) -> int:
+    project_arg = getattr(args, "project", ".")
+    project_name = project_arg if project_arg != "." else None
     try:
-        state_dir, task_id = task_context.resolve(explicit_id=args.task_id)
+        state_dir, task_id = task_context.resolve(
+            explicit_id=args.task_id,
+            project_name=project_name,
+        )
     except task_context.TaskNotFound as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

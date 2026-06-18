@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet import state  # noqa: E402
 from fleet.commands import cleanup as cleanup_mod  # noqa: E402
 from fleet.commands import merge as merge_mod  # noqa: E402
+from tests._fleet_test_helpers import make_project  # noqa: E402
 
 
 def _ok(*_a, **_k) -> subprocess.CompletedProcess:
@@ -51,7 +52,8 @@ class MergeCmdTests(unittest.TestCase):
     def _args(self, task_id: str, **over) -> MagicMock:
         args = MagicMock()
         args.task_id = task_id
-        args.project = str(self.project)
+        # "." → resolve via FLEET_STATE_DIR (set per-test), not by registry name.
+        args.project = "."
         args.squash = False
         args.keep = False
         args.force = False
@@ -198,6 +200,58 @@ class MergeCmdTests(unittest.TestCase):
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False):
             rc = merge_mod.run(self._args("999"))
         self.assertEqual(rc, 1)
+
+
+class MergeLeaderProjectTests(unittest.TestCase):
+    """Phase 6: ``merge --project <name>`` resolves cross-project from a leader
+    pane (FLEET_STATE_DIR = the session dir, which owns no tasks/)."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.fleet_home = base / "fleet-state"
+        self.fleet_home.mkdir()
+        self.repo = base / "repo"
+        self.repo.mkdir()
+        self._old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "demo", self.repo)
+        self.session_dir = state.session_dir("main")
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        state.save_task(self.state_dir, "1", {
+            "id": "1", "title": "t1", "status": "completed",
+            "agent": "claude:sonnet", "workspace": "none",
+            "owner_session": "main", "branch": "demo/task/1",
+        })
+
+    def tearDown(self) -> None:
+        if self._old is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old
+        self._tmp.cleanup()
+
+    def _args(self, **over) -> MagicMock:
+        args = MagicMock()
+        args.task_id = "1"
+        args.project = "demo"
+        args.squash = False
+        args.keep = True
+        args.force = False
+        for k, v in over.items():
+            setattr(args, k, v)
+        return args
+
+    def test_merge_resolves_by_project_over_session_state_dir(self) -> None:
+        with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.session_dir)}, clear=False), \
+                patch("fleet.commands.merge.subprocess.run", side_effect=_ok), \
+                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = False
+            rc = merge_mod.run(self._args())
+        self.assertEqual(rc, 0)
+        events = [json.loads(l) for l in
+                  (self.state_dir / "events.jsonl").read_text().splitlines() if l]
+        self.assertTrue(any(e["type"] == "merge" for e in events))
 
 
 class TeardownHelperTests(unittest.TestCase):
