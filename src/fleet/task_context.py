@@ -32,6 +32,14 @@ class TaskNotFound(RuntimeError):
     """Raised when a task id can't be determined from any source."""
 
 
+class ProjectNotFound(RuntimeError):
+    """Raised when a project state dir can't be resolved (no task id needed)."""
+
+
+class _Unresolved(Exception):
+    """Internal: raised by _resolve_state_dir_core when state-dir resolution fails."""
+
+
 def resolve(
     *,
     explicit_id: str | None = None,
@@ -58,18 +66,19 @@ def resolve(
     return state_dir, task_id
 
 
-def _resolve_state_dir(here: Path, project_name: str | None) -> Path:
-    """Resolve the project state dir for a task-centric command.
+def _resolve_state_dir_core(here: Path, project_name: str | None) -> Path:
+    """Shared 3-step state-dir resolution used by task- and project-centric commands.
 
-    Raises :class:`TaskNotFound` with a message that points at ``--project``
-    when nothing resolves.
+    Raises :class:`_Unresolved` when nothing resolves. The message is reused
+    verbatim by both :func:`_resolve_state_dir` (raises :class:`TaskNotFound`)
+    and :func:`resolve_project_state_dir` (raises :class:`ProjectNotFound`).
     """
     # 1. Explicit --project: registry by name, ignoring FLEET_STATE_DIR / cwd
-    #    (the leader path — design §5.3 priority 1).
+    #    (the leader path — design §5.3 priority 1; Issue #166 Phase 6).
     if project_name is not None:
         state_dir = state_mod.resolve_state_dir(here, project_name=project_name)
         if state_dir is None:
-            raise TaskNotFound(
+            raise _Unresolved(
                 f"no registered project named {project_name!r} "
                 f"(see `fleet status --all`)"
             )
@@ -82,8 +91,8 @@ def _resolve_state_dir(here: Path, project_name: str | None) -> Path:
         if _is_session_dir(candidate):
             # A project-agnostic leader pane points FLEET_STATE_DIR at its
             # session dir, which has no tasks/. The cwd fallbacks must not apply
-            # for a leader (design §5.3) — name the project instead.
-            raise TaskNotFound(
+            # for a leader — name the project explicitly instead.
+            raise _Unresolved(
                 f"FLEET_STATE_DIR is the leader session dir {candidate.name!r}, "
                 f"which owns no tasks; pass --project <name> to name the target "
                 f"project"
@@ -94,11 +103,50 @@ def _resolve_state_dir(here: Path, project_name: str | None) -> Path:
     # 3. Ad-hoc human use: resolve from cwd via the registry.
     state_dir = state_mod.resolve_state_dir(here)
     if state_dir is None:
-        raise TaskNotFound(
+        raise _Unresolved(
             f"no registered project found for {here.resolve()} "
             f"(pass --project <name>)"
         )
     return state_dir
+
+
+def _resolve_state_dir(here: Path, project_name: str | None) -> Path:
+    """Resolve the project state dir for a task-centric command.
+
+    Raises :class:`TaskNotFound` with a message that points at ``--project``
+    when nothing resolves.
+    """
+    try:
+        return _resolve_state_dir_core(here, project_name)
+    except _Unresolved as exc:
+        raise TaskNotFound(str(exc)) from exc
+
+
+def resolve_project_state_dir(
+    *,
+    project_name: str | None = None,
+    cwd: Path | None = None,
+) -> Path:
+    """Resolve a project's state dir for a *project-centric* command.
+
+    Session-aware, mirroring :func:`resolve`'s state-dir logic without
+    requiring a task id:
+
+    1. ``project_name`` (from ``--project``) → registry by name, ignoring
+       ``FLEET_STATE_DIR`` / cwd. Unknown name → :class:`ProjectNotFound`.
+    2. ``FLEET_STATE_DIR`` — if it is a leader **session dir**, refuse and
+       point at ``--project``; else, if a real dir, use it.
+    3. cwd via the registry (ad-hoc human use), else :class:`ProjectNotFound`
+       pointing at ``--project``.
+
+    Never returns ``None`` and never silently resolves to the ``fleet``
+    project from a leader pane.
+    """
+    here = Path(cwd) if cwd is not None else Path.cwd()
+    try:
+        return _resolve_state_dir_core(here, project_name)
+    except _Unresolved as exc:
+        raise ProjectNotFound(str(exc)) from exc
 
 
 def _is_session_dir(path: Path) -> bool:

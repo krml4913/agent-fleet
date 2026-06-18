@@ -19,6 +19,7 @@ from .. import prompt_deliverer
 from .. import workspace as workspace_mod
 from .. import prompt_pointer
 from .. import state as state_mod
+from .. import task_context
 from .. import formation as formation_mod
 from .. import tmux as tmux_mod
 from ..events import append_event
@@ -185,7 +186,7 @@ def launch_stage_driver(
     if auto_paste:
         print(f"prompt:        deliverer detached (log: {log_path})")
     if not auto_paste:
-        print(f"paste pointer: inside the pane press C-b ], then Enter")
+        print("paste pointer: inside the pane press C-b ], then Enter")
         print(f"           or: fleet-agent send-prompt {task_id}")
     return 0
 
@@ -214,7 +215,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project name (default: resolved from cwd via registry)",
+        help=(
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd"
+        ),
     )
     p.add_argument(
         "--session",
@@ -366,8 +370,9 @@ def run(args: argparse.Namespace) -> int:
         inferred_name = _infer_project_from_promptfile(prompt_file)
 
     resolve_name = project_name or inferred_name
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=resolve_name)
-    if state_dir is None:
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=resolve_name)
+    except task_context.ProjectNotFound as e:
         if inferred_name is not None:
             # Inferred a project from the prompt-file path that isn't registered.
             # Fail loudly rather than silently falling back to the cwd project.
@@ -377,10 +382,7 @@ def run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         else:
-            print(
-                f"error: no registered project found for {project_arg!r}",
-                file=sys.stderr,
-            )
+            print(f"error: {e}", file=sys.stderr)
         return 1
 
     task_dir_path = state_mod.task_dir(state_dir, args.task_id)

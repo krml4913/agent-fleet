@@ -130,5 +130,73 @@ class TaskContextTests(unittest.TestCase):
         self.assertIn("--project", str(cm.exception))
 
 
+class ResolveProjectStateDirTests(unittest.TestCase):
+    """Tests for :func:`task_context.resolve_project_state_dir`."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "demo", self.project)
+        self._saved_state_dir = os.environ.pop("FLEET_STATE_DIR", None)
+
+    def tearDown(self) -> None:
+        if self._saved_state_dir is not None:
+            os.environ["FLEET_STATE_DIR"] = self._saved_state_dir
+        else:
+            os.environ.pop("FLEET_STATE_DIR", None)
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def test_explicit_project_name_resolves(self) -> None:
+        sd = task_context.resolve_project_state_dir(project_name="demo")
+        self.assertEqual(sd, self.state_dir.resolve())
+
+    def test_explicit_project_name_ignores_fleet_state_dir(self) -> None:
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        sd = task_context.resolve_project_state_dir(
+            project_name="demo", cwd=Path("/tmp")
+        )
+        self.assertEqual(sd, self.state_dir.resolve())
+
+    def test_unknown_project_name_raises(self) -> None:
+        with self.assertRaises(task_context.ProjectNotFound) as cm:
+            task_context.resolve_project_state_dir(project_name="nope")
+        self.assertIn("nope", str(cm.exception))
+
+    def test_leader_session_dir_raises(self) -> None:
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        with self.assertRaises(task_context.ProjectNotFound) as cm:
+            task_context.resolve_project_state_dir(cwd=Path("/tmp"))
+        self.assertIn("--project", str(cm.exception))
+
+    def test_cwd_fallback_resolves_registered_project(self) -> None:
+        sd = task_context.resolve_project_state_dir(cwd=self.project)
+        self.assertEqual(sd, self.state_dir.resolve())
+
+    def test_cwd_fallback_with_no_project_raises(self) -> None:
+        unregistered = Path(self._tmp.name) / "other"
+        unregistered.mkdir()
+        with self.assertRaises(task_context.ProjectNotFound) as cm:
+            task_context.resolve_project_state_dir(cwd=unregistered)
+        self.assertIn("--project", str(cm.exception))
+
+    def test_fleet_state_dir_non_session_used(self) -> None:
+        os.environ["FLEET_STATE_DIR"] = str(self.state_dir)
+        sd = task_context.resolve_project_state_dir(cwd=Path("/tmp"))
+        self.assertEqual(sd, self.state_dir.resolve())
+
+
 if __name__ == "__main__":
     unittest.main()

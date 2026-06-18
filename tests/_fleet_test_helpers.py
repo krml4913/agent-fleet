@@ -54,6 +54,7 @@ def run_fleet(*args: str, fleet_home: Path | None = None, cwd: Path | None = Non
     FLEET = ROOT / "fleet"
     env = os.environ.copy()
     env.pop("FLEET_TASK_ID", None)
+    env.pop("FLEET_STATE_DIR", None)  # prevent leader-pane env leaking into tests
     if fleet_home is not None:
         env["FLEET_HOME"] = str(fleet_home)
     if env_extra:
@@ -73,6 +74,7 @@ def run_fleet_agent(*args: str, fleet_home: Path | None = None, cwd: Path | None
     FLEET_AGENT = ROOT / "fleet-agent"
     env = os.environ.copy()
     env.pop("FLEET_TASK_ID", None)
+    env.pop("FLEET_STATE_DIR", None)  # prevent leader-pane env leaking into tests
     if fleet_home is not None:
         env["FLEET_HOME"] = str(fleet_home)
     if env_extra:

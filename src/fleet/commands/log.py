@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-from .. import state as state_mod
+from .. import task_context
 from ..events import read_events
 
 
@@ -24,7 +23,14 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         default=None,
         help="Filter by task id (default: all tasks)",
     )
-    p.add_argument("--project", default=".", help="Project name (default: resolved from cwd)")
+    p.add_argument(
+        "--project",
+        default=".",
+        help=(
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd"
+        ),
+    )
     p.add_argument(
         "-n",
         "--lines",
@@ -45,12 +51,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 def run(args: argparse.Namespace) -> int:
     project_name = args.project if args.project != "." else None
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-    if state_dir is None:
-        print(
-            f"error: no registered project found for {args.project!r}",
-            file=sys.stderr,
-        )
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     events = read_events(state_dir / "events.jsonl")

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from .. import prompt_deliverer
 from .. import state as state_mod
+from .. import task_context
 from .. import tmux as tmux_mod
 
 
@@ -26,7 +26,14 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         ),
     )
     p.add_argument("task_id", help="Task id")
-    p.add_argument("--project", default=".", help="Project name (default: resolved from cwd)")
+    p.add_argument(
+        "--project",
+        default=".",
+        help=(
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd"
+        ),
+    )
     p.add_argument(
         "--prompt-timeout",
         type=float,
@@ -39,12 +46,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 def run(args: argparse.Namespace) -> int:
     project_name = args.project if args.project != "." else None
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-    if state_dir is None:
-        print(
-            f"error: no registered project found for {args.project!r}",
-            file=sys.stderr,
-        )
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     if not tmux_mod.available():

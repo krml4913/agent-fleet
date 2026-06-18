@@ -10,8 +10,8 @@ from pathlib import Path
 from .. import heartbeat
 from .. import leader_notifier
 from .. import state as state_mod
+from .. import task_context
 from ..events import read_events
-from ..state import load_registry, project_state_dir
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -30,7 +30,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "name",
         nargs="?",
         default=None,
-        help="Project name (default: resolved from cwd via registry)",
+        help=(
+            "Project name — back-compat alias for --project in table mode "
+            "(default: resolved from FLEET_STATE_DIR / cwd via registry)"
+        ),
     )
     p.add_argument(
         "--all",
@@ -66,9 +69,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         default=None,
         metavar="NAME",
         help=(
-            "Project name for --json mode (default: resolved from cwd via "
-            "registry). Lets a leader invoke status by absolute path from "
-            "another repo."
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd. In table mode "
+            "the positional argument is a back-compat alias."
         ),
     )
     p.set_defaults(func=run)
@@ -81,14 +84,25 @@ def run(args: argparse.Namespace) -> int:
     if getattr(args, "all_projects", False):
         return _run_all(args)
 
-    project_name = getattr(args, "name", None)
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-    if state_dir is None:
+    # --project is canonical; the positional name is a back-compat alias in
+    # table mode. Conflict (both given, different values) → error.
+    flag = getattr(args, "project", None)
+    pos = getattr(args, "name", None)
+    if flag and pos and flag != pos:
         print(
-            f"error: no registered project found for {project_name!r}" if project_name
-            else "error: no registered project found for cwd",
+            f"error: project given twice and they differ: "
+            f"{pos!r} vs --project {flag!r}",
             file=sys.stderr,
         )
+        return 1
+    project_name = flag or pos
+
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
+        if project_name is None:
+            print("  use --project <name> or --all", file=sys.stderr)
         return 1
 
     project = state_mod.load_project(state_dir)
@@ -223,13 +237,10 @@ def _run_json(args: argparse.Namespace) -> int:
         return 1
 
     project_name = getattr(args, "project", None)
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-    if state_dir is None:
-        print(
-            f"error: no registered project found for {project_name!r}" if project_name
-            else "error: no registered project found for cwd",
-            file=sys.stderr,
-        )
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     try:
