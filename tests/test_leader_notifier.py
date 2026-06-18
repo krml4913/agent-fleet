@@ -131,6 +131,15 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertIn("pull the diff", block)
         self.assertIn("completed+merged", block)
 
+    def test_render_block_does_not_include_driver_result(self) -> None:
+        """render_block must not expose the driver's self-reported result= flag.
+
+        Showing ``result=approved`` alongside a gate event misleads the leader into
+        thinking the user_approval gate has already been decided.
+        """
+        block = leader_notifier.render_block([self._record("1", result="approved")])
+        self.assertNotIn("result=", block)
+
     # -- inject-time PR-URL re-scan (per-record project) ------------------
 
     def test_refill_fills_missing_pr_url_found_at_inject_time(self) -> None:
@@ -397,6 +406,23 @@ class DoneHookTests(unittest.TestCase):
         else:
             os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
+
+    def test_intermediate_handoff_does_not_enqueue(self) -> None:
+        """An intermediate stage transition (status=running) must not notify the leader.
+
+        implementer→code-reviewer and code-reviewer→implementer handoffs are
+        internal driver-to-driver events; the leader has nothing to act on.
+        Only completed and awaiting_orders reach the leader.
+        """
+        project = {"name": "demo", "notify_leader_on_driver_done": "true"}
+        with patch("fleet.leader_notifier.start_detached") as spawn:
+            done_cmd._maybe_notify_leader(
+                self.state_dir, self.task_id, self.task, project, "demo",
+                status="running", result="approved",
+                summary="task-1 stage 1 done → next stage (code-reviewer) starting",
+            )
+        spawn.assert_not_called()
+        self.assertFalse(leader_notifier.queue_path(self.session_dir).exists())
 
     def test_truthy_parsing(self) -> None:
         for v in ("true", "True", "1", "yes", "on", "  TRUE "):

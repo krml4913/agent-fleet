@@ -7,6 +7,20 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: suppress noisy intermediate-handoff notifications to the leader pane
+
+`notify_leader_on_driver_done` fired on every `fleet-agent done`, including
+internal `implementer ↔ code-reviewer` handoffs inside a `pair_review` or
+`multi_stage` task. This caused the leader to investigate false gates repeatedly.
+
+- Leader notifications are now limited to terminal events: task **completed** and
+  **awaiting_orders** (user_approval gate). Intermediate stage transitions
+  (`status=running`) are silently skipped.
+- `render_block` no longer emits `result=approved` in the injected text. That
+  field was the driver's self-reported `--result` flag, which looked like a gate
+  approval decision and was misleading.
+- Regression tests added for both changes.
+
 ### fix: archive collision no longer strands the live task dir
 
 `fleet-agent cleanup --archive` (and `merge`, which shares the same teardown)
