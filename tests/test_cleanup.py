@@ -92,7 +92,8 @@ class CleanupCmdTests(unittest.TestCase):
         mock_tmux.TmuxError = Exception
         args = MagicMock()
         args.task_id = "stage-transition"
-        args.project = str(self.project)
+        # "." → resolve via FLEET_STATE_DIR (patched below), not registry name.
+        args.project = "."
         args.archive = False
         args.force = False
 

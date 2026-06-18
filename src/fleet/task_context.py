@@ -1,13 +1,22 @@
 """Resolve which task a driver-side CLI call is acting on.
 
-Resolution priority:
+Task-id resolution priority:
   1. Explicit ``--task-id`` argument (most explicit, wins)
   2. ``FLEET_TASK_ID`` environment variable (set by spawn into the pane)
   3. ``cwd`` inspection — walk parents looking for ``<state>/tasks/task-<id>/``
 
 State-dir resolution:
-  - ``FLEET_STATE_DIR`` env var (always set in spawned driver panes) wins
-    over cwd-based discovery, so commands work from any working directory.
+  - ``--project <name>`` (``project_name``) wins outright: resolve the project
+    by registry name, **ignoring** ``FLEET_STATE_DIR`` and cwd. This is the
+    leader path — a project-agnostic leader pane names its project explicitly
+    (design §5.3 priority 1; Issue #166 Phase 6).
+  - Otherwise ``FLEET_STATE_DIR`` (always set in spawned driver panes) wins
+    over cwd-based discovery, so driver commands work from any working
+    directory — **except** when it points at a project-agnostic leader session
+    dir (``global/sessions/<label>/``), which carries no ``tasks/``: that is the
+    signal of a leader pane, so we refuse rather than dead-end and tell the
+    caller to pass ``--project``.
+  - Failing both, fall back to registry resolution from cwd (ad-hoc human use).
 
 If none of those produce an id, :class:`TaskNotFound` is raised.
 """
@@ -27,25 +36,16 @@ def resolve(
     *,
     explicit_id: str | None = None,
     cwd: Path | None = None,
+    project_name: str | None = None,
 ) -> tuple[Path, str]:
-    """Return ``(state_dir, task_id)`` for the current invocation."""
+    """Return ``(state_dir, task_id)`` for the current invocation.
+
+    *project_name* (from ``--project``) selects the project by registry name and
+    overrides every cwd / ``FLEET_STATE_DIR`` heuristic — the leader path. When
+    absent, the driver / ad-hoc fallbacks apply (``FLEET_STATE_DIR`` then cwd).
+    """
     here = Path(cwd) if cwd is not None else Path.cwd()
-
-    # FLEET_STATE_DIR wins (always set in spawned driver panes).
-    state_dir: Path | None = None
-    env_state_dir = os.environ.get("FLEET_STATE_DIR")
-    if env_state_dir:
-        candidate = Path(env_state_dir)
-        state_dir = candidate if candidate.is_dir() else None
-
-    # Fall back to registry-based resolution from cwd.
-    if state_dir is None:
-        state_dir = state_mod.resolve_state_dir(here)
-
-    if state_dir is None:
-        raise TaskNotFound(
-            f"no registered project found for {here.resolve()}"
-        )
+    state_dir = _resolve_state_dir(here, project_name)
 
     task_id = explicit_id or os.environ.get("FLEET_TASK_ID")
     if task_id is None:
@@ -56,6 +56,63 @@ def resolve(
             "(pass --task-id, set FLEET_TASK_ID, or run inside a task dir)"
         )
     return state_dir, task_id
+
+
+def _resolve_state_dir(here: Path, project_name: str | None) -> Path:
+    """Resolve the project state dir for a task-centric command.
+
+    Raises :class:`TaskNotFound` with a message that points at ``--project``
+    when nothing resolves.
+    """
+    # 1. Explicit --project: registry by name, ignoring FLEET_STATE_DIR / cwd
+    #    (the leader path — design §5.3 priority 1).
+    if project_name is not None:
+        state_dir = state_mod.resolve_state_dir(here, project_name=project_name)
+        if state_dir is None:
+            raise TaskNotFound(
+                f"no registered project named {project_name!r} "
+                f"(see `fleet status --all`)"
+            )
+        return state_dir
+
+    # 2. FLEET_STATE_DIR (the driver pane's project state dir).
+    env_state_dir = os.environ.get("FLEET_STATE_DIR")
+    if env_state_dir:
+        candidate = Path(env_state_dir)
+        if _is_session_dir(candidate):
+            # A project-agnostic leader pane points FLEET_STATE_DIR at its
+            # session dir, which has no tasks/. The cwd fallbacks must not apply
+            # for a leader (design §5.3) — name the project instead.
+            raise TaskNotFound(
+                f"FLEET_STATE_DIR is the leader session dir {candidate.name!r}, "
+                f"which owns no tasks; pass --project <name> to name the target "
+                f"project"
+            )
+        if candidate.is_dir():
+            return candidate
+
+    # 3. Ad-hoc human use: resolve from cwd via the registry.
+    state_dir = state_mod.resolve_state_dir(here)
+    if state_dir is None:
+        raise TaskNotFound(
+            f"no registered project found for {here.resolve()} "
+            f"(pass --project <name>)"
+        )
+    return state_dir
+
+
+def _is_session_dir(path: Path) -> bool:
+    """Return True when *path* is a ``global/sessions/<label>/`` session dir.
+
+    Detected structurally (parent is ``global/sessions/``) so it holds even
+    before ``session.json`` is written. This is how a project-agnostic leader
+    pane is told apart from a driver pane: the leader's ``FLEET_STATE_DIR`` is
+    its session dir, not a project state dir.
+    """
+    try:
+        return path.resolve().parent == state_mod.global_sessions_dir().resolve()
+    except (OSError, ValueError):
+        return False
 
 
 def _from_cwd(cwd: Path, state_dir: Path) -> str | None:

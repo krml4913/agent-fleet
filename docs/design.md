@@ -628,7 +628,7 @@ per-stage `role` required check. Further structural validation (e.g. the
 |---|---|
 | `--formation <name>` explicit | load `<state>/formations/<name>.yaml`. Absence is an error (no template fallback) |
 | omitted + 1 file in formations/ | auto-adopt that one |
-| omitted + formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from `<state>/leader-session.json` |
+| omitted + formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6) |
 | omitted + 2+ files in formations/ | ambiguity error (prompts to pass `--formation <name>`) |
 
 ---

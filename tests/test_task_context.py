@@ -93,6 +93,42 @@ class TaskContextTests(unittest.TestCase):
         self.assertEqual(sd, self.state_dir.resolve())
         self.assertEqual(tid, "99")
 
+    # -- Phase 6: --project (leader path) ----------------------------------
+
+    def test_project_name_resolves_by_registry(self) -> None:
+        sd, tid = task_context.resolve(
+            explicit_id="7", cwd=Path("/tmp"), project_name="demo"
+        )
+        self.assertEqual(sd, self.state_dir.resolve())
+        self.assertEqual(tid, "7")
+
+    def test_project_name_wins_over_fleet_state_dir(self) -> None:
+        # Leader pane: FLEET_STATE_DIR is the session dir, but --project names
+        # the real project and must override it.
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        sd, tid = task_context.resolve(
+            explicit_id="7", cwd=Path("/tmp"), project_name="demo"
+        )
+        self.assertEqual(sd, self.state_dir.resolve())
+        self.assertEqual(tid, "7")
+
+    def test_unknown_project_name_raises(self) -> None:
+        with self.assertRaises(task_context.TaskNotFound) as cm:
+            task_context.resolve(explicit_id="7", project_name="nope")
+        self.assertIn("nope", str(cm.exception))
+
+    def test_session_dir_state_dir_demands_project(self) -> None:
+        # FLEET_STATE_DIR = a leader session dir, no --project → clear error
+        # that points at --project (no silent cwd fallback for the leader path).
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        with self.assertRaises(task_context.TaskNotFound) as cm:
+            task_context.resolve(explicit_id="7", cwd=Path("/tmp"))
+        self.assertIn("--project", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

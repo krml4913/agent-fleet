@@ -112,7 +112,15 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         default=None,
         help="Task id (default: derived from cwd or FLEET_TASK_ID)",
     )
-    p.add_argument("--project", default=".", help="Project path (default: cwd)")
+    p.add_argument(
+        "--project",
+        default=".",
+        metavar="NAME",
+        help=(
+            "Project name (registry). Required from a project-agnostic leader "
+            "session; defaults to cwd / FLEET_STATE_DIR resolution otherwise."
+        ),
+    )
     p.add_argument(
         "--archive",
         action="store_true",
@@ -127,10 +135,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    project_arg = getattr(args, "project", ".")
+    project_name = project_arg if project_arg != "." else None
     try:
         state_dir, task_id = task_context.resolve(
             explicit_id=args.task_id,
-            cwd=Path(args.project),
+            project_name=project_name,
         )
     except task_context.TaskNotFound as e:
         print(f"error: {e}", file=sys.stderr)

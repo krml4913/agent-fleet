@@ -56,9 +56,10 @@ Commands (`fleet-agent`):
     start <id> "<desc>" --project <name> [--formation T] [--agent A]  — spawn a task
     start <id> --prompt-file PATH --project <name> [--formation T] [--agent A]
     inbox <id> "<msg>" --project <name>   — instruct a driver
-    cleanup <id> [--archive]              — retire a finished task
+    cleanup <id> --project <name> [--archive]  — retire a finished task
+    merge <id> --project <name> [--squash]     — merge a finished task's PR, then retire it
     send-prompt <id> --project <name>     — re-paste driver prompt pointer
-    approve <id> / reject <id>            — relay user approval gates
+    approve <id> --project <name> / reject <id> --project <name>  — relay user approval gates
   `ask` / `event emit` / `done` are driver-only — you never call them.
   `fleet ...` (status / log / attach / sessions / formation / preflight) is the
   read-only user-facing CLI — use it when asked, never poll on a timer.

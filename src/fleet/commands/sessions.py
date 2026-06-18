@@ -1,0 +1,168 @@
+"""``fleet sessions`` — read-only view of leader sessions and their work.
+
+Lists every known leader session (``global/sessions/<label>/session.json``,
+Issue #166 §5.6) cross-referenced with tmux for liveness, and — per session —
+its **in-flight tasks**: a scan of ``task.yaml`` across all registered projects
+for ``owner_session == label`` with a non-terminal status.
+
+On-demand read only (design principle 7 — no polling, no state writes). A task
+with no ``owner_session`` is attributed to ``main`` (the default label), matching
+:func:`fleet.state.task_owner_session`, so cutover-era tasks never disappear.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from . import cleanup as cleanup_mod
+from .. import state as state_mod
+from .. import tmux as tmux_mod
+
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+
+
+def add_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "sessions",
+        help="List leader sessions and their in-flight tasks",
+        description=(
+            "Show every known leader session (label → tmux pane + agent) with a "
+            "live/stale marker, and each session's in-flight tasks scanned across "
+            "all projects by owner_session. Read-only; never writes state."
+        ),
+    )
+    p.set_defaults(func=run)
+
+
+def run(args: argparse.Namespace) -> int:
+    use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+    records = _load_session_records()
+    tasks_by_label = _scan_inflight_tasks()
+
+    # Union: every session with a record, plus every label some in-flight task
+    # claims (a session may own work without a record — or vice versa).
+    labels = sorted(set(records) | set(tasks_by_label))
+
+    print(_style(f"SESSIONS  {len(labels)}", _BOLD, use_color))
+    if not labels:
+        print("  (no leader sessions)")
+        return 0
+
+    tmux_ok = tmux_mod.available()
+    for label in labels:
+        record = records.get(label)
+        tasks = tasks_by_label.get(label, [])
+        live = _liveness(label, tmux_ok)
+
+        print()
+        bullet = _style("●", _GREEN if live is True else _DIM, use_color)
+        live_cell = {True: "live", False: "stale", None: "?"}[live]
+        agent = (record or {}).get("agent", "—")
+        pane = (record or {}).get("pane", f"fleet-{label}:leader")
+        since = _short_date((record or {}).get("started_at", ""))
+        header = f"{bullet} {_style(label, _BOLD, use_color)}  ({live_cell})  {agent}  {pane}"
+        if since:
+            header += f"  since {since}"
+        if record is None:
+            header += _style("  [no session record]", _YELLOW, use_color)
+        print(header)
+
+        if not tasks:
+            print(_style("    (no in-flight tasks)", _DIM, use_color))
+            continue
+        id_width = max(len(f"task-{t['id']}") for t in tasks)
+        proj_width = max(len(t["project"]) for t in tasks)
+        status_width = max(len(t["status"]) for t in tasks)
+        for t in tasks:
+            print(
+                "    {proj:<{pw}}  {tid:<{iw}}  {status:<{sw}}  {title}".format(
+                    proj=t["project"],
+                    pw=proj_width,
+                    tid=f"task-{t['id']}",
+                    iw=id_width,
+                    status=t["status"],
+                    sw=status_width,
+                    title=t["title"],
+                ).rstrip()
+            )
+
+    return 0
+
+
+def _liveness(label: str, tmux_ok: bool) -> bool | None:
+    """Return True (live), False (stale), or None (tmux unavailable → unknown)."""
+    if not tmux_ok:
+        return None
+    return tmux_mod.session_exists(f"fleet-{label}")
+
+
+def _load_session_records() -> dict[str, dict]:
+    """Map session label → its ``session.json`` record (dir name is the key).
+
+    A missing or unparseable record yields an empty dict for that label so the
+    session still appears in the listing.
+    """
+    out: dict[str, dict] = {}
+    sessions_root = state_mod.global_sessions_dir()
+    if not sessions_root.is_dir():
+        return out
+    for child in sorted(sessions_root.iterdir()):
+        if not child.is_dir():
+            continue
+        rec_path = child / state_mod.SESSION_RECORD_NAME
+        if not rec_path.is_file():
+            continue
+        try:
+            data = json.loads(rec_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        out[child.name] = data if isinstance(data, dict) else {}
+    return out
+
+
+def _scan_inflight_tasks() -> dict[str, list[dict]]:
+    """Map owner-session label → its non-terminal tasks across all projects.
+
+    Each task entry is ``{project, id, status, title}``. A missing/empty
+    ``owner_session`` defaults to ``main`` (:func:`state.task_owner_session`).
+    """
+    by_label: dict[str, list[dict]] = {}
+    reg = state_mod.load_registry()
+    for name in sorted(reg.get("projects", {})):
+        state_dir = state_mod.project_state_dir(name)
+        if not state_dir.is_dir():
+            continue
+        for task in state_mod.list_tasks(state_dir):
+            status = str(task.get("status", "?"))
+            if status in cleanup_mod.TERMINAL_STATUSES:
+                continue
+            label = state_mod.task_owner_session(task)
+            by_label.setdefault(label, []).append(
+                {
+                    "project": name,
+                    "id": str(task.get("id", "?")),
+                    "status": status,
+                    "title": str(task.get("title") or "-"),
+                }
+            )
+    return by_label
+
+
+def _style(text: str, code: str, enabled: bool) -> str:
+    if not enabled or not code:
+        return text
+    return f"{code}{text}{_RESET}"
+
+
+def _short_date(value: str) -> str:
+    if isinstance(value, str) and len(value) >= 10:
+        return value[:10]
+    return ""
