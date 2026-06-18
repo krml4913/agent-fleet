@@ -42,6 +42,7 @@ GLOBAL_SUBDIR = "global"
 LEADER_MEMORY_SUBDIR = "leader-memory"
 SESSIONS_SUBDIR = "sessions"
 SESSION_RECORD_NAME = "session.json"
+SESSION_SCOPE_KEY = "scope"
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "prompts"
 
@@ -139,6 +140,120 @@ def session_record_path(label: str) -> Path:
     (Issue #166): label / agent spec / started_at / tmux pane for one session.
     """
     return session_dir(label) / SESSION_RECORD_NAME
+
+
+# ---------------------------------------------------------------------------
+# Session scope helpers (Issue #172)
+# ---------------------------------------------------------------------------
+
+
+def read_session_record(label: str) -> dict | None:
+    """Parse global/sessions/<label>/session.json. None on missing/invalid."""
+    path = session_record_path(label)
+    if not path.is_file():
+        return None
+    try:
+        import json as _json
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def session_scope(label: str) -> list[str] | None:
+    """Return the session's scope list, or None when unscoped.
+
+    None means "no scope declared" — all projects. A present-but-empty list
+    is normalised to None (we never persist []), so callers test ``is None``.
+    """
+    record = read_session_record(label)
+    if record is None:
+        return None
+    raw = record.get(SESSION_SCOPE_KEY)
+    if not isinstance(raw, list) or not raw:
+        return None
+    return [str(s) for s in raw if s]
+
+
+def in_scope(label: str, project_name: str) -> bool:
+    """True if the session is unscoped, or project_name is in its scope."""
+    scope = session_scope(label)
+    if scope is None:
+        return True
+    return project_name in scope
+
+
+def set_session_scope(
+    label: str,
+    names: list[str] | None,
+    *,
+    mode: str = "set",
+) -> list[str] | None:
+    """Atomically upsert the scope field on session.json (flock + atomic RMW).
+
+    Creates a minimal record {label, scope} when the dir/record is absent.
+    Validates incoming names against the registry for set/add (raises ValueError
+    on unknown names). mode="clear" deletes the key. Returns the new scope (or
+    None when cleared/empty).
+    """
+    import json as _json
+
+    rec_path = session_record_path(label)
+
+    def _mutate(old_text: str) -> str:
+        record: dict
+        if old_text.strip():
+            try:
+                record = _json.loads(old_text)
+                if not isinstance(record, dict):
+                    record = {}
+            except ValueError:
+                record = {}
+        else:
+            record = {}
+
+        record.setdefault("label", label)
+
+        if mode == "clear":
+            record.pop(SESSION_SCOPE_KEY, None)
+            return _json.dumps(record, indent=2)
+
+        current: list[str] = []
+        raw = record.get(SESSION_SCOPE_KEY)
+        if isinstance(raw, list):
+            current = [str(s) for s in raw if s]
+
+        if mode == "set":
+            new_scope = list(dict.fromkeys(names or []))
+        elif mode == "add":
+            new_scope = list(dict.fromkeys(current + list(names or [])))
+        elif mode == "rm":
+            remove_set = set(names or [])
+            new_scope = [n for n in current if n not in remove_set]
+        else:
+            raise ValueError(f"unknown mode: {mode!r}")
+
+        if new_scope:
+            record[SESSION_SCOPE_KEY] = sorted(set(new_scope))
+        else:
+            record.pop(SESSION_SCOPE_KEY, None)
+        return _json.dumps(record, indent=2)
+
+    if mode in ("set", "add") and names:
+        reg = load_registry()
+        known = set(reg.get("projects", {}).keys())
+        unknown = [n for n in names if n not in known]
+        if unknown:
+            listed = ", ".join(sorted(known)) if known else "(none)"
+            raise ValueError(
+                f"unknown project name(s): {', '.join(unknown)}\n"
+                f"registered projects: {listed}"
+            )
+
+    sdir = session_dir(label)
+    sdir.mkdir(parents=True, exist_ok=True)
+    atomic_update(rec_path, _mutate)
+    return session_scope(label)
 
 
 # ---------------------------------------------------------------------------

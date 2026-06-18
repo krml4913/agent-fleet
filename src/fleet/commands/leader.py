@@ -77,6 +77,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         default=3.0,
         help="Seconds to wait for the agent CLI to start before pasting (default: 3.0).",
     )
+    p.add_argument(
+        "--scope",
+        default=None,
+        metavar="PROJECTS",
+        help=(
+            "Comma-separated project names to set as this session's scope at launch. "
+            "Sets scope in session.json before the prompt is pasted. Names are "
+            "validated against the registry. Example: --scope image-gallery,bmweb,fleet"
+        ),
+    )
     p.set_defaults(func=run, auto_paste=True)
 
 
@@ -126,18 +136,29 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: tmux setup failed: {e}", file=sys.stderr)
         return 1
 
+    record: dict = {
+        "label": label,
+        "agent": args.agent,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "pane": f"{session}:leader",
+    }
     state_mod.session_record_path(label).write_text(
-        json.dumps({
-            "label": label,
-            "agent": args.agent,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "pane": f"{session}:leader",
-        }, indent=2),
+        json.dumps(record, indent=2),
         encoding="utf-8",
     )
 
+    # Set scope from --scope flag before prompt is pasted
+    scope_arg = getattr(args, "scope", None)
+    if scope_arg:
+        scope_names = [n.strip() for n in scope_arg.split(",") if n.strip()]
+        try:
+            state_mod.set_session_scope(label, scope_names, mode="set")
+        except ValueError as e:
+            print(f"error: --scope: {e}", file=sys.stderr)
+            return 1
+
     if args.auto_paste:
-        prompt_text = lp.render()
+        prompt_text = lp.render(session_label=label)
         prompt_path = session_dir / "leader-prompt.md"
         prompt_path.write_text(prompt_text, encoding="utf-8")
         buffer_name = f"fleet-leader-{label}"

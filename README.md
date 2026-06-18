@@ -226,7 +226,8 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane (default agent `claude:opus`). |
 | `fleet attach [target] [--project P]` | Attach to the leader (default) or a task driver pane. |
-| `fleet status [name] [--all] [--events N]` | Print project info, task list, recent events. |
+| `fleet status [name] [--all] [--unscoped] [--events N]` | Print project info, task list, recent events. With `--all`, filters to the session's scope by default; `--unscoped` shows all projects. |
+| `fleet scope [label] [--set/--add/--rm/--clear]` | View or edit the set of projects a leader session is responsible for. |
 | `fleet log [task_id] [-n N] [--type T]` | Tail `events.jsonl`, optionally filtered by task / type. |
 | `fleet formation list \| show <name> \| init --from <template>` | Inspect or create formations. |
 | `fleet workspace list \| set <mode>` | Show or set the workspace mode (`worktree` / `none`). |

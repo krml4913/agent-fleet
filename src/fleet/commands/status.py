@@ -74,6 +74,25 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "the positional argument is a back-compat alias."
         ),
     )
+    p.add_argument(
+        "--unscoped",
+        action="store_true",
+        dest="unscoped",
+        help=(
+            "With --all: ignore the session scope and show all registered projects. "
+            "Without --all, has no effect."
+        ),
+    )
+    p.add_argument(
+        "--session",
+        default=None,
+        metavar="LABEL",
+        dest="status_session",
+        help=(
+            "Session label whose scope to apply when filtering --all output. "
+            "Defaults to $FLEET_SESSION when present."
+        ),
+    )
     p.set_defaults(func=run)
 
 
@@ -328,6 +347,36 @@ def _last_event(events: list[dict], task_id: str) -> dict | None:
     return None
 
 
+def _scope_filter(
+    projects: dict,
+    args: argparse.Namespace,
+) -> tuple[dict, str | None]:
+    """Filter *projects* to the session scope when applicable.
+
+    Returns ``(filtered_projects, scope_header)`` where *scope_header* is a
+    one-line note to print above the listing (or ``None`` when no filter was
+    applied).
+    """
+    if getattr(args, "unscoped", False):
+        return projects, None
+
+    label = getattr(args, "status_session", None) or os.environ.get("FLEET_SESSION")
+    if not label:
+        return projects, None
+
+    scope = state_mod.session_scope(label)
+    if scope is None:
+        return projects, None
+
+    filtered = {k: v for k, v in projects.items() if k in scope}
+    hidden = len(projects) - len(filtered)
+    note = (
+        f"scope: {label} → {', '.join(scope)}"
+        + (f"  ({hidden} hidden — --unscoped for all)" if hidden else "")
+    )
+    return filtered, note
+
+
 def _run_all(args: argparse.Namespace) -> int:
     """Print a summary for every registered project."""
     reg = state_mod.load_registry()
@@ -336,6 +385,15 @@ def _run_all(args: argparse.Namespace) -> int:
 
     if not projects:
         print("(no registered projects — run `fleet init` first)")
+        return 0
+
+    projects, scope_header = _scope_filter(projects, args)
+    if scope_header:
+        print(scope_header)
+        print()
+
+    if not projects:
+        print("(no projects in scope — use --unscoped to see all)")
         return 0
 
     for name, entry in projects.items():

@@ -152,6 +152,48 @@ class FleetAgentPathInjectionTests(_FleetHomeBase):
         text = leader_prompt.render(fleet_bin="/opt/agent-fleet/fleet-agent")
         self.assertIn("--project <name>", text)
 
+    def test_render_no_session_label_no_roster_section(self) -> None:
+        text = leader_prompt.render()
+        self.assertNotIn("Projects in scope", text)
+        self.assertNotIn("Projects\n", text)
+
+    def test_render_scoped_session_injects_roster(self) -> None:
+        import json
+        # Register a project
+        proj = Path(self._tmp.name) / "proj"
+        proj.mkdir()
+        state.register_project("myproj", proj)
+        # Create session with scope
+        sdir = state.session_dir("main")
+        sdir.mkdir(parents=True, exist_ok=True)
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main", "scope": ["myproj"]}), encoding="utf-8"
+        )
+        text = leader_prompt.render(session_label="main")
+        self.assertIn("Projects in scope", text)
+        self.assertIn("myproj", text)
+
+    def test_render_unscoped_session_injects_unscoped_note(self) -> None:
+        import json
+        proj = Path(self._tmp.name) / "proj2"
+        proj.mkdir()
+        state.register_project("myproj2", proj)
+        # Session with no scope field
+        sdir = state.session_dir("main")
+        sdir.mkdir(parents=True, exist_ok=True)
+        state.session_record_path("main").write_text(
+            json.dumps({"label": "main"}), encoding="utf-8"
+        )
+        text = leader_prompt.render(session_label="main")
+        self.assertIn("unscoped", text)
+        self.assertIn("myproj2", text)
+
+    def test_render_empty_registry_omits_section(self) -> None:
+        # No projects registered → section should be omitted
+        text = leader_prompt.render(session_label="main")
+        self.assertNotIn("Projects in scope", text)
+        self.assertNotIn("unscoped (serves all", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -498,5 +498,87 @@ class UnreadTasksTests(unittest.TestCase):
             tmp.cleanup()
 
 
+class ScopeFilterTests(unittest.TestCase):
+    """Tests for ``fleet status --all`` scope filtering (Issue #172)."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self.proj_alpha = Path(self._tmp.name) / "alpha"
+        self.proj_alpha.mkdir()
+        self.proj_beta = Path(self._tmp.name) / "beta"
+        self.proj_beta.mkdir()
+        make_project(self.fleet_home, "alpha", self.proj_alpha)
+        make_project(self.fleet_home, "beta", self.proj_beta)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run_all(self, *extra_args: str, env_extra: dict | None = None):
+        return run_fleet("status", "--all", *extra_args, fleet_home=self.fleet_home,
+                         env_extra=env_extra)
+
+    def test_no_scope_shows_all_projects(self) -> None:
+        result = self._run_all(env_extra={"FLEET_SESSION": "main"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
+
+    def test_scope_filters_to_session_scope(self) -> None:
+        from fleet import state
+        old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        try:
+            state.set_session_scope("main", ["alpha"], mode="set")
+        finally:
+            if old is None:
+                os.environ.pop("FLEET_HOME", None)
+            else:
+                os.environ["FLEET_HOME"] = old
+        result = self._run_all(env_extra={"FLEET_SESSION": "main"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha", result.stdout)
+        self.assertNotIn("beta", result.stdout)
+
+    def test_unscoped_flag_shows_all_despite_scope(self) -> None:
+        from fleet import state
+        old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        try:
+            state.set_session_scope("main", ["alpha"], mode="set")
+        finally:
+            if old is None:
+                os.environ.pop("FLEET_HOME", None)
+            else:
+                os.environ["FLEET_HOME"] = old
+        result = self._run_all("--unscoped", env_extra={"FLEET_SESSION": "main"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
+
+    def test_no_fleet_session_env_shows_all(self) -> None:
+        result = self._run_all()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
+
+    def test_session_flag_overrides_env(self) -> None:
+        from fleet import state
+        old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        try:
+            state.set_session_scope("other", ["beta"], mode="set")
+        finally:
+            if old is None:
+                os.environ.pop("FLEET_HOME", None)
+            else:
+                os.environ["FLEET_HOME"] = old
+        result = self._run_all("--session", "other", env_extra={"FLEET_SESSION": "main"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("alpha", result.stdout)
+        self.assertIn("beta", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

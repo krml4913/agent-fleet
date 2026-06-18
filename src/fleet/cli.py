@@ -31,6 +31,7 @@ from .commands import memory as memory_cmd
 from .commands import merge as merge_cmd
 from .commands import preflight as preflight_cmd
 from .commands import rm as rm_cmd
+from .commands import scope as scope_cmd
 from .commands import send_prompt as send_prompt_cmd
 from .commands import sessions as sessions_cmd
 from .commands import start as start_cmd
@@ -56,6 +57,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     attach_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
     sessions_cmd.add_parser(sub)
+    scope_cmd.add_parser(sub)
     log_cmd.add_parser(sub)
     formation_cmd.add_parser(sub)
     workspace_cmd.add_parser(sub)
