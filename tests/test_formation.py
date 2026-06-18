@@ -1,6 +1,7 @@
 """Tests for ``fleet.formation`` — load / validate / list (templates + custom)."""
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -105,26 +106,50 @@ class FormationTemplateTests(unittest.TestCase):
                 formation.resolve_formation(state, None)
 
     def test_resolve_formation_zero_customs_with_leader_session(self) -> None:
+        # The _leader_solo fallback reads the owner session's record under
+        # global/sessions/<label>/ (Issue #166), not a per-project leader-session.json.
+        import json, io, contextlib
+        from fleet import state as state_mod
+
         with TemporaryDirectory() as tmp:
-            state = Path(tmp) / ".fleet-state"
-            (state / "formations").mkdir(parents=True)
-            import json
-            (state / "leader-session.json").write_text(
-                json.dumps({"agent": "claude:opus", "started_at": "2026-01-01T00:00:00+00:00"})
-            )
-            import io, contextlib
-            buf = io.StringIO()
-            with contextlib.redirect_stderr(buf):
-                name, data = formation.resolve_formation(state, None)
-            self.assertEqual(name, "_leader_solo")
-            self.assertEqual(data["stages"][0]["agent"], "claude:opus")
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state_path = Path(tmp) / ".fleet-state"
+                (state_path / "formations").mkdir(parents=True)
+                rec = state_mod.session_record_path("main")
+                rec.parent.mkdir(parents=True, exist_ok=True)
+                rec.write_text(json.dumps(
+                    {"label": "main", "agent": "claude:opus",
+                     "started_at": "2026-01-01T00:00:00+00:00"}
+                ))
+                buf = io.StringIO()
+                with contextlib.redirect_stderr(buf):
+                    name, data = formation.resolve_formation(
+                        state_path, None, owner_session="main"
+                    )
+                self.assertEqual(name, "_leader_solo")
+                self.assertEqual(data["stages"][0]["agent"], "claude:opus")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
 
     def test_resolve_formation_zero_customs_no_leader_session_raises(self) -> None:
         with TemporaryDirectory() as tmp:
-            state = Path(tmp) / ".fleet-state"
-            (state / "formations").mkdir(parents=True)
-            with self.assertRaises(formation.ResolutionError):
-                formation.resolve_formation(state, None)
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state_path = Path(tmp) / ".fleet-state"
+                (state_path / "formations").mkdir(parents=True)
+                with self.assertRaises(formation.ResolutionError):
+                    formation.resolve_formation(state_path, None, owner_session="main")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
 
     # ---- expand_stages ----
 

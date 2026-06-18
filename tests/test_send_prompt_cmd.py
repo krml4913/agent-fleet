@@ -57,6 +57,12 @@ class SendPromptTests(unittest.TestCase):
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)
         (td / "driver-prompt.md").write_text("hello\n")
+        # owner_session resolves the target tmux session (Issue #166); the label
+        # here matches the project name, so the (absent) session is fleet-<name>.
+        state.save_task(
+            self.state_dir, "1",
+            {"id": "1", "status": "spawning", "owner_session": self.project_name},
+        )
         r = run_fleet_agent("send-prompt", "1", "--project", self.project_name,
                             fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 1)
@@ -76,6 +82,7 @@ class SendPromptTests(unittest.TestCase):
             {
                 "id": "1",
                 "status": "spawning",
+                "owner_session": self.project_name,
                 "current_stage": 0,
                 "stages": [{"role": "implementer", "agent": "claude:sonnet", "status": "running"}],
             },

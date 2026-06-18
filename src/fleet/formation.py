@@ -21,6 +21,8 @@ if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
 
 import yaml
 
+from . import state as state_mod
+
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 CUSTOM_SUBDIR = "formations"
 
@@ -94,12 +96,15 @@ def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
 def resolve_formation(
     state_dir: Path,
     requested: str | None,
+    *,
+    owner_session: str = "main",
 ) -> tuple[str, dict[str, Any]]:
     """Return ``(effective_name, formation_dict)`` for start.
 
     Rules:
     - ``requested`` given: load strictly from formations/; missing → error.
-    - ``requested`` is None + 0 customs: synthesise leader-solo.
+    - ``requested`` is None + 0 customs: synthesise leader-solo from the owner
+      session's agent (``global/sessions/<owner_session>/session.json``).
     - ``requested`` is None + 1 custom: use that one (unambiguous).
     - ``requested`` is None + 2+ customs: ambiguous → error.
     """
@@ -112,7 +117,7 @@ def resolve_formation(
 
     customs = list_custom(state_dir)
     if len(customs) == 0:
-        return synth_leader_solo(state_dir)
+        return synth_leader_solo(owner_session)
     if len(customs) == 1:
         return (customs[0], load_formation(customs[0], state_dir))
     raise ResolutionError(
@@ -121,18 +126,24 @@ def resolve_formation(
     )
 
 
-def synth_leader_solo(state_dir: Path) -> tuple[str, dict[str, Any]]:
-    """Synthesise a single-stage solo formation from the leader's agent."""
-    session = read_leader_session(state_dir)
+def synth_leader_solo(owner_session: str) -> tuple[str, dict[str, Any]]:
+    """Synthesise a single-stage solo formation from the owner session's agent.
+
+    Reads the spawning session's record (Issue #166: the per-session leader
+    record relocated from per-project ``leader-session.json`` to
+    ``global/sessions/<label>/session.json``).
+    """
+    session = read_leader_session(owner_session)
     if session is None:
         raise ResolutionError(
-            "no formations defined and no leader-session.json found. "
-            "Either run `fleet leader` first, or pass --formation <name>."
+            f"no formations defined and no leader session record for "
+            f"{owner_session!r}. Either run `fleet leader` first, or pass "
+            f"--formation <name>."
         )
     agent = session.get("agent")
     if not agent or not _agent_spec_valid(agent):
         raise ResolutionError(
-            f"invalid agent in leader-session.json: {agent!r}"
+            f"invalid agent in session record for {owner_session!r}: {agent!r}"
         )
     import sys as _sys
     print(f"warn: no formation specified, falling back to leader agent ({agent})", file=_sys.stderr)
@@ -144,9 +155,14 @@ def synth_leader_solo(state_dir: Path) -> tuple[str, dict[str, Any]]:
     return ("_leader_solo", data)
 
 
-def read_leader_session(state_dir: Path) -> dict[str, Any] | None:
-    """Read ``<state>/leader-session.json``.  Returns None on any error."""
-    path = state_dir / "leader-session.json"
+def read_leader_session(label: str) -> dict[str, Any] | None:
+    """Read ``global/sessions/<label>/session.json``.  Returns None on any error.
+
+    The owner session's leader record (label / agent spec / started_at / pane),
+    written by ``fleet leader`` (Issue #166). Used to pick the vendor ``ready``
+    regex for notifier routing (§10.3) and the fallback agent for ``_leader_solo``.
+    """
+    path = state_mod.session_record_path(label)
     try:
         text = path.read_text(encoding="utf-8")
         data = json.loads(text)

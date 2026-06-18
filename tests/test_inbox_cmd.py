@@ -82,6 +82,12 @@ class InboxDeliveryTests(unittest.TestCase):
         self._tmp = TemporaryDirectory()
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="testproj")
+        # The driver window lives in the task's owner session (Issue #166); here
+        # the label happens to match the project name, so it is fleet-testproj.
+        state.save_task(self.state_dir, "42", {
+            "id": "42", "title": "x", "status": "running",
+            "owner_session": "testproj",
+        })
 
     def tearDown(self) -> None:
         self._tmp.cleanup()

@@ -6,6 +6,7 @@ Shared ``launch_stage_driver()`` is called by the orchestrator for subsequent st
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import subprocess
@@ -43,6 +44,18 @@ def _validate_task_id(task_id: str) -> str | None:
     if len(task_id) > _TASK_ID_MAX_LEN:
         return f"error: task id too long ({len(task_id)} chars, max {_TASK_ID_MAX_LEN}): {task_id}"
     return None
+
+
+def _resolve_owner_session(args: argparse.Namespace) -> str:
+    """Resolve the task's owner session label (Issue #166 §10.3).
+
+    Precedence (decided in #166): an explicit ``--session`` override wins, else
+    the leader pane's ``FLEET_SESSION`` env, else the default ``"main"``. The label
+    is stamped onto ``task.yaml`` as ``owner_session`` and keys both driver-window
+    placement (``fleet-<label>``) and leader notification routing.
+    """
+    explicit = getattr(args, "session", None)
+    return explicit or os.environ.get("FLEET_SESSION") or "main"
 
 
 def _fleet_clone_root() -> Path:
@@ -99,6 +112,7 @@ def launch_stage_driver(
     stage_idx: int,
     stage: dict,
     project_name: str,
+    owner_session: str,
     auto_paste: bool = True,
     prompt_delay: float = 3.0,
     prompt_timeout: float = prompt_deliverer.DEFAULT_TIMEOUT_SECONDS,
@@ -109,6 +123,11 @@ def launch_stage_driver(
 
     Shared between ``start`` (first stage) and the orchestrator (later stages).
     Expects the task directory and driver-prompt.md to already exist.
+
+    The driver window opens in the **owner session's** tmux (``fleet-<owner_session>``,
+    Issue #166 §5.2) — the session that spawned the task holds both the leader
+    window and its drivers' windows. ``project_name`` is used only for the session
+    *display* name so resumable panes are distinguishable in the picker.
     """
     agent_spec = stage.get("agent", "")
     role_name = stage.get("role", "driver")
@@ -116,15 +135,13 @@ def launch_stage_driver(
     prompt_path = task_dir / "driver-prompt.md"
     buffer_name = f"fleet-task-{task_id}"
 
-    session = f"fleet-{project_name}"
+    session = f"fleet-{owner_session}"
     if not tmux_mod.session_exists(session):
         tmux_mod.new_session(session)
     window = f"{task_id}·{role_name}"
     effective_cwd = window_cwd or task_dir
 
     try:
-        import os
-
         repo_root = _fleet_clone_root()
         driver_env = {
             "FLEET_TASK_ID": task_id,
@@ -198,6 +215,15 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--project",
         default=".",
         help="Project name (default: resolved from cwd via registry)",
+    )
+    p.add_argument(
+        "--session",
+        default=None,
+        metavar="LABEL",
+        help=(
+            "Owner session label stamped onto the task (default: env FLEET_SESSION, "
+            "else 'main'). Decides driver-window placement and notification routing."
+        ),
     )
     p.add_argument(
         "--formation",
@@ -362,11 +388,14 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: task-{args.task_id} already exists at {task_dir_path}", file=sys.stderr)
         return 1
 
+    owner_session = _resolve_owner_session(args)
+
     # Load and validate formation
     try:
         formation_name, formation_data = formation_mod.resolve_formation(
             state_dir=state_dir,
             requested=args.formation,
+            owner_session=owner_session,
         )
         formation_mod.validate(formation_data)
     except (formation_mod.ResolutionError, ValueError) as e:
@@ -452,6 +481,7 @@ def run(args: argparse.Namespace) -> int:
         "description": description,
         "status": "spawning",
         "formation": formation_name,
+        "owner_session": owner_session,
         "workspace": workspace_mod.load(state_dir),
         "current_stage": current_stage_idx,
         "stages": expanded_stages,
@@ -510,6 +540,7 @@ def run(args: argparse.Namespace) -> int:
         stage_idx=current_stage_idx,
         stage=current_stage,
         project_name=project_name,
+        owner_session=owner_session,
         auto_paste=args.auto_paste,
         prompt_delay=args.prompt_delay,
         prompt_timeout=getattr(args, "prompt_timeout", prompt_deliverer.DEFAULT_TIMEOUT_SECONDS),

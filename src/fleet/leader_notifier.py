@@ -7,12 +7,15 @@ injects a coalesced, idempotent summary of finished/gated tasks so the leader
 can review without polling.
 
 fleet is daemon-less, so there is nothing watching for the leader to become
-idle. ``done`` enqueues a persisted record (`<state>/leader-pending.jsonl`)
-and spawns this detached poller. The queue survives process exit and leader
-detach: if the leader pane is absent the records stay queued and the next
-``done`` (or re-attach) re-spawns a notifier that flushes them. A non-blocking
-flock (`<state>/leader-notifier.lock`) keeps only one notifier live at a time
-so we never double-inject.
+idle. ``done`` resolves the task's ``owner_session`` and enqueues a persisted
+record into that session's queue (`global/sessions/<label>/leader-pending.jsonl`),
+then spawns this detached poller against the ``fleet-<label>`` pane. The queue
+survives process exit and leader detach: if the leader pane is absent the records
+stay queued and the next ``done`` (or re-attach) re-spawns a notifier that
+flushes them. A non-blocking flock (`global/sessions/<label>/leader-notifier.lock`)
+keeps only one notifier per session live at a time so we never double-inject.
+Routing is keyed by session, not project (Issue #166 §10.3): one notifier flushes
+a session's pending notifications across every project that session spawned.
 """
 from __future__ import annotations
 
@@ -50,8 +53,14 @@ PR_URL_RE = re.compile(r"https://github\.com/[^\s)\]]+/pull/\d+")
 # ---------------------------------------------------------------------------
 
 
-def queue_path(state_dir: Path) -> Path:
-    return Path(state_dir) / QUEUE_NAME
+def queue_path(session_dir: Path) -> Path:
+    """Return the session's pending-notification queue (Issue #166 §10.3).
+
+    Keyed by session, not project: the queue lives under
+    ``global/sessions/<label>/`` so one notifier flushes a session's pending
+    notifications across all the projects that session spawned.
+    """
+    return Path(session_dir) / QUEUE_NAME
 
 
 def scan_pr_url(state_dir: Path, task_id: str) -> str | None:
@@ -79,6 +88,11 @@ def build_record(
 
     Carries everything the leader needs to no-op an already-handled task and,
     otherwise, to make its first move "pull the diff and run the gate".
+
+    ``state_dir`` here is the **project** state dir the task lives in. It is
+    recorded on the record so the (session-keyed, cross-project) notifier can
+    re-scan that task's outbox at flush time — the queue itself lives under the
+    owner session's dir, away from any one project (Issue #166 §10.3).
     """
     record: dict = {
         "nonce": uuid.uuid4().hex,
@@ -87,6 +101,7 @@ def build_record(
         "status": status,
         "branch": branch,
         "worktree": worktree,
+        "state_dir": str(state_dir),
         "pr_url": scan_pr_url(state_dir, task_id),
         "summary": summary,
     }
@@ -95,15 +110,15 @@ def build_record(
     return record
 
 
-def enqueue(state_dir: Path, record: dict) -> None:
-    """Append a record to the persisted queue (lock-guarded, never lost)."""
+def enqueue(session_dir: Path, record: dict) -> None:
+    """Append a record to the session's persisted queue (lock-guarded, never lost)."""
     line = json.dumps(record, ensure_ascii=False) + "\n"
-    atomic_update(queue_path(state_dir), lambda old: old + line)
+    atomic_update(queue_path(session_dir), lambda old: old + line)
 
 
-def read_queue(state_dir: Path) -> list[dict]:
+def read_queue(session_dir: Path) -> list[dict]:
     """Return all queued records (skips malformed lines)."""
-    path = queue_path(state_dir)
+    path = queue_path(session_dir)
     if not path.exists():
         return []
     out: list[dict] = []
@@ -118,7 +133,7 @@ def read_queue(state_dir: Path) -> list[dict]:
     return out
 
 
-def clear_records(state_dir: Path, nonces: set[str]) -> None:
+def clear_records(session_dir: Path, nonces: set[str]) -> None:
     """Remove exactly the flushed records, preserving any appended meanwhile.
 
     Records are matched by ``nonce`` so a record enqueued *during* an injection
@@ -143,7 +158,7 @@ def clear_records(state_dir: Path, nonces: set[str]) -> None:
             kept.append(stripped)
         return ("\n".join(kept) + "\n") if kept else ""
 
-    atomic_update(queue_path(state_dir), _mutate)
+    atomic_update(queue_path(session_dir), _mutate)
 
 
 # ---------------------------------------------------------------------------
@@ -195,19 +210,19 @@ def _fleet_clone_root() -> Path:
 
 def start_detached(
     *,
-    state_dir: Path,
+    session_dir: Path,
     session: str,
     window: str,
     agent_spec: str,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> Path:
-    """Spawn a detached notifier that flushes the queue into the leader pane.
+    """Spawn a detached notifier that flushes the session's queue into its pane.
 
     Defensive: callers should already have enqueued the record. If a notifier
     is already running it will no-op (lock), so spawning is always safe.
     """
-    log_path = Path(state_dir) / "leader-notifier.log"
+    log_path = Path(session_dir) / "leader-notifier.log"
     repo_root = _fleet_clone_root()
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
@@ -221,8 +236,8 @@ def start_detached(
         sys.executable,
         "-m",
         "fleet.leader_notifier",
-        "--state-dir",
-        str(state_dir),
+        "--session-dir",
+        str(session_dir),
         "--session",
         session,
         "--window",
@@ -255,7 +270,7 @@ def start_detached(
 
 def notify(
     *,
-    state_dir: Path,
+    session_dir: Path,
     session: str,
     window: str,
     agent_spec: str,
@@ -268,8 +283,8 @@ def notify(
     timeout — records stay queued for the next spawn). Never raises on tmux
     trouble; a missing pane just leaves records queued.
     """
-    state_dir = Path(state_dir)
-    lock_fp = _acquire_lock(state_dir)
+    session_dir = Path(session_dir)
+    lock_fp = _acquire_lock(session_dir)
     if lock_fp is None:
         # Another notifier holds the queue; it will flush what we enqueued.
         return 0
@@ -280,7 +295,7 @@ def notify(
         deadline = time.monotonic() + max(0.0, timeout)
 
         while time.monotonic() <= deadline:
-            if not read_queue(state_dir):
+            if not read_queue(session_dir):
                 return 0  # nothing pending → done
             if not tmux.session_exists(session):
                 return 0  # leader detached → leave queued, re-spawn later
@@ -290,7 +305,7 @@ def notify(
                 return 0  # window gone → leave queued
 
             if adapter.ready.search(pane):
-                if _flush_once(state_dir, session, window):
+                if _flush_once(session_dir, session, window):
                     # Loop again: a record may have been enqueued mid-flush.
                     continue
                 return 0  # flush failed (tmux) → leave queued
@@ -301,40 +316,43 @@ def notify(
         _release_lock(lock_fp)
 
 
-def _refill_pr_urls(state_dir: Path, records: list[dict]) -> None:
+def _refill_pr_urls(records: list[dict]) -> None:
     """Top up missing ``pr_url`` fields by re-scanning each task's outbox.
 
     Best-effort, in place: a record enqueued at ``done`` time can carry a null
     ``pr_url`` because the driver called ``done`` just before its PR landed in
     ``outbox.md``. By inject time the PR has usually been written, so re-scan
     any record still missing a URL. Records that already carry one are left
-    untouched (not re-scanned). ``scan_pr_url`` never raises, but guard anyway
-    so a re-scan hiccup can never block the injection.
+    untouched (not re-scanned). Each record carries its own project ``state_dir``
+    (the queue is cross-project), so the re-scan targets the right outbox.
+    ``scan_pr_url`` never raises, but guard anyway so a re-scan hiccup can never
+    block the injection.
     """
     for rec in records:
         if rec.get("pr_url"):
             continue
         task_id = rec.get("task_id")
-        if not task_id:
+        state_dir = rec.get("state_dir")
+        if not task_id or not state_dir:
             continue
         try:
-            url = scan_pr_url(state_dir, task_id)
+            url = scan_pr_url(Path(state_dir), task_id)
         except Exception:  # noqa: BLE001 - best-effort; never block the flush
             url = None
         if url:
             rec["pr_url"] = url
 
 
-def _flush_once(state_dir: Path, session: str, window: str) -> bool:
+def _flush_once(session_dir: Path, session: str, window: str) -> bool:
     """Inject the current queue once and clear exactly what was flushed.
 
     Returns True on a successful injection (or empty queue), False if tmux
     failed before submit — in which case records are left untouched/queued.
     """
-    records = read_queue(state_dir)
+    records = read_queue(session_dir)
     if not records:
         return True
-    _refill_pr_urls(state_dir, records)
+    _refill_pr_urls(records)
     text = render_block(records)
     try:
         time.sleep(INJECT_SETTLE_SECONDS)
@@ -342,9 +360,9 @@ def _flush_once(state_dir: Path, session: str, window: str) -> bool:
     except tmux.TmuxError:
         return False
     nonces = {r.get("nonce") for r in records if r.get("nonce")}
-    clear_records(state_dir, nonces)
+    clear_records(session_dir, nonces)
     append_event(
-        state_dir / "events.jsonl",
+        Path(session_dir) / "events.jsonl",
         "leader_notified",
         window=window,
         count=len(records),
@@ -353,9 +371,14 @@ def _flush_once(state_dir: Path, session: str, window: str) -> bool:
     return True
 
 
-def _acquire_lock(state_dir: Path):
-    """Non-blocking exclusive lock. Returns the fp on success, None if held."""
-    lock_path = Path(state_dir) / LOCK_NAME
+def _acquire_lock(session_dir: Path):
+    """Non-blocking exclusive lock. Returns the fp on success, None if held.
+
+    One notifier per session: the lock lives under ``global/sessions/<label>/``.
+    """
+    session_dir = Path(session_dir)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = session_dir / LOCK_NAME
     fp = open(lock_path, "a+")  # noqa: SIM115 - released in _release_lock
     try:
         fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -379,7 +402,7 @@ def _release_lock(fp) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--state-dir", required=True, type=Path)
+    p.add_argument("--session-dir", required=True, type=Path)
     p.add_argument("--session", required=True)
     p.add_argument("--window", required=True)
     p.add_argument("--agent", required=True)
@@ -391,7 +414,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     return notify(
-        state_dir=args.state_dir,
+        session_dir=args.session_dir,
         session=args.session,
         window=args.window,
         agent_spec=args.agent,

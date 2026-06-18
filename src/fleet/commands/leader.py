@@ -1,13 +1,15 @@
-"""``fleet leader`` — launch the leader pane for a project.
+"""``fleet leader`` — launch a project-agnostic leader session.
 
-Creates a detached tmux session named ``fleet-<project>``, opens a
-single ``leader`` window in the project root, and starts the chosen
-agent CLI inside. If the session already exists, prints the attach
-command and exits (the leader is single-instance per project).
+Creates a detached tmux session named ``fleet-<label>`` (default label
+``main``), opens a single ``leader`` window in the **agent-fleet clone root**,
+and starts the chosen agent CLI inside. If the session already exists, prints
+the attach command and exits (one session per label).
 
-This is the entry point described in design doc §3 — the leader is the
-user's conversational counterpart; per §4.1 it only does dialogue and
-``fleet-agent start``, never state polling.
+Since Issue #166 a leader session is **not bound to a project** (design §4.1,
+§5.6): it drops project resolution, pins cwd to the clone root, and carries its
+label in ``FLEET_SESSION`` so ``fleet-agent start`` can stamp ``owner_session``
+onto each task. Per-session state lives at ``global/sessions/<label>/``. Per §4.1
+the leader only does dialogue and ``fleet-agent start``, never state polling.
 """
 from __future__ import annotations
 
@@ -29,23 +31,29 @@ from ..events import append_event
 
 
 DEFAULT_LEADER_AGENT = "claude:opus"
+DEFAULT_SESSION_LABEL = "main"
+
+# commands/leader.py → parents[0]=commands, [1]=fleet, [2]=src, [3]=clone root.
+_CLONE_ROOT = Path(__file__).resolve().parents[3]
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "leader",
-        help="Launch the leader pane for this project",
+        help="Launch a project-agnostic leader session",
         description=(
-            "Create a tmux session 'fleet-<project>' with a single leader "
-            "window running the chosen agent CLI. Single-instance per "
-            "project: if the session already exists, prints the attach "
-            "command and exits."
+            "Create a tmux session 'fleet-<label>' (default label 'main') with a "
+            "single leader window running the chosen agent CLI in the agent-fleet "
+            "clone root. One session per label: if it already exists, prints the "
+            "attach command and exits. The session is project-agnostic — it serves "
+            "any project, and every dispatch passes --project explicitly."
         ),
     )
     p.add_argument(
-        "--project",
-        default=".",
-        help="Project name (default: resolved from cwd via registry)",
+        "--name",
+        default=DEFAULT_SESSION_LABEL,
+        metavar="LABEL",
+        help=f"Session label → tmux fleet-<label> (default: {DEFAULT_SESSION_LABEL})",
     )
     p.add_argument(
         "--agent",
@@ -73,22 +81,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    state_dir = state_mod.resolve_state_dir(Path.cwd(), project_name=args.project if args.project != "." else None)
-    if state_dir is None:
-        print(
-            f"error: no registered project found for {args.project!r}",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        project = state_mod.load_project(state_dir)
-    except FileNotFoundError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 1
-
-    name = project.get("name") or "fleet"
-    session = f"fleet-{name}"
+    label = getattr(args, "name", None) or DEFAULT_SESSION_LABEL
+    session = f"fleet-{label}"
 
     if not tmux_mod.available():
         print("error: tmux not on PATH", file=sys.stderr)
@@ -107,23 +101,24 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
+    session_dir = state_mod.session_dir(label)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
     # Session display name so the leader is identifiable in the session picker.
-    session_name = f"{name}-leader"
+    session_name = f"{label}-leader"
 
     cli = agents_mod.cli_command(args.agent)
     cli = cli + agents_mod.session_name_launch_args(args.agent, session_name)
     cli_quoted = " ".join(shlex.quote(p) for p in cli)
 
-    project_root = Path(project.get("repo", str(state_dir.parent)))
-
     try:
         tmux_mod.new_session(
             session,
             window_name="leader",
-            cwd=str(project_root),
+            cwd=str(_CLONE_ROOT),
             env={
-                "FLEET_PROJECT": name,
-                "FLEET_STATE_DIR": str(state_dir),
+                "FLEET_SESSION": label,
+                "FLEET_STATE_DIR": str(session_dir),
             },
         )
         tmux_mod.send_keys(session, "leader", cli_quoted)
@@ -131,20 +126,21 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: tmux setup failed: {e}", file=sys.stderr)
         return 1
 
-    leader_session_path = state_dir / "leader-session.json"
-    leader_session_path.write_text(
+    state_mod.session_record_path(label).write_text(
         json.dumps({
+            "label": label,
             "agent": args.agent,
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "pane": f"{session}:leader",
         }, indent=2),
         encoding="utf-8",
     )
 
     if args.auto_paste:
-        prompt_text = lp.render(project_name=name, state_dir=state_dir)
-        prompt_path = state_dir / "leader-prompt.md"
+        prompt_text = lp.render()
+        prompt_path = session_dir / "leader-prompt.md"
         prompt_path.write_text(prompt_text, encoding="utf-8")
-        buffer_name = f"fleet-leader-{name}"
+        buffer_name = f"fleet-leader-{label}"
         try:
             prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
             time.sleep(max(0.0, args.prompt_delay))
@@ -161,10 +157,11 @@ def run(args: argparse.Namespace) -> int:
             print(f"warn: leader prompt paste failed: {e}", file=sys.stderr)
 
     append_event(
-        state_dir / "events.jsonl",
+        session_dir / "events.jsonl",
         "leader_start",
         agent=args.agent,
         session=session,
+        label=label,
     )
 
     print(f"leader started: session={session}, agent={args.agent}")

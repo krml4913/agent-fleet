@@ -370,6 +370,7 @@ def _launch_driver_for_stage(
         stage_idx=stage_idx,
         stage=stage,
         project_name=project_name,
+        owner_session=state_mod.task_owner_session(task),
         window_cwd=Path(worktree) if worktree else None,
         replace_task_windows=replace_task_windows,
     )
@@ -390,8 +391,7 @@ def _handoff_to_stage_driver(
     if not tmux_mod.available():
         return
 
-    project = state_mod.load_project(state_dir)
-    session = f"fleet-{project.get('name', '?')}"
+    session = f"fleet-{state_mod.task_owner_session(task)}"
     window = _stage_window_name(task_id, stage)
 
     try:

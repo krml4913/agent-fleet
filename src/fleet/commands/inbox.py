@@ -73,18 +73,18 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
     """Send a notification text into the driver's tmux pane.
 
     Silently skips if tmux is unavailable or the pane doesn't exist yet
-    (e.g. driver not spawned or already finished).
+    (e.g. driver not spawned or already finished). The driver window lives in
+    its task's owner session (``fleet-<owner_session>``, Issue #166 §5.2), so we
+    resolve the session from the task rather than the project. The inbox.md write
+    is independent of this — only the live tmux nudge depends on the pane.
     """
     if not tmux_mod.available():
         return
     try:
-        project = state_mod.load_project(state_dir)
+        task = state_mod.load_task(state_dir, task_id)
     except FileNotFoundError:
         return
-    project_name = project.get("name", "")
-    if not project_name:
-        return
-    session = f"fleet-{project_name}"
+    session = f"fleet-{state_mod.task_owner_session(task)}"
     from .. import driver_prompt as dp
 
     fleet_bin = dp.fleet_agent_bin()
