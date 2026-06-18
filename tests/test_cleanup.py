@@ -79,6 +79,47 @@ class CleanupCmdTests(unittest.TestCase):
         self.assertTrue((sd / "tasks" / "_archive" / "task-3").is_dir())
         self.assertEqual(state.list_tasks(sd), [])
 
+    def test_archive_collision_uniquifies_and_preserves_existing(self) -> None:
+        # A re-spawned task id collides with an archive left by a prior cleanup.
+        # The live dir must still be archived (no stranding) under a unique name,
+        # and the existing archive must stay untouched.
+        sd = self.state_dir
+        archive_root = sd / "tasks" / "_archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        old = archive_root / "task-3"
+        old.mkdir()
+        (old / "marker.txt").write_text("first run")
+
+        self._save("3", "completed")
+        # Mark the live (re-spawned) dir so we can tell the two apart.
+        (state.task_dir(sd, "3") / "marker.txt").write_text("second run")
+
+        r = self._run("cleanup", "3", "--archive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+        self.assertFalse((sd / "tasks" / "task-3").exists())  # no stranding
+        self.assertEqual((old / "marker.txt").read_text(), "first run")  # untouched
+        self.assertTrue((archive_root / "task-3-2").is_dir())
+        self.assertEqual(
+            (archive_root / "task-3-2" / "marker.txt").read_text(), "second run"
+        )
+        self.assertEqual(state.list_tasks(sd), [])
+
+    def test_archive_collision_chains_to_next_free_suffix(self) -> None:
+        # task-3 and task-3-2 both already archived → the next archive goes to -3.
+        sd = self.state_dir
+        archive_root = sd / "tasks" / "_archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        (archive_root / "task-3").mkdir()
+        (archive_root / "task-3-2").mkdir()
+
+        self._save("3", "completed")
+        r = self._run("cleanup", "3", "--archive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+        self.assertFalse((sd / "tasks" / "task-3").exists())
+        self.assertTrue((archive_root / "task-3-3").is_dir())
+
     def test_unknown_task(self) -> None:
         r = self._run("cleanup", "999")
         self.assertEqual(r.returncode, 1)

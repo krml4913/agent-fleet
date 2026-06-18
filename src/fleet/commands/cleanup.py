@@ -94,14 +94,20 @@ def teardown(
         archive_root.mkdir(parents=True, exist_ok=True)
         src = state_mod.task_dir(state_dir, task_id)
         dst = archive_root / src.name
+        # A re-spawned task id can collide with an archive left by a prior
+        # cleanup of the same id. Never overwrite that history (it would lose a
+        # past run) and never leave the live dir stranded in tasks/: pick a
+        # deterministic collision-free suffix (task-<id>-2, -3, …) instead.
         if dst.exists():
-            print(
-                f"warn: archive target already exists; leaving task dir in place: {dst}",
-                file=sys.stderr,
-            )
-        else:
-            os.rename(src, dst)
-            archived = True
+            n = 2
+            while True:
+                candidate = archive_root / f"{src.name}-{n}"
+                if not candidate.exists():
+                    dst = candidate
+                    break
+                n += 1
+        os.rename(src, dst)
+        archived = True
 
     return archived
 

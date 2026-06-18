@@ -7,6 +7,21 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: archive collision no longer strands the live task dir
+
+`fleet-agent cleanup --archive` (and `merge`, which shares the same teardown)
+used to **leave the live `tasks/task-<id>/` in place** whenever the archive
+target `tasks/_archive/task-<id>/` already existed — which happens when a task
+id is re-spawned (e.g. recreating a dead driver) and cleaned up again. The
+stranded dir kept the completed task showing in `fleet status` and required a
+manual `rm`/`mv`.
+
+- Teardown now archives the live dir under a deterministic collision-free name
+  (`task-<id>-2`, `-3`, …) instead of warning and skipping. The live dir is
+  always removed from `tasks/`; the pre-existing archive is never overwritten,
+  so history is preserved.
+- The no-collision case is unchanged: the dir still archives to `task-<id>`.
+
 ### feat: session scope — restrict a leader session's project set (Issue #172)
 
 Adds the concept of a **session scope**: the set of projects a leader session is

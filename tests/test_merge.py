@@ -291,6 +291,29 @@ class TeardownHelperTests(unittest.TestCase):
         mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", "1")
         mock_tmux.delete_buffer.assert_called_once_with("fleet-task-1")
 
+    def test_teardown_archive_collision_uniquifies(self) -> None:
+        # Shared by cleanup and merge: archiving a re-spawned id whose archive
+        # already exists must move the live dir to a unique name, leave the prior
+        # archive intact, and report archived=True (no stranding).
+        archive_root = self.state_dir / "tasks" / "_archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        (archive_root / "task-1").mkdir()
+        (archive_root / "task-1" / "marker.txt").write_text("first run")
+
+        task = state.load_task(self.state_dir, "1")
+        with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = False
+            archived = cleanup_mod.teardown(
+                self.state_dir, "1", task, archive=True,
+            )
+
+        self.assertTrue(archived)
+        self.assertFalse((self.state_dir / "tasks" / "task-1").exists())
+        self.assertEqual(
+            (archive_root / "task-1" / "marker.txt").read_text(), "first run"
+        )
+        self.assertTrue((archive_root / "task-1-2").is_dir())
+
     def test_teardown_uses_project_repo_as_project_root(self) -> None:
         # repo (self.project) differs from state_dir.parent; teardown must hand
         # on_cleanup the real repo so a non-fleet project's worktree (which lives
