@@ -25,7 +25,12 @@ class LeaderCmdTests(unittest.TestCase):
         self.fleet_home.mkdir()
         self._old_fleet_home = os.environ.get("FLEET_HOME")
         os.environ["FLEET_HOME"] = str(self.fleet_home)
-        self.label = "main"
+        # Use an isolated, randomized label so real-tmux tests never collide
+        # with a live leader session. The production default label is "main"
+        # → session "fleet-main"; if a test used it literally, tearDown's
+        # kill_session would terminate the running leader (the strict default
+        # is verified separately in test_default_session_label_is_main).
+        self.label = "test-" + os.urandom(3).hex()
         self.session = f"fleet-{self.label}"
 
     def tearDown(self) -> None:
@@ -37,9 +42,17 @@ class LeaderCmdTests(unittest.TestCase):
             os.environ["FLEET_HOME"] = self._old_fleet_home
         self._tmp.cleanup()
 
+    def test_default_session_label_is_main(self) -> None:
+        # The production default (no --name) is label "main" → session
+        # "fleet-main". Verified here without spawning a real session so the
+        # live-tmux tests can stay on isolated, randomized labels.
+        from fleet.commands import leader
+
+        self.assertEqual(leader.DEFAULT_SESSION_LABEL, "main")
+
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
-    def test_launch_creates_session_default_main(self) -> None:
-        r = run_fleet("leader", fleet_home=self.fleet_home)
+    def test_launch_creates_session_and_emits_event(self) -> None:
+        r = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(tmux.session_exists(self.session))
         events_path = state.session_dir(self.label) / "events.jsonl"
@@ -49,7 +62,8 @@ class LeaderCmdTests(unittest.TestCase):
 
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
     def test_launch_writes_session_record(self) -> None:
-        r = run_fleet("leader", "--agent", "claude:opus", fleet_home=self.fleet_home)
+        r = run_fleet("leader", "--name", self.label, "--agent", "claude:opus",
+                      fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 0, r.stderr)
         record_path = state.session_record_path(self.label)
         self.assertTrue(record_path.exists(), "session.json was not written")
@@ -63,15 +77,16 @@ class LeaderCmdTests(unittest.TestCase):
 
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
     def test_existing_session_is_idempotent(self) -> None:
-        r1 = run_fleet("leader", fleet_home=self.fleet_home)
+        r1 = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r1.returncode, 0, r1.stderr)
-        r2 = run_fleet("leader", fleet_home=self.fleet_home)
+        r2 = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("already exists", r2.stdout)
 
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
     def test_launch_writes_leader_prompt(self) -> None:
-        r = run_fleet("leader", "--prompt-delay", "0", fleet_home=self.fleet_home)
+        r = run_fleet("leader", "--name", self.label, "--prompt-delay", "0",
+                      fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 0, r.stderr)
         prompt_path = state.session_dir(self.label) / "leader-prompt.md"
         self.assertTrue(prompt_path.exists(), "leader-prompt.md was not written")
@@ -80,18 +95,20 @@ class LeaderCmdTests(unittest.TestCase):
 
     @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
     def test_custom_label_session(self) -> None:
-        session = "fleet-migration"
+        label = "test-" + os.urandom(3).hex()
+        session = f"fleet-{label}"
         try:
-            r = run_fleet("leader", "--name", "migration", fleet_home=self.fleet_home)
+            r = run_fleet("leader", "--name", label, fleet_home=self.fleet_home)
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertTrue(tmux.session_exists(session))
-            self.assertTrue(state.session_record_path("migration").exists())
+            self.assertTrue(state.session_record_path(label).exists())
         finally:
             if tmux.session_exists(session):
                 tmux.kill_session(session)
 
     def test_no_auto_paste_skips_prompt_file(self) -> None:
-        run_fleet("leader", "--no-auto-paste", fleet_home=self.fleet_home)
+        run_fleet("leader", "--name", self.label, "--no-auto-paste",
+                  fleet_home=self.fleet_home)
         prompt_path = state.session_dir(self.label) / "leader-prompt.md"
         self.assertFalse(prompt_path.exists(), "leader-prompt.md should not be written with --no-auto-paste")
 
