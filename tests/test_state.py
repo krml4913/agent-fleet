@@ -239,7 +239,7 @@ class SessionScopeTests(_FleetHomeBase):
 
     def test_session_scope_no_scope_field_is_none(self) -> None:
         import json
-        sdir = self._make_session_dir("main")
+        self._make_session_dir("main")
         state.session_record_path("main").write_text(
             json.dumps({"label": "main"}), encoding="utf-8"
         )
@@ -247,7 +247,7 @@ class SessionScopeTests(_FleetHomeBase):
 
     def test_session_scope_returns_list(self) -> None:
         import json
-        sdir = self._make_session_dir("main")
+        self._make_session_dir("main")
         state.session_record_path("main").write_text(
             json.dumps({"label": "main", "scope": ["a", "b"]}), encoding="utf-8"
         )
@@ -255,7 +255,7 @@ class SessionScopeTests(_FleetHomeBase):
 
     def test_session_scope_empty_list_normalised_to_none(self) -> None:
         import json
-        sdir = self._make_session_dir("main")
+        self._make_session_dir("main")
         state.session_record_path("main").write_text(
             json.dumps({"label": "main", "scope": []}), encoding="utf-8"
         )

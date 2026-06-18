@@ -1,7 +1,6 @@
 """Tests for ``fleet scope`` command (Issue #172)."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 import unittest
