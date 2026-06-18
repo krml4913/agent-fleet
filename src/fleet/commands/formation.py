@@ -4,11 +4,10 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from pathlib import Path
 
 import yaml
 
-from .. import state as state_mod
+from .. import task_context
 from .. import formation as formation_mod
 
 
@@ -26,7 +25,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--project",
         default=".",
-        help="Project name used to resolve custom formations (default: resolved from cwd)",
+        help=(
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd"
+        ),
     )
     sp = p.add_subparsers(dest="formation_cmd", required=True, metavar="<sub>")
 
@@ -57,13 +59,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p_init.set_defaults(func=run_init)
 
 
-def _state_dir(project: str) -> Path | None:
-    project_name = project if project != "." else None
-    return state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-
-
 def run_list(args: argparse.Namespace) -> int:
-    state_dir = _state_dir(args.project)
+    project_name = args.project if args.project != "." else None
     templates = formation_mod.list_templates()
     print("template formations:")
     if not templates:
@@ -73,22 +70,25 @@ def run_list(args: argparse.Namespace) -> int:
             print(f"  {name}")
     print()
     print("custom formations:")
-    if state_dir is None:
-        print("  (no registered project found for cwd — run `fleet init` first)")
-    else:
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
         custom = formation_mod.list_custom(state_dir)
         if not custom:
             print(f"  (none under {state_dir / 'formations'})")
         else:
             for name in custom:
                 print(f"  {name}")
+    except task_context.ProjectNotFound as e:
+        print(f"  (no project resolved — {e})")
     return 0
 
 
 def run_show(args: argparse.Namespace) -> int:
-    state_dir = _state_dir(args.project)
-    if state_dir is None:
-        print("error: no registered project found for cwd — run `fleet init` first", file=sys.stderr)
+    project_name = args.project if args.project != "." else None
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
     try:
         data = formation_mod.load_formation(args.name, state_dir)
@@ -104,9 +104,11 @@ def run_show(args: argparse.Namespace) -> int:
 
 
 def run_init(args: argparse.Namespace) -> int:
-    state_dir = _state_dir(args.project)
-    if state_dir is None:
-        print("error: no registered project found for cwd — run `fleet init` first", file=sys.stderr)
+    project_name = args.project if args.project != "." else None
+    try:
+        state_dir = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     template_name = args.template

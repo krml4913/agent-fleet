@@ -366,6 +366,84 @@ class StatusJsonTests(unittest.TestCase):
         self.assertIn("no registered project", result.stderr)
 
 
+class StatusProjectResolutionTests(unittest.TestCase):
+    """Tests for --project / positional alias / leader-pane error in table mode."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.fleet_home = base / "fleet-state"
+        self.fleet_home.mkdir()
+        self.project = base / "proj"
+        self.project.mkdir()
+        self._old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = make_project(self.fleet_home, "bmweb", self.project)
+        self.session_dir = state.session_dir("main")
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        if self._old is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old
+        self._tmp.cleanup()
+
+    def test_flag_project_works_in_table_mode(self) -> None:
+        result = run_fleet(
+            "status", "--project", "bmweb",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bmweb", result.stdout)
+
+    def test_positional_project_still_works(self) -> None:
+        result = run_fleet(
+            "status", "bmweb",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bmweb", result.stdout)
+
+    def test_flag_and_positional_same_value_ok(self) -> None:
+        result = run_fleet(
+            "status", "bmweb", "--project", "bmweb",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bmweb", result.stdout)
+
+    def test_flag_and_positional_conflict_errors(self) -> None:
+        make_project(self.fleet_home, "other", Path(self._tmp.name) / "other")
+        result = run_fleet(
+            "status", "bmweb", "--project", "other",
+            fleet_home=self.fleet_home, cwd=self.project,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("differ", result.stderr)
+
+    def test_leader_pane_no_project_errors(self) -> None:
+        result = run_fleet(
+            "status",
+            fleet_home=self.fleet_home,
+            cwd=self.project,
+            env_extra={"FLEET_STATE_DIR": str(self.session_dir)},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--project", result.stderr)
+        self.assertIn("--all", result.stderr)
+
+    def test_leader_pane_with_project_flag_works(self) -> None:
+        result = run_fleet(
+            "status", "--project", "bmweb",
+            fleet_home=self.fleet_home,
+            cwd=self.project,
+            env_extra={"FLEET_STATE_DIR": str(self.session_dir)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bmweb", result.stdout)
+
+
 class UnreadTasksTests(unittest.TestCase):
     def test_unread_when_no_ack(self) -> None:
         events = [{"ts": "2026-05-20T10:00:00Z", "type": "inbox_message", "task_id": "1"}]

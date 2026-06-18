@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
-from tests._fleet_test_helpers import make_project, run_fleet_agent  # noqa: E402
+from tests._fleet_test_helpers import make_project, run_fleet, run_fleet_agent  # noqa: E402
 
 
 def _approval_task(task_id: str) -> dict:
@@ -81,6 +81,14 @@ class LeaderProjectResolutionTests(unittest.TestCase):
             },
         )
 
+    def _run_fleet(self, *args: str) -> "subprocess.CompletedProcess[str]":  # noqa: F821
+        return run_fleet(
+            *args,
+            fleet_home=self.fleet_home,
+            cwd=self.repo,
+            env_extra={"FLEET_STATE_DIR": str(self.session_dir)},
+        )
+
     # -- cleanup ------------------------------------------------------------
 
     def test_cleanup_cross_project_with_project(self) -> None:
@@ -126,6 +134,52 @@ class LeaderProjectResolutionTests(unittest.TestCase):
     def test_approve_without_project_points_at_project_flag(self) -> None:
         self._save("1", _approval_task("1"))
         r = self._run("approve", "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--project", r.stderr)
+
+
+    # -- sweep: surface-A commands (fleet) ------------------------------------
+
+    def test_status_without_project_errors_in_leader_pane(self) -> None:
+        r = self._run_fleet("status")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--project", r.stderr)
+
+    def test_status_with_project_works_from_leader_pane(self) -> None:
+        r = self._run_fleet("status", "--project", "demo")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("demo", r.stdout)
+
+    def test_log_without_project_errors_in_leader_pane(self) -> None:
+        r = self._run_fleet("log")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--project", r.stderr)
+
+    def test_log_with_project_works_from_leader_pane(self) -> None:
+        r = self._run_fleet("log", "--project", "demo")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    # -- sweep: surface-A commands (fleet-agent) ------------------------------
+
+    def test_inbox_without_project_errors_in_leader_pane(self) -> None:
+        self._save("1", {
+            "id": "1", "title": "t", "status": "running",
+            "workspace": "none", "owner_session": "main",
+        })
+        r = self._run("inbox", "1", "hello")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--project", r.stderr)
+
+    def test_inbox_with_project_works_from_leader_pane(self) -> None:
+        self._save("1", {
+            "id": "1", "title": "t", "status": "running",
+            "workspace": "none", "owner_session": "main",
+        })
+        r = self._run("inbox", "1", "hello", "--project", "demo")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_send_prompt_without_project_errors_in_leader_pane(self) -> None:
+        r = self._run("send-prompt", "1")
         self.assertEqual(r.returncode, 1)
         self.assertIn("--project", r.stderr)
 

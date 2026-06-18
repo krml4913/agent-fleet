@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from .. import workspace as workspace_mod
 from .. import state as state_mod
+from .. import task_context
 
 
 def add_parser(sub: "argparse._SubParsersAction") -> None:
@@ -19,7 +19,14 @@ def add_parser(sub: "argparse._SubParsersAction") -> None:
             "Available: worktree, none."
         ),
     )
-    p.add_argument("--project", default=".", help="Project name (default: cwd)")
+    p.add_argument(
+        "--project",
+        default=".",
+        help=(
+            "Project name (registry); required from a project-agnostic leader "
+            "session, else resolved from FLEET_STATE_DIR / cwd"
+        ),
+    )
     sp = p.add_subparsers(dest="workspace_cmd", required=True, metavar="<sub>")
 
     sp_list = sp.add_parser("list", help="Show available workspace modes and the active one")
@@ -30,30 +37,30 @@ def add_parser(sub: "argparse._SubParsersAction") -> None:
     sp_set.set_defaults(func=run_set)
 
 
-def _state_dir(project: str) -> "Path | None":
-    project_name = project if project != "." else None
-    return state_mod.resolve_state_dir(Path.cwd(), project_name=project_name)
-
-
 def run_list(args: argparse.Namespace) -> int:
-    sd = _state_dir(args.project)
+    project_name = args.project if args.project != "." else None
     print("available workspace modes:")
     for v in workspace_mod.VALUES:
         print(f"  {v}")
-    if sd is not None:
+    try:
+        sd = task_context.resolve_project_state_dir(project_name=project_name)
         try:
             active = workspace_mod.load(sd)
         except FileNotFoundError:
             active = workspace_mod.DEFAULT
         print()
         print(f"active workspace: {active}")
+    except task_context.ProjectNotFound:
+        pass
     return 0
 
 
 def run_set(args: argparse.Namespace) -> int:
-    sd = _state_dir(args.project)
-    if sd is None:
-        print(f"error: no registered project for {args.project!r}", file=sys.stderr)
+    project_name = args.project if args.project != "." else None
+    try:
+        sd = task_context.resolve_project_state_dir(project_name=project_name)
+    except task_context.ProjectNotFound as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
     project = state_mod.load_project(sd)
     project["workspace"] = args.name
