@@ -233,3 +233,248 @@ class RebuildGlobalTests(unittest.TestCase):
         with patch.object(status_data, "collect_global_snapshot", _raise):
             result = html_dashboard.rebuild_global_if_present()
         self.assertIsNone(result)
+
+
+class UXImprovementTests(unittest.TestCase):
+    """Tests for the v1→v2 UX polish: banner anchors, title cleaning,
+    relative timestamps, event filtering, PR number labels, and active-first
+    project layout."""
+
+    def _snap_with_awaiting(self) -> dict:
+        """Snapshot with one awaiting_orders task in project 'alpha'."""
+        snap = _minimal_snapshot(
+            project_name="alpha",
+            task_title="# fleet-task : implement something",
+            task_status="awaiting_orders",
+        )
+        snap["projects"][0]["awaiting"] = snap["projects"][0]["tasks"]
+        return snap
+
+    # ------------------------------------------------------------------
+    # 1. Awaiting banner with anchor links
+    # ------------------------------------------------------------------
+
+    def test_banner_has_anchor_link_to_task_row(self) -> None:
+        snap = self._snap_with_awaiting()
+        out = html_dashboard.render(snap)
+        # Banner must contain a link to the task row anchor.
+        self.assertIn('href="#t-alpha-1"', out)
+
+    def test_task_row_has_id_attribute(self) -> None:
+        snap = self._snap_with_awaiting()
+        out = html_dashboard.render(snap)
+        # The task row must carry the matching id.
+        self.assertIn('id="t-alpha-1"', out)
+
+    def test_awaiting_row_has_css_class(self) -> None:
+        snap = self._snap_with_awaiting()
+        out = html_dashboard.render(snap)
+        self.assertIn('class="awaiting-row"', out)
+
+    def test_banner_absent_when_zero_awaiting(self) -> None:
+        snap = _minimal_snapshot(task_status="running")
+        out = html_dashboard.render(snap)
+        self.assertNotIn("awaiting orders", out)
+
+    # ------------------------------------------------------------------
+    # 2. Title cleaning
+    # ------------------------------------------------------------------
+
+    def test_title_strips_leading_hash(self) -> None:
+        snap = _minimal_snapshot(task_title="# My task title")
+        out = html_dashboard.render(snap)
+        self.assertIn("My task title", out)
+        # The raw "#" prefix should not appear as text content.
+        self.assertNotIn("># My task title<", out)
+
+    def test_long_title_truncated_with_full_in_hover(self) -> None:
+        long_title = "A" * 70
+        snap = _minimal_snapshot(task_title=long_title)
+        out = html_dashboard.render(snap)
+        # Truncation ellipsis present.
+        self.assertIn("…", out)
+        # Full title in title= attribute.
+        self.assertIn(f'title="{long_title}"', out)
+
+    def test_short_title_no_truncation(self) -> None:
+        snap = _minimal_snapshot(task_title="Short title")
+        out = html_dashboard.render(snap)
+        self.assertIn("Short title", out)
+        # No spurious title= attribute for short titles.
+        self.assertNotIn('title="Short title"', out)
+
+    # ------------------------------------------------------------------
+    # 3. Relative timestamps on recent events
+    # ------------------------------------------------------------------
+
+    def test_event_timestamp_shown_as_relative(self) -> None:
+        snap = _minimal_snapshot()
+        # Add a significant event (milestone) that predates generated_at by 5 min.
+        snap["recent_events"] = [
+            {
+                "ts": "2026-06-19T23:55:00Z",
+                "type": "milestone",
+                "task_id": "1",
+                "project": "demo",
+            }
+        ]
+        # generated_at is 2026-06-20T00:00:00Z (5 minutes later).
+        out = html_dashboard.render(snap)
+        self.assertIn("5m ago", out)
+
+    def test_event_absolute_timestamp_in_title_attr(self) -> None:
+        snap = _minimal_snapshot()
+        snap["recent_events"] = [
+            {
+                "ts": "2026-06-19T23:55:00Z",
+                "type": "milestone",
+                "task_id": "1",
+                "project": "demo",
+            }
+        ]
+        out = html_dashboard.render(snap)
+        self.assertIn('title="2026-06-19T23:55:00Z"', out)
+
+    # ------------------------------------------------------------------
+    # 4. Event noise filtering
+    # ------------------------------------------------------------------
+
+    def test_noise_events_excluded(self) -> None:
+        snap = _minimal_snapshot()
+        snap["recent_events"] = [
+            {"ts": "2026-06-20T00:00:00Z", "type": "heartbeat", "task_id": "1", "project": "demo"},
+            {"ts": "2026-06-20T00:00:00Z", "type": "inbox_seen", "task_id": "1", "project": "demo"},
+            {"ts": "2026-06-20T00:00:00Z", "type": "inbox_message", "task_id": "1", "project": "demo"},
+            {"ts": "2026-06-20T00:00:00Z", "type": "handoff_message", "task_id": "1", "project": "demo"},
+            {"ts": "2026-06-20T00:00:00Z", "type": "prompt_deliverer_started", "task_id": "1", "project": "demo"},
+        ]
+        out = html_dashboard.render(snap)
+        # All entries are noise → events section should be empty.
+        self.assertIn("(none)", out)
+
+    def test_significant_events_shown(self) -> None:
+        snap = _minimal_snapshot()
+        snap["recent_events"] = [
+            {"ts": "2026-06-20T00:00:00Z", "type": "heartbeat", "task_id": "1", "project": "demo"},
+            {"ts": "2026-06-20T00:00:00Z", "type": "done", "task_id": "1", "project": "demo"},
+        ]
+        out = html_dashboard.render(snap)
+        # "done" event should appear in the event list.
+        self.assertIn("done", out)
+        # heartbeat should be filtered out — not shown in the events section.
+        events_section = out.split("<h2>Recent events")[1] if "<h2>Recent events" in out else ""
+        self.assertNotIn("heartbeat", events_section)
+
+    def test_significant_event_coloring(self) -> None:
+        snap = _minimal_snapshot()
+        snap["recent_events"] = [
+            {"ts": "2026-06-20T00:00:00Z", "type": "done", "task_id": "1", "project": "demo"},
+        ]
+        out = html_dashboard.render(snap)
+        self.assertIn('class="ev-ok"', out)
+
+    def test_attention_event_coloring(self) -> None:
+        snap = _minimal_snapshot()
+        snap["recent_events"] = [
+            {"ts": "2026-06-20T00:00:00Z", "type": "failed", "task_id": "1", "project": "demo"},
+        ]
+        out = html_dashboard.render(snap)
+        self.assertIn('class="ev-attention"', out)
+
+    # ------------------------------------------------------------------
+    # 4b. PR link shows PR number
+    # ------------------------------------------------------------------
+
+    def test_pr_link_shows_number(self) -> None:
+        snap = _minimal_snapshot()
+        snap["projects"][0]["tasks"][0]["pr_url"] = "https://github.com/x/y/pull/42"
+        out = html_dashboard.render(snap)
+        self.assertIn("PR #42", out)
+        self.assertIn('href="https://github.com/x/y/pull/42"', out)
+
+    def test_pr_url_attribute_escaped(self) -> None:
+        snap = _minimal_snapshot()
+        snap["projects"][0]["tasks"][0]["pr_url"] = 'https://example.com/pull/1?a="b"'
+        out = html_dashboard.render(snap)
+        self.assertNotIn('"b"', out)
+        self.assertIn("&quot;b&quot;", out)
+
+    # ------------------------------------------------------------------
+    # 5. Active-first project layout
+    # ------------------------------------------------------------------
+
+    def test_active_project_before_empty(self) -> None:
+        snap: dict = {
+            "generated_at": "2026-06-20T00:00:00Z",
+            "version": "0.1.0",
+            "projects": [
+                {
+                    "name": "zzz-idle",
+                    "repo": "/tmp/idle",
+                    "repo_exists": True,
+                    "state_exists": True,
+                    "by_status": {},
+                    "awaiting": [],
+                    "tasks": [],
+                },
+                {
+                    "name": "aaa-work",
+                    "repo": "/tmp/work",
+                    "repo_exists": True,
+                    "state_exists": True,
+                    "by_status": {"running": 1},
+                    "awaiting": [],
+                    "tasks": [
+                        {
+                            "id": "1",
+                            "title": "do work",
+                            "status": "running",
+                            "severity": "active",
+                            "formation": "solo",
+                            "stage": None,
+                            "last_seen": "2m ago",
+                            "pr_url": None,
+                        }
+                    ],
+                },
+            ],
+            "sessions": [],
+            "recent_events": [],
+        }
+        out = html_dashboard.render(snap)
+        # "aaa-work" has tasks; "zzz-idle" does not.  Even though "zzz" sorts
+        # alphabetically before "aaa", active projects must appear first.
+        pos_active = out.index("aaa-work")
+        pos_idle = out.index("zzz-idle")
+        self.assertLess(pos_active, pos_idle, "active project must appear before idle one")
+
+    def test_empty_project_compressed(self) -> None:
+        snap: dict = {
+            "generated_at": "2026-06-20T00:00:00Z",
+            "version": "0.1.0",
+            "projects": [
+                {
+                    "name": "idle",
+                    "repo": "/tmp/idle",
+                    "repo_exists": True,
+                    "state_exists": True,
+                    "by_status": {},
+                    "awaiting": [],
+                    "tasks": [],
+                },
+            ],
+            "sessions": [],
+            "recent_events": [],
+        }
+        out = html_dashboard.render(snap)
+        # Empty project should appear as a compact entry, not a full <table>.
+        self.assertIn("idle", out)
+        self.assertNotIn("<table>", out)
+        self.assertIn("no tasks", out)
+
+    def test_header_summary_stats(self) -> None:
+        snap = _minimal_snapshot(task_status="running")
+        out = html_dashboard.render(snap)
+        self.assertIn("running 1", out)
+        self.assertIn("awaiting 0", out)
+        self.assertIn("projects 1", out)
