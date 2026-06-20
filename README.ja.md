@@ -122,6 +122,7 @@ leader ▸ `status-json-flag` を pair_review で開始する（codex が実装�
 ```bash
 ~/dev/agent-fleet/fleet status                 # タスク一覧 + 直近のイベント
 cat fleet-state/projects/trial/dashboard.md    # 人間が読めるロールアップ（自動更新）
+~/dev/agent-fleet/fleet dashboard              # 全 PJ 横断 GUI ビュー（ブラウザで開く）
 ```
 
 driver の肩越しに覗いたり引き継いだりするには、そのペインにアタッチする —— これが
@@ -232,6 +233,8 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | leader ペインを起動 / アタッチする（デフォルトエージェント `claude:opus`）。 |
 | `fleet attach [target] [--project P]` | leader（デフォルト）またはタスク driver ペインにアタッチする。 |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | プロジェクト情報、タスク一覧、直近のイベントを表示する。`--all` 時はセッションの scope 内 project のみ表示（`--unscoped` で全件）。 |
+| `fleet sessions` | leader セッションと全 PJ の実行中タスクを一覧表示する。 |
+| `fleet dashboard [--no-open]` | 全 PJ 横断 HTML ダッシュボード（`fleet-state/global/dashboard.html`）を生成してブラウザで開く。 |
 | `fleet scope [label] [--set/--add/--rm/--clear]` | leader セッションが担当する project の集合（scope）を確認・編集する。 |
 | `fleet log [task_id] [-n N] [--type T]` | `events.jsonl` を tail し、任意でタスク / タイプでフィルタする。 |
 | `fleet formation list \| show <name> \| init --from <template>` | formation を確認または作成する。 |
@@ -286,6 +289,8 @@ reviewer を追加し、ゲートを外せる。完全なスキーマと leader 
 ```
 agent-fleet/fleet-state/
   projects.yaml                 # 既知のプロジェクトのレジストリ
+  global/
+    dashboard.html              # 全 PJ 横断 GUI ビュー（自動生成、fleet dashboard で開く）
   projects/trial/
     project.yaml                # name / workspace モード / created_at
     events.jsonl                # 追記専用の監査ログ

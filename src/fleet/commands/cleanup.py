@@ -26,7 +26,7 @@ from .. import tmux as tmux_mod
 from ..events import append_event
 
 
-TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+TERMINAL_STATUSES = state_mod.TERMINAL_STATUSES
 
 
 def teardown(

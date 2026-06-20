@@ -117,6 +117,7 @@ Keep an eye on progress from any shell in the project:
 ```bash
 ~/dev/agent-fleet/fleet status                 # tasks + recent events
 cat fleet-state/projects/trial/dashboard.md    # human-readable rollup (auto-updated)
+~/dev/agent-fleet/fleet dashboard              # cross-project GUI view (opens in browser)
 ```
 
 To look over a driver's shoulder or take over, attach into its pane — this is
@@ -227,6 +228,8 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane (default agent `claude:opus`). |
 | `fleet attach [target] [--project P]` | Attach to the leader (default) or a task driver pane. |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | Print project info, task list, recent events. With `--all`, filters to the session's scope by default; `--unscoped` shows all projects. |
+| `fleet sessions` | List leader sessions and their in-flight tasks across all projects. |
+| `fleet dashboard [--no-open]` | Render & open the cross-project HTML dashboard (`fleet-state/global/dashboard.html`). |
 | `fleet scope [label] [--set/--add/--rm/--clear]` | View or edit the set of projects a leader session is responsible for. |
 | `fleet log [task_id] [-n N] [--type T]` | Tail `events.jsonl`, optionally filtered by task / type. |
 | `fleet formation list \| show <name> \| init --from <template>` | Inspect or create formations. |
@@ -281,6 +284,8 @@ After `fleet init --name trial`, state lives under the agent-fleet checkout:
 ```
 agent-fleet/fleet-state/
   projects.yaml                 # registry of known projects
+  global/
+    dashboard.html              # cross-project GUI view (auto-generated, open with fleet dashboard)
   projects/trial/
     project.yaml                # name / workspace mode / created_at
     events.jsonl                # append-only audit log

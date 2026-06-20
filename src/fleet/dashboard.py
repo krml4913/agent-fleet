@@ -101,9 +101,14 @@ def render(state_dir: Path) -> str:
 
 
 def rebuild(state_dir: Path) -> Path:
-    """Re-render dashboard.md from current state. Returns the dashboard path."""
+    """Re-render dashboard.md from current state and refresh the global HTML if present.
+
+    Returns the per-project dashboard.md path.
+    """
     out = state_dir / "dashboard.md"
     text = render(state_dir)
     with atomic_write(out) as f:
         f.write(text)
+    from . import html_dashboard  # local import: cycle break
+    html_dashboard.rebuild_global_if_present()
     return out

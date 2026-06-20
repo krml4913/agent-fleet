@@ -7,6 +7,28 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: cross-project HTML dashboard (`fleet dashboard`)
+
+Add `fleet dashboard [--no-open]` — a new user-facing CLI command that generates
+a self-contained HTML file (`fleet-state/global/dashboard.html`) showing every
+registered project's task state, leader sessions, and a merged recent-events tail
+in one browser page.  Refs #182.
+
+- **No daemon, no HTTP server**: the file is generated on demand and kept fresh by
+  the existing `dashboard.rebuild` write hook (opt-in by file presence; zero
+  cross-project scan cost until the user first runs `fleet dashboard`).
+- **Browser liveness** via `<meta http-equiv="refresh" content="15">` — no
+  resident process.
+- **`src/fleet/status_data.py`** (new core module): presentation-agnostic
+  state-derivation helpers extracted from `commands/status.py` and
+  `commands/sessions.py` so the HTML renderer (core) can reuse them without an
+  inverted dependency on commands.
+- **`src/fleet/html_dashboard.py`** (new core renderer): inline CSS, vanilla HTML,
+  no JS framework, no external assets.
+- **`state.TERMINAL_STATUSES`** added as the canonical constant (re-exported by
+  `commands/cleanup.py` for back-compat).
+- `dashboard.md` is unchanged — the HTML view is additive, not a replacement.
+
 ### fix: clear a batch of non-blocking review nits (scope / handoff / docs)
 
 Four independent, low-risk polish items deferred as non-blocking nits during the

@@ -39,6 +39,9 @@ REGISTRY_VERSION = 1
 # leader memory (``global/leader-memory/``) and — reserved for later phases of
 # Issue #166 — per-session leader state (``global/sessions/<label>/``).
 GLOBAL_SUBDIR = "global"
+
+# Task statuses that indicate no further work is expected.
+TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 LEADER_MEMORY_SUBDIR = "leader-memory"
 SESSIONS_SUBDIR = "sessions"
 SESSION_RECORD_NAME = "session.json"

@@ -20,6 +20,7 @@ from .commands import approval as approval_cmd
 from .commands import ask as ask_cmd
 from .commands import attach as attach_cmd
 from .commands import cleanup as cleanup_cmd
+from .commands import dashboard as dashboard_cmd
 from .commands import done as done_cmd
 from .commands import event as event_cmd
 from .commands import inbox as inbox_cmd
@@ -57,6 +58,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     attach_cmd.add_parser(sub)
     status_cmd.add_parser(sub)
     sessions_cmd.add_parser(sub)
+    dashboard_cmd.add_parser(sub)
     scope_cmd.add_parser(sub)
     log_cmd.add_parser(sub)
     formation_cmd.add_parser(sub)
