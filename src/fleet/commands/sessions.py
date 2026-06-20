@@ -12,13 +12,11 @@ with no ``owner_session`` is attributed to ``main`` (the default label), matchin
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-from pathlib import Path
 
-from . import cleanup as cleanup_mod
 from .. import state as state_mod
+from .. import status_data as status_data_mod
 from .. import tmux as tmux_mod
 
 _RESET = "\033[0m"
@@ -109,63 +107,9 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _liveness(label: str, tmux_ok: bool) -> bool | None:
-    """Return True (live), False (stale), or None (tmux unavailable → unknown)."""
-    if not tmux_ok:
-        return None
-    return tmux_mod.session_exists(f"fleet-{label}")
-
-
-def _load_session_records() -> dict[str, dict]:
-    """Map session label → its ``session.json`` record (dir name is the key).
-
-    A missing or unparseable record yields an empty dict for that label so the
-    session still appears in the listing.
-    """
-    out: dict[str, dict] = {}
-    sessions_root = state_mod.global_sessions_dir()
-    if not sessions_root.is_dir():
-        return out
-    for child in sorted(sessions_root.iterdir()):
-        if not child.is_dir():
-            continue
-        rec_path = child / state_mod.SESSION_RECORD_NAME
-        if not rec_path.is_file():
-            continue
-        try:
-            data = json.loads(rec_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            data = {}
-        out[child.name] = data if isinstance(data, dict) else {}
-    return out
-
-
-def _scan_inflight_tasks() -> dict[str, list[dict]]:
-    """Map owner-session label → its non-terminal tasks across all projects.
-
-    Each task entry is ``{project, id, status, title}``. A missing/empty
-    ``owner_session`` defaults to ``main`` (:func:`state.task_owner_session`).
-    """
-    by_label: dict[str, list[dict]] = {}
-    reg = state_mod.load_registry()
-    for name in sorted(reg.get("projects", {})):
-        state_dir = state_mod.project_state_dir(name)
-        if not state_dir.is_dir():
-            continue
-        for task in state_mod.list_tasks(state_dir):
-            status = str(task.get("status", "?"))
-            if status in cleanup_mod.TERMINAL_STATUSES:
-                continue
-            label = state_mod.task_owner_session(task)
-            by_label.setdefault(label, []).append(
-                {
-                    "project": name,
-                    "id": str(task.get("id", "?")),
-                    "status": status,
-                    "title": str(task.get("title") or "-"),
-                }
-            )
-    return by_label
+_liveness = status_data_mod.session_liveness
+_load_session_records = status_data_mod.load_session_records
+_scan_inflight_tasks = status_data_mod.scan_inflight_tasks
 
 
 def _style(text: str, code: str, enabled: bool) -> str:

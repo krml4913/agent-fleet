@@ -10,6 +10,7 @@ from pathlib import Path
 from .. import heartbeat
 from .. import leader_notifier
 from .. import state as state_mod
+from .. import status_data as status_data_mod
 from .. import task_context
 from ..events import read_events
 
@@ -313,30 +314,7 @@ def _task_json(state_dir: Path, task_id: str, task: dict) -> dict:
     }
 
 
-def _gate_result(task: dict) -> str | None:
-    """Return the current stage's gate/approval result, or ``None``.
-
-    Mirrors the orchestrator's per-stage bookkeeping: a stage carries an
-    explicit ``result`` (e.g. ``changes-requested``) and/or a ``user_approval``
-    gate whose ``status`` settles to ``approved``. Prefer the explicit result,
-    fall back to a settled approval, else ``None``.
-    """
-    idx = _current_stage_index(task)
-    stages = task.get("stages")
-    if idx < 0 or not isinstance(stages, list):
-        return None
-    stage = stages[idx]
-    if not isinstance(stage, dict):
-        return None
-    result = stage.get("result")
-    if result:
-        return str(result)
-    ua = stage.get("user_approval")
-    if isinstance(ua, dict):
-        ua_status = ua.get("status")
-        if ua_status in {"approved", "rejected"}:
-            return str(ua_status)
-    return None
+_gate_result = status_data_mod.gate_result
 
 
 def _last_event(events: list[dict], task_id: str) -> dict | None:
@@ -448,24 +426,14 @@ def _style(text: str, code: str, enabled: bool) -> str:
 
 
 def _status_color(status: str) -> str:
-    if status in {"done", "approved"}:
-        return _GREEN
-    if status in {"running", "spawning"}:
-        return _YELLOW
-    if status in {"awaiting_orders", "failed", "changes-requested"}:
-        return _RED
-    return ""
+    return {
+        "ok": _GREEN,
+        "active": _YELLOW,
+        "attention": _RED,
+    }.get(status_data_mod.status_severity(status), "")
 
 
-def _current_stage_index(task: dict) -> int:
-    """Return the valid current-stage index, or -1 if the task has no stages."""
-    stages = task.get("stages")
-    if not isinstance(stages, list) or not stages:
-        return -1
-    idx = task.get("current_stage", 0)
-    if not isinstance(idx, int) or idx < 0 or idx >= len(stages):
-        return -1
-    return idx
+_current_stage_index = status_data_mod.current_stage_index
 
 
 def _stage_cell(task: dict) -> str:
@@ -541,16 +509,7 @@ def _print_verbose(task: dict, acks: dict, use_color: bool) -> None:
     print(f"      acks: inbox_seen {seen}  ·  heartbeat {beat}")
 
 
-def _peer_review_progress(peer_review: object) -> str:
-    if not isinstance(peer_review, dict):
-        return ""
-    if peer_review.get("phase") not in {"implementing", "reviewing"}:
-        return ""
-
-    iteration = peer_review.get("iteration")
-    if iteration is None or iteration == "":
-        return "review"
-    return f"review ×{iteration}"
+_peer_review_progress = status_data_mod.peer_review_progress
 
 
 def _short_date(value: str) -> str:
