@@ -25,6 +25,25 @@ def _truthy(value: object) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _next_handoff_role(stages: list, idx: int) -> str:
+    """Role of the driver that actually runs next after an intermediate handoff.
+
+    A peer_review handoff keeps the **same** stage and only flips the
+    implementer/reviewer phase, so ``stages[idx]["role"]`` is the stage's
+    primary (implementer) role — not necessarily who runs next. When the stage
+    is in the ``reviewing`` phase the next driver is the reviewer
+    (``peer_review.role``); otherwise it is the stage's own role (a multi-stage
+    advance, or a rework iteration back to the implementer).
+    """
+    if not (0 <= idx < len(stages)):
+        return "?"
+    stage = stages[idx]
+    pr = stage.get("peer_review")
+    if isinstance(pr, dict) and pr.get("role") and pr.get("phase") == "reviewing":
+        return str(pr.get("role") or "?")
+    return str(stage.get("role", "?") or "?")
+
+
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "done",
@@ -98,10 +117,10 @@ def run(args: argparse.Namespace) -> int:
         current_idx = task.get("current_stage", 0)
         if not isinstance(current_idx, int):
             current_idx = 0
-        next_role = stages[current_idx].get("role", "?") if 0 <= current_idx < M else "?"
+        next_role = _next_handoff_role(stages, current_idx)
         level = "progress"
-        title = f"fleet {project_name}: task-{task_id} stage {N} done"
-        message = f"task-{task_id} stage {N} done → next stage ({next_role}) starting"
+        title = f"fleet {project_name}: task-{task_id} stage {N} handed off"
+        message = f"task-{task_id} stage {N} handed off → {next_role}"
 
     notify.send(state_dir, title=title, message=message, level=level)
 

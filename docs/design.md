@@ -342,6 +342,26 @@ cwd-based fallbacks (2, 3) never resolve a project for it. Those fallbacks remai
 for drivers (running inside a task dir / worktree) and for ad-hoc human
 invocations — not for leader dispatch.
 
+**Unified resolution + a session-aware default (Issue #171).** Both the
+task-centric entry point (`task_context.resolve`) and the project-centric one
+(`task_context.resolve_project_state_dir`) run the **same** three-step core, so
+`--project` behaves identically everywhere and the project-centric path no longer
+needs a task id. The driver-facing layer adds two rules on top of
+`resolve_state_dir`:
+
+1. `--project <name>` wins outright — registry-by-name, ignoring `FLEET_STATE_DIR`
+   and cwd (the leader path; priority 1 above).
+2. With no `--project`, `FLEET_STATE_DIR` wins over cwd — **except** when it
+   points at a leader **session dir** (`global/sessions/<label>/`, which carries
+   no `tasks/`). That absence is the signal of a leader pane: rather than
+   dead-end on the wrong project, the resolver refuses and tells the caller to
+   name the project (`--project`, or `--all` for `fleet status`). Otherwise it
+   falls back to cwd via the registry for ad-hoc human use.
+
+So a bare `fleet status` / `fleet-agent …` from a leader pane is a guided error
+("pass `--project <name>` or `--all`"), from a worktree resolves that task's
+project, and from a registered repo resolves by longest-path match.
+
 ### 5.4 Race Protection
 
 State is hardened through Python structure:
@@ -409,6 +429,27 @@ There is no persisted "active project" pointer; the conversational active projec
 is focus only, and every dispatch passes `--project` explicitly (§4.1). The
 session→pane mapping and each session's in-flight tasks are surfaced by `fleet
 sessions` (§10.3), the cross-session CLI view.
+
+**Session scope — an optional project allow-list (Issue #172).** A session may
+declare a **scope**: the set of projects it is responsible for. Scope is the
+optional `scope` field on `global/sessions/<label>/session.json` (a sorted name
+list). It is a focus / safety layer over the per-project storage above —
+**absent field ⇒ unscoped ⇒ all registered projects** (full backward
+compatibility; sessions that predate scope keep serving everything). Surfaces:
+
+| Surface | Behaviour |
+|---|---|
+| `fleet scope <label> [--set / --add / --rm / --clear]` | view (no flag) or mutate the scope; `--set` / `--add` validate names against the registry |
+| `fleet leader --scope a,b,c` | set the scope at session launch — names are registry-validated **before** the pane / `session.json` are created |
+| `fleet status --all` | defaults to the session's scope; `--unscoped` shows every registered project, with a one-line note of how many were hidden |
+| `fleet-agent start …` (dispatch) | **hard-blocks** a dispatch whose target project is outside the owner session's scope; `--allow-out-of-scope` overrides for an intentional cross-scope dispatch |
+| leader prompt | the session's scope roster is injected so the leader knows its projects (unscoped ⇒ a note listing all registered projects) |
+
+Scope is a **dial, not a wall**: by default it filters views and guards dispatch,
+but every guard has an explicit override, consistent with §1.3 ("mechanism gives
+a dial, the user picks"). It binds to the session rather than a project because
+the session is the context-scope unit, and one project may be served by several
+sessions.
 
 ---
 

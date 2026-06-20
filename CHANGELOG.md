@@ -7,6 +7,29 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: clear a batch of non-blocking review nits (scope / handoff / docs)
+
+Four independent, low-risk polish items deferred as non-blocking nits during the
+session-scope (#176) and notify-noise (#178) peer reviews:
+
+- **`fleet leader --scope` validates before side effects.** An invalid `--scope`
+  project name is now rejected *before* the tmux session and `session.json` are
+  created, instead of after — a typo no longer leaves a half-built leader pane
+  with an unpasted prompt. The valid path is unchanged.
+- **`fleet scope --add ""` no longer silently no-ops.** The read-only/mutate
+  branch tested flag *truthiness*, so a present-but-empty value (`--add ""`) fell
+  through to the display path. It now tests flag *presence* and rejects an empty
+  project list with an explicit error.
+- **`fleet-agent done` desktop notification names the real next driver.** For a
+  peer_review `implementer → reviewer` handoff the stage does not advance, so the
+  message surfaced the stage's own implementer role and claimed "next stage
+  starting". It now derives the actual next role (the reviewer) from the
+  peer_review phase and uses accurate handoff wording.
+- **`docs/design.md` reflects the shipped session-scope (#172) and unified
+  `--project` resolution (#171) as settled design** (§5.3, §5.6).
+- Regression tests added for the scope-validation, empty-`--add`, and
+  peer_review-handoff paths.
+
 ### fix: recover dropped codex submit Enter so prompt delivery doesn't time out
 
 Spawning a `codex` driver could fail prompt delivery: the deliverer pasted the

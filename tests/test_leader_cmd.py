@@ -156,6 +156,55 @@ class LeaderCmdTests(unittest.TestCase):
         cli_sent = mock_tmux.send_keys.call_args_list[0].args[2]
         self.assertIn(f"--name {self.label}-leader", cli_sent)
 
+    def test_invalid_scope_fails_before_session_creation(self) -> None:
+        """An unknown --scope project errors before any tmux/session.json side effect."""
+        from fleet.commands import leader
+
+        args = unittest.mock.MagicMock()
+        args.name = self.label
+        args.agent = "claude:opus"
+        args.attach = False
+        args.auto_paste = False
+        args.prompt_delay = 0.0
+        args.scope = "no-such-project"
+
+        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = False
+            mock_tmux.TmuxError = Exception
+            result = leader.run(args)
+
+        self.assertEqual(result, 1)
+        # Nothing was created: no tmux session, no session.json record.
+        mock_tmux.new_session.assert_not_called()
+        self.assertFalse(state.session_record_path(self.label).exists())
+
+    def test_valid_scope_is_applied_to_session_record(self) -> None:
+        """A registered --scope project is validated and persisted onto session.json."""
+        from tests._fleet_test_helpers import make_project
+        from fleet.commands import leader
+
+        repo = Path(self._tmp.name) / "alpha-repo"
+        repo.mkdir()
+        make_project(self.fleet_home, "alpha", repo)
+
+        args = unittest.mock.MagicMock()
+        args.name = self.label
+        args.agent = "claude:opus"
+        args.attach = False
+        args.auto_paste = False
+        args.prompt_delay = 0.0
+        args.scope = "alpha"
+
+        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
+            mock_tmux.available.return_value = True
+            mock_tmux.session_exists.return_value = False
+            mock_tmux.TmuxError = Exception
+            result = leader.run(args)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(state.session_scope(self.label), ["alpha"])
+
     def test_injects_fleet_session_env(self) -> None:
         from fleet.commands import leader
 

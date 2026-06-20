@@ -212,7 +212,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertEqual(self._last_level, "waiting")
 
     def test_notify_next_stage_running(self) -> None:
-        """When advancing to the next stage, the 'stage N done → next stage (role) starting' wording is sent."""
+        """A multi-stage advance names the genuinely-next stage's role in the handoff wording."""
         state.save_task(self.state_dir, "ms1", {
             "id": "ms1", "title": "x", "status": "running",
             "formation": "pair_review", "workspace": "none",
@@ -234,9 +234,47 @@ class DoneNotifyTests(unittest.TestCase):
         task = state.load_task(self.state_dir, "ms1")
         self.assertEqual(task["status"], "running")
         self.assertIn("ms1", message)
-        self.assertIn("stage 1 done", message)
+        self.assertIn("stage 1 handed off", message)
         self.assertIn("reviewer", message)
-        self.assertIn("starting", message)
+        self.assertEqual(self._last_level, "progress")
+
+    def test_notify_peer_review_handoff_names_reviewer(self) -> None:
+        """An implementer→reviewer peer_review handoff names the reviewer, not the implementer.
+
+        Regression: the peer_review handoff keeps the same stage and only flips
+        the phase to 'reviewing', so reading stages[current_idx].role surfaced
+        the stage's own implementer role instead of the actual next driver
+        (the reviewer), and 'next stage starting' was wrong (same stage).
+        """
+        state.save_task(self.state_dir, "pr1", {
+            "id": "pr1", "title": "x", "status": "running",
+            "formation": "pair_review", "workspace": "none",
+            "current_stage": 0,
+            "stages": [
+                {
+                    "role": "implementer", "agent": "claude:sonnet", "status": "running",
+                    "peer_review": {"role": "code-reviewer"},
+                },
+            ],
+        })
+        task_dir = self.state_dir / "tasks" / "task-pr1"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "driver-prompt.md").write_text("test prompt")
+        (task_dir / "inbox.md").write_text("")
+        (task_dir / "outbox.md").write_text("")
+
+        ret, title, message = self._run_done("pr1")
+
+        self.assertEqual(ret, 0)
+        task = state.load_task(self.state_dir, "pr1")
+        # Same stage, only the phase flipped — no stage advance.
+        self.assertEqual(task["current_stage"], 0)
+        self.assertEqual(task["stages"][0]["peer_review"]["phase"], "reviewing")
+        # The desktop message must name the actual next driver (the reviewer),
+        # not the stage's own implementer role.
+        self.assertIn("code-reviewer", message)
+        self.assertNotIn("implementer", message)
+        self.assertNotIn("starting", message)
         self.assertEqual(self._last_level, "progress")
 
 

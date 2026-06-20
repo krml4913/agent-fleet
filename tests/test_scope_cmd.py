@@ -95,6 +95,23 @@ class ScopeCmdTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unknown", result.stderr)
 
+    def test_add_empty_string_is_rejected_not_silently_ignored(self) -> None:
+        """`--add ""` is a present-but-falsy flag; it must error, not fall through to display."""
+        self._run("scope", "main", "--set", "alpha")
+        result = self._run("scope", "main", "--add", "")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no project name", result.stderr)
+        # It must not have been silently treated as a read-only display.
+        self.assertNotIn("unscoped", result.stdout)
+        self.assertNotIn("alpha", result.stdout)
+        # The existing scope is left untouched.
+        self.assertEqual(state.session_scope("main"), ["alpha"])
+
+    def test_set_empty_string_is_rejected(self) -> None:
+        result = self._run("scope", "main", "--set", "")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no project name", result.stderr)
+
     # --- record-less session dir ---
 
     def test_set_creates_record_for_recordless_session(self) -> None:
