@@ -183,6 +183,26 @@ def in_scope(label: str, project_name: str) -> bool:
     return project_name in scope
 
 
+def validate_registered_projects(names: list[str] | None) -> None:
+    """Raise ``ValueError`` if any of *names* is not a registered project.
+
+    Shared by ``fleet scope`` and ``fleet leader --scope`` so an invalid project
+    name can be rejected *before* any session / tmux side effects are created.
+    Empty / falsy input is a no-op.
+    """
+    if not names:
+        return
+    reg = load_registry()
+    known = set(reg.get("projects", {}).keys())
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        listed = ", ".join(sorted(known)) if known else "(none)"
+        raise ValueError(
+            f"unknown project name(s): {', '.join(unknown)}\n"
+            f"registered projects: {listed}"
+        )
+
+
 def set_session_scope(
     label: str,
     names: list[str] | None,
@@ -239,16 +259,8 @@ def set_session_scope(
             record.pop(SESSION_SCOPE_KEY, None)
         return _json.dumps(record, indent=2)
 
-    if mode in ("set", "add") and names:
-        reg = load_registry()
-        known = set(reg.get("projects", {}).keys())
-        unknown = [n for n in names if n not in known]
-        if unknown:
-            listed = ", ".join(sorted(known)) if known else "(none)"
-            raise ValueError(
-                f"unknown project name(s): {', '.join(unknown)}\n"
-                f"registered projects: {listed}"
-            )
+    if mode in ("set", "add"):
+        validate_registered_projects(names)
 
     sdir = session_dir(label)
     sdir.mkdir(parents=True, exist_ok=True)

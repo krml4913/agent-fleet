@@ -78,6 +78,17 @@ def _parse_names(value: str) -> list[str]:
     return [n.strip() for n in value.split(",") if n.strip()]
 
 
+def _require_names(names: list[str], flag: str) -> None:
+    """Reject an empty / whitespace-only project list for a mutation flag.
+
+    ``--add ""`` (and friends) parse to ``[]``; without this they would be a
+    silent no-op. Make the intent explicit — a mutation flag carrying no real
+    name is an error, not a quiet skip.
+    """
+    if not names:
+        raise ValueError(f"{flag}: no project name given (got an empty value)")
+
+
 def run(args: argparse.Namespace) -> int:
     label = _resolve_label(args)
 
@@ -86,8 +97,10 @@ def run(args: argparse.Namespace) -> int:
     rm_names = getattr(args, "rm_names", None)
     clear = getattr(args, "clear", False)
 
-    # Read-only mode
-    if not any([set_names, add_names, rm_names, clear]):
+    # Read-only mode: no mutation flag was given at all. Test flag *presence*
+    # (`is not None` / the `clear` bool), not truthiness — `--add ""` is present
+    # but falsy and must not silently fall through to the display path.
+    if set_names is None and add_names is None and rm_names is None and not clear:
         scope = state_mod.session_scope(label)
         if scope is None:
             print(f"{label}: (unscoped — all projects)")
@@ -102,14 +115,17 @@ def run(args: argparse.Namespace) -> int:
             print(f"{label}: scope cleared (unscoped — all projects)")
         elif set_names is not None:
             names = _parse_names(set_names)
+            _require_names(names, "--set")
             new = state_mod.set_session_scope(label, names, mode="set")
             print(f"{label}: scope set to {', '.join(new or [])}")
         elif add_names is not None:
             names = _parse_names(add_names)
+            _require_names(names, "--add")
             new = state_mod.set_session_scope(label, names, mode="add")
             print(f"{label}: scope is now {', '.join(new or [])}")
         elif rm_names is not None:
             names = _parse_names(rm_names)
+            _require_names(names, "--rm")
             new = state_mod.set_session_scope(label, names, mode="rm")
             if new:
                 print(f"{label}: scope is now {', '.join(new)}")

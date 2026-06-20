@@ -111,6 +111,19 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
+    # Validate --scope against the registry *before* any tmux session or
+    # session.json is created. An invalid project name must fail early — not
+    # after the leader pane and record already exist with an unpasted prompt.
+    scope_arg = getattr(args, "scope", None)
+    scope_names: list[str] = []
+    if scope_arg:
+        scope_names = [n.strip() for n in scope_arg.split(",") if n.strip()]
+        try:
+            state_mod.validate_registered_projects(scope_names)
+        except ValueError as e:
+            print(f"error: --scope: {e}", file=sys.stderr)
+            return 1
+
     session_dir = state_mod.session_dir(label)
     session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -147,15 +160,11 @@ def run(args: argparse.Namespace) -> int:
         encoding="utf-8",
     )
 
-    # Set scope from --scope flag before prompt is pasted
-    scope_arg = getattr(args, "scope", None)
-    if scope_arg:
-        scope_names = [n.strip() for n in scope_arg.split(",") if n.strip()]
-        try:
-            state_mod.set_session_scope(label, scope_names, mode="set")
-        except ValueError as e:
-            print(f"error: --scope: {e}", file=sys.stderr)
-            return 1
+    # Apply the already-validated scope (parsed above) before the prompt is
+    # pasted. Names were registry-checked before the session existed, so this
+    # only persists the scope onto the freshly written record.
+    if scope_names:
+        state_mod.set_session_scope(label, scope_names, mode="set")
 
     if args.auto_paste:
         prompt_text = lp.render(session_label=label)
