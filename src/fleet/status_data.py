@@ -308,5 +308,7 @@ def collect_global_snapshot() -> dict:
         "version": __version__,
         "projects": collect_projects(),
         "sessions": collect_sessions(),
-        "recent_events": collect_recent_events(),
+        # Collect extra so the renderer can filter noise and still show
+        # RECENT_EVENTS_DISPLAYED significant events.
+        "recent_events": collect_recent_events(limit=100),
     }

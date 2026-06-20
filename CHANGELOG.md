@@ -7,6 +7,36 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: HTML dashboard UX polish (awaiting banner, title cleaning, relative timestamps, event filtering)
+
+Four usability improvements on top of the v1 HTML dashboard (PR #183).  Design
+principles from v1 are preserved: no daemon, no polling, no new dependencies,
+stdlib-only, inline CSS, safe escaping throughout.  Refs #184.
+
+- **Awaiting-orders banner with anchor links**: tasks in `awaiting_orders` state
+  are surfaced at the top of the page with clickable links that jump to the
+  corresponding task row.  The row itself gets a left-border highlight.  Banner is
+  suppressed when there are zero awaiting tasks.
+- **Title cleaning**: leading `#` markers and decoration are stripped from task
+  titles.  Titles longer than 60 chars are truncated with `…`; the full title is
+  available in a `title=` hover attribute.
+- **Relative timestamps on recent events**: event timestamps are shown as
+  `"Nm ago"` / `"Nh ago"` computed at render time relative to `generated_at`.
+  Absolute timestamps are preserved in `title=` for hover access.
+- **Event noise filtering**: `heartbeat`, `inbox_seen`, `inbox_message`,
+  `handoff_message`, `prompt_deliverer_started` are excluded from the
+  recent-events display.  Significant events (`done`, `merge`, `start`,
+  `awaiting_orders`, `failed`, `error`, …) are color-coded by severity.
+- **Active-first project layout**: projects with tasks render first (full table);
+  projects with no tasks are compressed to a single summary line below.
+- **Header summary stats**: at-a-glance count of running / awaiting / projects in
+  the top-right corner.
+- **PR number labels**: PR links now show `PR #N` instead of the generic `PR`
+  text; URL is still the href, number extracted from the GitHub pull URL.
+- `collect_global_snapshot()` in `status_data.py` now collects 100 events so the
+  renderer can filter noise and still surface `RECENT_EVENTS_DISPLAYED` (15)
+  significant ones.
+
 ### feat: cross-project HTML dashboard (`fleet dashboard`)
 
 Add `fleet dashboard [--no-open]` — a new user-facing CLI command that generates
