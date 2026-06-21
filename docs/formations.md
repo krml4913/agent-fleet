@@ -130,7 +130,9 @@ Behavior:
 - On reject, the stage returns to implementation (if there is a `peer_review`, the implementer pane is woken).
 
 The approval call belongs to the user — **the leader does not self-approve**
-(see the `user-approval-gate` memory).
+(see the `user-approval-gate` memory). A driver calling `fleet-agent done` at
+the gate does **not** settle it; the gate moves only on `fleet-agent
+approve`/`reject`.
 
 ---
 

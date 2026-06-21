@@ -37,6 +37,16 @@ stdlib-only, inline CSS, safe escaping throughout.  Refs #184.
   renderer can filter noise and still surface `RECENT_EVENTS_DISPLAYED` (15)
   significant ones.
 
+### fix: driver `done` can no longer self-clear a `user_approval` gate
+
+Harden the approval boundary so a stage driver's `fleet-agent done --result
+approved` can no longer settle a raised `user_approval` gate (or a peer_review
+escalation) and drive the task to `completed`. Once a task is parked in
+`awaiting_orders`, only the explicit leader relay — `fleet-agent approve` /
+`reject` — settles it; a driver's `done` is an idempotent no-op. Removes the
+deprecated `done`-as-approval-relay compatibility path in
+`orchestrator.advance()`. Refs #184.
+
 ### feat: cross-project HTML dashboard (`fleet dashboard`)
 
 Add `fleet dashboard [--no-open]` — a new user-facing CLI command that generates

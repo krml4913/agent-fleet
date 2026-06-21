@@ -421,41 +421,106 @@ class UserApprovalGateTests(unittest.TestCase):
         # Stage should NOT be done yet
         self.assertNotEqual(updated["stages"][0]["status"], "done")
 
-    def test_user_approval_asked_approves_and_completes(self) -> None:
+    def test_driver_done_cannot_self_approve_asked_gate(self) -> None:
+        # Reproduce the two-call pattern observed in task-fleet-html-dashboard:
+        # first advance raises the gate (pending→asked, awaiting_orders);
+        # second advance must be a no-op — gate stays asked, task stays awaiting.
         stages = [
             {
                 "role": "driver",
                 "agent": "claude:sonnet",
                 "status": "running",
-                "user_approval": {"required": True, "status": "asked"},
+                "user_approval": {"required": True, "status": "pending"},
             }
         ]
         task = _make_task(self.sd, "31", stages, formation="solo")
+        # First call: pending → asked, task → awaiting_orders
+        orchestrator.advance(self.sd, "31", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "31")
+        self.assertEqual(task["status"], "awaiting_orders")
+        # Second call: driver tries to self-approve — must be a no-op
         orchestrator.advance(self.sd, "31", task, result="approved", dry_run=True)
         updated = state.load_task(self.sd, "31")
         ua = updated["stages"][0]["user_approval"]
-        self.assertEqual(ua["status"], "approved")
-        self.assertEqual(updated["stages"][0]["status"], "done")
-        self.assertEqual(updated["status"], "completed")
+        self.assertEqual(ua["status"], "asked")
+        self.assertNotEqual(updated["stages"][0]["status"], "done")
+        self.assertNotEqual(updated["status"], "completed")
+        self.assertEqual(updated["status"], "awaiting_orders")
 
-    def test_user_approval_asked_changes_requested_rejects(self) -> None:
+    def test_driver_done_changes_requested_cannot_self_reject_asked_gate(self) -> None:
+        # A driver calling done --result changes-requested at the gate must not
+        # settle (reject) it — awaiting_orders is the human's turn.
         stages = [
             {
                 "role": "driver",
                 "agent": "claude:sonnet",
                 "status": "running",
-                "user_approval": {"required": True, "status": "asked"},
+                "user_approval": {"required": True, "status": "pending"},
             }
         ]
         task = _make_task(self.sd, "36", stages, formation="solo")
+        # First call: raise the gate
+        orchestrator.advance(self.sd, "36", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "36")
+        self.assertEqual(task["status"], "awaiting_orders")
+        # Second call with changes-requested: must be a no-op
         orchestrator.advance(
             self.sd, "36", task, result="changes-requested", dry_run=True
         )
         updated = state.load_task(self.sd, "36")
         ua = updated["stages"][0]["user_approval"]
-        self.assertEqual(ua["status"], "pending")
-        self.assertEqual(updated["stages"][0]["status"], "running")
-        self.assertEqual(updated["status"], "running")
+        self.assertEqual(ua["status"], "asked")
+        self.assertEqual(updated["status"], "awaiting_orders")
+
+    def test_layer2_desynced_asked_running_does_not_settle(self) -> None:
+        # Layer 2: if task.status is somehow "running" but the gate is "asked"
+        # (desync), a driver's done must still not settle the gate — it must
+        # re-assert awaiting_orders and leave the gate intact.
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        # Build task with status="running" (desync: gate is asked but task is running)
+        task = _make_task(self.sd, "37", stages, formation="solo")
+        # task.status is "running" here; Layer 1 does NOT fire (it only guards
+        # awaiting_orders). Layer 2 must catch this.
+        orchestrator.advance(self.sd, "37", task, result="approved", dry_run=True)
+        updated = state.load_task(self.sd, "37")
+        ua = updated["stages"][0]["user_approval"]
+        self.assertEqual(ua["status"], "asked")
+        self.assertNotEqual(updated["stages"][0]["status"], "done")
+        self.assertNotEqual(updated["status"], "completed")
+        self.assertEqual(updated["status"], "awaiting_orders")
+
+    def test_driver_done_during_peer_review_escalation_is_noop(self) -> None:
+        # After a peer_review escalation the task is awaiting_orders
+        # (phase=reviewing, iteration>=3). A driver's done must not advance it.
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "peer_review": {
+                    "role": "code-reviewer",
+                    "phase": "reviewing",
+                    "iteration": 3,
+                },
+            }
+        ]
+        task = _make_task(self.sd, "38", stages)
+        task["status"] = "awaiting_orders"
+        state.save_task(self.sd, "38", task)
+
+        orchestrator.advance(self.sd, "38", task, result="approved", dry_run=True)
+        updated = state.load_task(self.sd, "38")
+        self.assertEqual(updated["status"], "awaiting_orders")
+        self.assertNotEqual(updated["stages"][0]["status"], "done")
+        pr = updated["stages"][0]["peer_review"]
+        self.assertEqual(pr["phase"], "reviewing")
 
     def test_user_approval_writes_questions_md(self) -> None:
         stages = [
