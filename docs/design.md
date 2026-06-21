@@ -634,9 +634,9 @@ cross-stage advance launches the next stage's driver fresh.
   - reject: returns `user_approval.status` to `pending` and sends the stage
     back to implementation. In a peer_review stage, it wakes the existing
     implementer pane.
-- For backward compatibility, relaying asked-gate approval/rejection via `done
-  --result approved|changes-requested` remains for now but is not used in the
-  new path.
+- `awaiting_orders` is a leader-gated pause: only `fleet-agent approve`/`reject`
+  settle it; a driver's `done` is a no-op while a task awaits a human decision
+  (it cannot self-clear a `user_approval` gate or a peer_review escalation).
 
 ### 7.4 Formation YAML Schema
 

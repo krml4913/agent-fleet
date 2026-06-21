@@ -33,14 +33,23 @@ def advance(
     result="approved":
         peer_review.phase="implementing" → hand off to reviewer.
         peer_review.phase="reviewing"    → peer_review passed; check user_approval.
-        user_approval.status="asked"     → deprecated compatibility approval;
-                                           mark stage done; launch next.
+        user_approval.status="asked"     → gate is raised; idempotent no-op (re-asserts
+                                           awaiting_orders). Only approve_user_approval /
+                                           reject_user_approval (via ``fleet-agent
+                                           approve``/``reject``) settle a raised gate.
         (no peer_review, no user_approval) → mark stage done; launch next.
 
     result="changes-requested":
         peer_review.phase="reviewing" → return to the live implementer (iteration++) or
                                         escalate to user if max iterations exceeded.
         (no peer_review on stage)     → record result, leave stage in place (legacy).
+
+    ``awaiting_orders`` invariant: once a task is parked in awaiting_orders — whether a
+    user_approval gate is raised or a peer_review escalation has exceeded the iteration
+    cap — only the explicit leader relay (approve_user_approval / reject_user_approval)
+    settles it. A driver's ``done`` (the sole caller of this function) is a no-op while
+    the task awaits a human decision; it can neither self-approve nor self-reject the
+    gate.
     """
     stages = task.get("stages") or []
 
@@ -59,6 +68,17 @@ def advance(
         return
 
     stage = stages[current_idx]
+
+    # ── leader-gated pause: awaiting_orders is the human's turn ──────────
+    # Once a task is parked in ``awaiting_orders`` — a user_approval gate is
+    # raised, or a peer_review escalation exceeded the iteration cap — only the
+    # explicit leader relay (``fleet-agent approve``/``reject`` →
+    # ``approve_user_approval``/``reject_user_approval``) may settle it. A
+    # driver's ``done`` is the ONLY caller of ``advance`` and must never move the
+    # task past this point. Re-assert the pause and return (idempotent no-op;
+    # state is already persisted as awaiting_orders, so no save is needed).
+    if task.get("status") == "awaiting_orders":
+        return
 
     # ── peer_review loop ──────────────────────────────────────────────────
     pr = stage.get("peer_review")
@@ -162,23 +182,20 @@ def advance(
             _request_user_approval(state_dir, task_id, task, stage)
             return
 
-        if ua_status == "asked" and result == "approved":
-            # Backward compatibility: older leaders used a second
-            # ``done --result=approved`` as the user approval relay. New
-            # callers should use ``fleet-agent approve``.
-            ua["status"] = "approved"
+        if ua_status == "asked":
+            # Defensive: the gate is raised and awaiting the leader/user.
+            # Normally unreachable because the awaiting_orders guard above
+            # returns first; but if task.status and the gate ever desync, a
+            # driver's ``done`` must STILL NOT settle the gate — neither approve
+            # nor reject. Re-assert the pause and return. Settling the gate is the
+            # sole responsibility of approve_user_approval / reject_user_approval,
+            # reached only via ``fleet-agent approve``/``reject``.
+            ua["status"] = "asked"
             stage["user_approval"] = ua
             stages[current_idx] = stage
             task["stages"] = stages
-            _mark_stage_done_and_advance(
-                state_dir, task_id, task, current_idx, dry_run=dry_run
-            )
-            return
-
-        if ua_status == "asked" and result == "changes-requested":
-            # Backward compatibility for the old user rejection relay. New
-            # callers should use ``fleet-agent reject``.
-            reject_user_approval(state_dir, task_id, task, dry_run=dry_run)
+            task["status"] = "awaiting_orders"
+            state_mod.save_task(state_dir, task_id, task)
             return
 
     # ── mark stage done and advance ───────────────────────────────────────
