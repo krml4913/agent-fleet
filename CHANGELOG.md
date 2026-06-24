@@ -7,6 +7,13 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### docs: state that drivers never run `merge` or `cleanup`
+
+`docs/prompts/driver-base.md` now spells out that after `fleet-agent done` a
+driver's part is finished — merging the PR and tearing down the worktree/branch
+belong to the leader. The leader/driver authority split was previously implicit
+discipline that the driver prompt did not mention. Refs #188.
+
 ## [0.2.0] - 2026-06-24
 
 ### feat: HTML dashboard UX polish (awaiting banner, title cleaning, relative timestamps, event filtering)
