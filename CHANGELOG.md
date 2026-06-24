@@ -7,6 +7,8 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-24
+
 ### feat: HTML dashboard UX polish (awaiting banner, title cleaning, relative timestamps, event filtering)
 
 Four usability improvements on top of the v1 HTML dashboard (PR #183).  Design
