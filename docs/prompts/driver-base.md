@@ -27,6 +27,7 @@ Rules:
     advances the task to the next stage (or marks it completed if this is
     the last stage). Use `--result changes-requested` to signal that the
     current stage needs rework (stage-5 peer_review loop).
+  - After `fleet-agent done` your part is finished — never run `fleet-agent merge` or `fleet-agent cleanup`; merging the PR and tearing down the worktree/branch are the leader's job, not the driver's.
 
 Project memory (`$FLEET_STATE_DIR/memory/`) — shared across all vendor drivers, read/write it
   with `fleet-agent memory`:
