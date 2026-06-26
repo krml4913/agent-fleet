@@ -215,12 +215,28 @@ def expand_stages(formation_data: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+# Safety-boundary gate keys (design P8). These are the only keys whose silent
+# loss is dangerous, so they are the only keys ``validate`` lints for typos —
+# keeping the schema open (§7.4: custom keys are still allowed everywhere else).
+_GATE_KEYS = ("user_approval", "peer_review")
+
+
 def validate(data: dict[str, Any]) -> None:
     """Sanity-check a formation document (design doc §6).
 
     Required fields:
       * ``name``
       * ``stages`` — non-empty list; each element must be a mapping with ``role``
+
+    Gate keys are also checked *fail-loud* so a safety boundary (design P8)
+    cannot silently evaporate (§7.4 keeps the schema open otherwise):
+
+      * a present ``user_approval`` must be the string ``"required"`` /
+        ``"optional"`` or an object carrying a bool ``required``;
+      * a present ``peer_review`` must be an object carrying ``role``;
+      * a stage key that is a near-miss misspelling of a gate key
+        (``user_approval`` / ``peer_review``) is rejected — a typo would
+        otherwise drop the gate without a word.
     """
     if not isinstance(data, dict):
         raise ValueError("formation must be a YAML mapping at the top level")
@@ -238,6 +254,90 @@ def validate(data: dict[str, Any]) -> None:
             raise ValueError(f"formation stages[{i}] must be a mapping, got {type(stage).__name__}")
         if "role" not in stage:
             raise ValueError(f"formation stages[{i}] missing required field: role")
+        _validate_stage_gates(i, stage)
+
+
+def _validate_stage_gates(idx: int, stage: dict[str, Any]) -> None:
+    """Fail loud on a malformed or misspelled safety gate in one stage."""
+    # near-miss typo of a gate key → the gate would silently vanish.
+    for key in stage:
+        gate = _near_miss_gate_key(key)
+        if gate is not None:
+            raise ValueError(
+                f"formation stages[{idx}] has key {key!r}, which looks like a "
+                f"misspelling of the {gate!r} gate — the gate would be silently "
+                f"dropped. Rename it to {gate!r} or remove it."
+            )
+
+    ua = stage.get("user_approval")
+    if ua is not None:
+        if isinstance(ua, str):
+            if ua not in ("required", "optional"):
+                raise ValueError(
+                    f"formation stages[{idx}] user_approval string must be "
+                    f"'required' or 'optional', got {ua!r}"
+                )
+        elif isinstance(ua, dict):
+            if "required" not in ua:
+                raise ValueError(
+                    f"formation stages[{idx}] user_approval object must carry a "
+                    f"'required' field"
+                )
+            if not isinstance(ua["required"], bool):
+                raise ValueError(
+                    f"formation stages[{idx}] user_approval.required must be a "
+                    f"bool, got {type(ua['required']).__name__}"
+                )
+        else:
+            raise ValueError(
+                f"formation stages[{idx}] user_approval must be the string "
+                f"'required'/'optional' or an object with 'required', got "
+                f"{type(ua).__name__}"
+            )
+
+    pr = stage.get("peer_review")
+    if pr is not None:
+        if not isinstance(pr, dict):
+            raise ValueError(
+                f"formation stages[{idx}] peer_review must be an object with "
+                f"'role', got {type(pr).__name__}"
+            )
+        if not pr.get("role"):
+            raise ValueError(
+                f"formation stages[{idx}] peer_review must carry a 'role' field"
+            )
+
+
+def _near_miss_gate_key(key: str) -> str | None:
+    """Return the gate key ``key`` looks like a typo of, or ``None``.
+
+    Fires only for a key that is *not* an exact gate key but is a close
+    misspelling — a case-only difference or an edit distance of at most 2 from
+    a gate key. Scoped to ``_GATE_KEYS`` so the open schema (§7.4) holds for
+    every other key. The gate keys are 11+ characters, so an unrelated custom
+    key practically never lands within 2 edits.
+    """
+    if not isinstance(key, str) or key in _GATE_KEYS:
+        return None
+    lowered = key.lower()
+    for gate in _GATE_KEYS:
+        if lowered == gate:
+            return gate  # case-only difference, e.g. ``User_Approval``
+        if _edit_distance(lowered, gate) <= 2:
+            return gate
+    return None
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein edit distance between two strings (iterative DP)."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        cur = [i]
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
 
 
 # ---------------------------------------------------------------------------

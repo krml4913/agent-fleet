@@ -40,6 +40,26 @@ snippet via `events.truncate_text`; the full body still lives in `driver-prompt.
 / `inbox.md`. This shrinks the torn-write window without adding any lock or daemon
 and without closing the intentionally open event schema.
 
+### fix: `formation.validate` fails loud on a malformed or misspelled safety gate
+
+A typo'd or malformed gate key used to slip through silently and downgrade a
+gated formation to a bare solo — the `user_approval` / `peer_review` boundary
+(design P8) evaporated without a word, because `validate()` only checked
+`name` / `stages` / per-stage `role` and the orchestrator read the gates
+defensively (`stage.get(...)`). `validate()` now also, fail-loud:
+
+- rejects a present `user_approval` that is neither the string
+  `"required"`/`"optional"` nor an object carrying a bool `required`;
+- rejects a present `peer_review` that is not an object carrying `role`;
+- rejects a stage key that is a **near-miss misspelling** of a gate key
+  (`user_aproval`, `peer_reveiw`, `User_Approval`, …) — case-only differences
+  and an edit distance ≤ 2. The typo lint is scoped to the two safety-boundary
+  gate keys only, so the open schema (§7.4 — no schema language, custom keys
+  still allowed) is preserved for every other key.
+
+`validate()` runs once at `fleet-agent start` (P4 wiring), so a botched gate now
+aborts the start instead of running ungated.
+
 ### docs: route project knowledge to fleet memory, not a vendor's own auto-memory
 
 `AGENTS.md` now has a **memory** section stating that drivers and the leader must
