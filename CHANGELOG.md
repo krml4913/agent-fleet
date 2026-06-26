@@ -7,6 +7,15 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### docs: route project knowledge to fleet memory, not a vendor's own auto-memory
+
+`AGENTS.md` now has a **memory** section stating that drivers and the leader must
+record project knowledge via `fleet-agent memory` (the vendor-neutral per-project
+store) or the global leader-memory — never a vendor's own auto-memory (e.g. Claude
+Code's project memory), which is invisible to a Codex/other-vendor leader or driver
+and defeats fleet's shared multi-vendor memory. Mirrors the existing note in
+`docs/prompts/driver-base.md`.
+
 ### docs: state that drivers never run `merge` or `cleanup`
 
 `docs/prompts/driver-base.md` now spells out that after `fleet-agent done` a
