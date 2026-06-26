@@ -7,6 +7,24 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: tolerate corrupt lines in `events.jsonl` so `fleet status` / the dashboard never crash
+
+`read_events` (the canonical reader behind `fleet status`, `fleet log`, and both
+dashboards) parsed each line with an unguarded `json.loads`, so a single torn or
+garbage line took down the whole observability surface. It now skips malformed
+lines — non-JSON and non-object records alike — and surfaces one stderr summary
+per read, matching the defensive read already used by `leader_notifier.read_queue`
+(neither silent swallowing nor a full crash). Audit of the other line-by-line
+readers found `prompt_deliverer` already guarded and `heartbeat` reading only
+pre-parsed events, so no further reader changes were needed.
+
+As hardening on the write side, the two unbounded free-text fields that rode the
+lock-free `O_APPEND` path — `start`'s `description` (seen up to ~6 KB, well past
+`PIPE_BUF`) and `inbox_message`'s `message` — are now truncated to an audit-sized
+snippet via `events.truncate_text`; the full body still lives in `driver-prompt.md`
+/ `inbox.md`. This shrinks the torn-write window without adding any lock or daemon
+and without closing the intentionally open event schema.
+
 ### docs: route project knowledge to fleet memory, not a vendor's own auto-memory
 
 `AGENTS.md` now has a **memory** section stating that drivers and the leader must
