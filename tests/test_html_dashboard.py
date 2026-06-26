@@ -266,15 +266,33 @@ class UXImprovementTests(unittest.TestCase):
         # The task row must carry the matching id.
         self.assertIn('id="t-alpha-1"', out)
 
-    def test_awaiting_row_has_css_class(self) -> None:
+    def test_awaiting_card_has_css_class(self) -> None:
         snap = self._snap_with_awaiting()
         out = html_dashboard.render(snap)
-        self.assertIn('class="awaiting-row"', out)
+        self.assertIn("awaiting-card", out)
+
+    def test_render_uses_task_board_lanes(self) -> None:
+        snap = _minimal_snapshot(task_status="running")
+        out = html_dashboard.render(snap)
+        self.assertIn('class="task-board"', out)
+        self.assertIn("Your turn", out)
+        self.assertIn("Running", out)
+        self.assertIn("Needs attention", out)
+        self.assertIn("Done", out)
 
     def test_banner_absent_when_zero_awaiting(self) -> None:
         snap = _minimal_snapshot(task_status="running")
         out = html_dashboard.render(snap)
         self.assertNotIn("awaiting orders", out)
+
+    def test_no_external_assets_or_scripts(self) -> None:
+        snap = _minimal_snapshot()
+        snap["projects"][0]["tasks"][0]["pr_url"] = "https://github.com/x/y/pull/42"
+        out = html_dashboard.render(snap)
+        self.assertNotIn("<script", out)
+        self.assertNotIn("<link", out)
+        self.assertNotIn("@import", out)
+        self.assertNotIn("url(", out)
 
     # ------------------------------------------------------------------
     # 2. Title cleaning
