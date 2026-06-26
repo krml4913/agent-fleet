@@ -7,6 +7,21 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### fix: report a running task as `running`, not a stale `spawning`, from birth
+
+`fleet-agent start` set `stage[0].status = "running"` but hardcoded the task-level
+`status` to `"spawning"`, contradicting `state.derive_task_status` (any running
+stage ⇒ the task is `running`). Because the task top status is only recomputed on
+done/advance and on the deliverer's `awaiting_orders` path — neither of which fires
+while stage 0 is live — a solo task (one stage = the whole task) showed `spawning`
+the entire time it ran and jumped straight to `completed`, never once reporting
+`running`; multi-stage tasks showed `spawning` through their whole first stage.
+`fleet status` and the HTML dashboard read this persisted value, so both displayed
+the same lie. `start` now derives the task status from the (already-`running`)
+stages via `derive_task_status` instead of hardcoding it, so the task is
+self-consistent from creation. `spawning` is unchanged as the all-stages-pending
+fallback of `derive_task_status`; no new transition machinery was added.
+
 ### fix: tolerate corrupt lines in `events.jsonl` so `fleet status` / the dashboard never crash
 
 `read_events` (the canonical reader behind `fleet status`, `fleet log`, and both
