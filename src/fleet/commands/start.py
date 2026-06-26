@@ -510,7 +510,12 @@ def run(args: argparse.Namespace) -> int:
         "id": args.task_id,
         "title": title,
         "description": description,
-        "status": "spawning",
+        # Derive the task-level status from the stages instead of hardcoding
+        # "spawning": stage[0] was just set to "running" above, so this resolves
+        # to "running" and the task is self-consistent from birth. (A solo task
+        # is a single stage = the whole task, so it would otherwise show
+        # "spawning" the entire time it runs and never report "running".)
+        "status": state_mod.derive_task_status(expanded_stages),
         "formation": formation_name,
         "owner_session": owner_session,
         "workspace": workspace_mod.load(state_dir),

@@ -53,13 +53,22 @@ class StartTests(unittest.TestCase):
         task_data = state.load_task(self.state_dir, "7")
         self.assertEqual(str(task_data["id"]), "7")
         self.assertIn("agent: claude:sonnet", text)
-        self.assertIn("status: spawning", text)
+        # Task-level status is derived from the stages, not hardcoded: stage[0]
+        # is "running" at birth, so the task is "running" — never the stale
+        # "spawning" that used to be shown the entire time a solo task ran.
+        self.assertIn("status: running", text)
+        self.assertNotIn("status: spawning", text)
         self.assertIn("formation: solo", text)
         self.assertIn("stages:", text)
         self.assertIn("current_stage:", text)
         self.assertIsInstance(task_data.get("stages"), list)
         self.assertEqual(len(task_data["stages"]), 1)
         self.assertEqual(task_data["stages"][0]["status"], "running")
+        # The persisted task status agrees with derive_task_status(stages).
+        self.assertEqual(task_data["status"], "running")
+        self.assertEqual(
+            task_data["status"], state.derive_task_status(task_data["stages"])
+        )
         events_path = self.state_dir / "events.jsonl"
         lines = [json.loads(l) for l in events_path.read_text().splitlines() if l]
         starts = [e for e in lines if e.get("type") == "start"]
