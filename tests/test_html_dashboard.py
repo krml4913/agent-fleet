@@ -278,7 +278,7 @@ class UXImprovementTests(unittest.TestCase):
         self.assertIn("Your turn", out)
         self.assertIn("Running", out)
         self.assertIn("Needs attention", out)
-        self.assertIn("Done", out)
+        self.assertIn("In review", out)
 
     def test_banner_absent_when_zero_awaiting(self) -> None:
         snap = _minimal_snapshot(task_status="running")

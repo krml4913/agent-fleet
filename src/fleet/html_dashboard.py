@@ -49,7 +49,7 @@ _LANE_ORDER: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("awaiting_orders", "Your turn", ("awaiting_orders",)),
     ("running", "Running", ("running", "spawning")),
     ("attention", "Needs attention", ("failed", "changes-requested", "rejected")),
-    ("done", "Done", ("completed", "done", "approved", "cancelled")),
+    ("done", "In review", ("completed", "done", "approved", "cancelled")),
     ("other", "Other", ()),
 )
 _STATUS_TO_LANE = {
