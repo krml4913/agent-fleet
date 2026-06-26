@@ -41,6 +41,24 @@ agent-fleet uses **trunk-based development** with lightweight milestone tags:
   named milestone tag" (since `main` itself is already available). Add one entry per
   change; when a milestone tag is cut, move the entries under `## [X.Y.Z] - <date>`.
 
+## memory (write project knowledge to fleet memory, not your vendor's own)
+
+When you — driver **or** leader — are asked to remember something, write it to the
+**fleet memory**, never to your vendor's own auto-memory (e.g. Claude Code's project
+memory). fleet is multi-vendor: a leader or driver may run on Claude, Codex, or
+another agent, and one vendor's private memory is invisible to the others — siloing
+knowledge there defeats the shared, vendor-neutral memory the project exists to provide.
+
+- **Project knowledge** → `fleet-agent memory write <name> [--type project|reference|feedback]`
+  (the per-project store at `<state>/memory/`, read by every vendor's drivers and the
+  leader). Separate from any vendor's own auto-memory — do not double-manage the two.
+- **Cross-project leader rules / user preferences** → the global leader-memory
+  (`global/leader-memory/`), injected into every leader prompt regardless of vendor.
+- Which tier: does it travel with the leader across **all** projects (global) or with
+  **one** project across all sessions (per-project)?
+- If you record project knowledge in a vendor's own auto-memory by reflex, move it to
+  fleet memory and delete the vendor-side copy.
+
 ## role-specific discipline
 
 Additional discipline specific to each role is documented in `docs/prompts/roles/<role>.md`.
