@@ -22,7 +22,7 @@ from .. import state as state_mod
 from .. import task_context
 from .. import formation as formation_mod
 from .. import tmux as tmux_mod
-from ..events import append_event
+from ..events import append_event, truncate_text
 
 
 _TASK_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -541,7 +541,8 @@ def run(args: argparse.Namespace) -> int:
         formation=formation_name,
         role=role_name,
         agent=agent_spec,
-        description=description,
+        # Audit snippet only — the full description lives in driver-prompt.md.
+        description=truncate_text(description),
         dry_run=bool(args.dry_run),
     )
 

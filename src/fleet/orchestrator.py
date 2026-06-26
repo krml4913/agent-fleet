@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import state as state_mod
-from .events import append_event, utcnow_iso
+from .events import append_event, truncate_text, utcnow_iso
 
 
 class UserApprovalError(ValueError):
@@ -469,7 +469,8 @@ def _append_handoff_inbox(state_dir: Path, task_id: str, message: str) -> None:
         state_dir / "events.jsonl",
         "inbox_message",
         task_id=task_id,
-        message=message,
+        # Audit snippet only — the full message lives in inbox.md.
+        message=truncate_text(message),
         inbox_ts=ts,
     )
 
