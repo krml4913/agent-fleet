@@ -661,8 +661,21 @@ schema language (JSON Schema etc.) is used (§1.3 principle 1).
 | `user_approval` | optional | human approval point. The string `"required"` / `"optional"`, or an object form |
 
 `validate()` performs the top-level `name` / `stages` required checks and the
-per-stage `role` required check. Further structural validation (e.g. the
-`peer_review` structure) is delegated to the orchestrator.
+per-stage `role` required check. It additionally fails **loud** on a malformed or
+misspelled *safety gate*, so a `user_approval` / `peer_review` boundary (P8)
+cannot silently vanish into a bare solo:
+
+- a present `user_approval` must be the string `"required"` / `"optional"` or an
+  object carrying a bool `required`;
+- a present `peer_review` must be an object carrying `role`;
+- a stage key that is a **near-miss misspelling** of a gate key — a case-only
+  difference or an edit distance ≤ 2 from `user_approval` / `peer_review`
+  (e.g. `user_aproval`, `peer_reveiw`) — is rejected.
+
+This lint is scoped to the two gate keys *only*: every other key stays
+unvalidated, so the open schema (no schema language; custom keys allowed) above
+is preserved. `validate()` runs once at `fleet-agent start` (P4), so a botched
+gate aborts the start rather than running ungated.
 
 ### 7.5 Formation Templates / Formations
 

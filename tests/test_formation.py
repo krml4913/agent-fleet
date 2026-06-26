@@ -231,6 +231,94 @@ class FormationTemplateTests(unittest.TestCase):
             ],
         })
 
+    # ---- gate keys: fail loud so a safety boundary cannot silently vanish ----
+
+    def test_validate_rejects_user_approval_typo(self) -> None:
+        # The headline bug: a near-miss typo silently drops the approval gate.
+        with self.assertRaises(ValueError) as ctx:
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "user_aproval": "required"}],
+            })
+        self.assertIn("user_approval", str(ctx.exception))
+
+    def test_validate_rejects_peer_review_typo(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "peer_reveiw": {"role": "code-reviewer"}}],
+            })
+        self.assertIn("peer_review", str(ctx.exception))
+
+    def test_validate_rejects_gate_key_case_typo(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "User_Approval": "required"}],
+            })
+
+    def test_validate_rejects_user_approval_wrong_string(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "user_approval": "yes"}],
+            })
+
+    def test_validate_rejects_user_approval_wrong_type(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "user_approval": ["required"]}],
+            })
+
+    def test_validate_rejects_user_approval_object_missing_required(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "user_approval": {"status": "pending"}}],
+            })
+
+    def test_validate_rejects_user_approval_required_not_bool(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "driver", "user_approval": {"required": "yes"}}],
+            })
+
+    def test_validate_rejects_peer_review_not_dict(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer", "peer_review": "code-reviewer"}],
+            })
+
+    def test_validate_rejects_peer_review_missing_role(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer", "peer_review": {"agent": "claude:opus"}}],
+            })
+
+    def test_validate_accepts_valid_gates(self) -> None:
+        # String shorthand, object form, and a valid peer_review all pass.
+        formation.validate({
+            "name": "x",
+            "stages": [
+                {"role": "designer", "user_approval": "required"},
+                {"role": "implementer",
+                 "user_approval": {"required": True},
+                 "peer_review": {"role": "code-reviewer", "agent": "claude:opus"}},
+            ],
+        })
+
+    def test_validate_allows_unrelated_custom_keys(self) -> None:
+        # Open schema (§7.4): custom keys far from the gate keys are untouched.
+        formation.validate({
+            "name": "x",
+            "stages": [{"role": "driver", "priority": "high", "review": "later"}],
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
