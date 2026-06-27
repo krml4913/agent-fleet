@@ -17,6 +17,21 @@ and reapplied across the existing 15-second meta refresh. The dashboard remains 
 single static HTML file with inline vanilla JavaScript and no daemon, server,
 Node, build step, or schema change.
 
+### feat: add a `research` formation — researcher role + fact-checker peer review
+
+A new shipped formation template (`src/fleet/templates/research.yaml`) for
+investigation tasks whose deliverable is a sourced written summary, not code. It
+runs a single `researcher` stage with a `fact-checker` peer_review and a
+`user_approval` gate. Two new role prompts back it: `researcher` investigates the
+topic over web search/fetch, synthesizes across sources with citations, and
+writes the summary to `outbox.md` (stating the path before `done`, mirroring the
+designer convention); `fact-checker` independently verifies each claim against
+its cited source and checks completeness/source quality, returning feedback
+through the existing peer_review mechanism. Both stages are `claude:opus` because
+the work needs web access. The formation ships as a template, so `--formation
+research` resolves through the cascade in every project with no per-project copy.
+No loading-machinery change — two role files plus one template.
+
 ### feat: resolve named formations through project, global, and template tiers
 
 Named formations now resolve by cascade: project overrides first, then
