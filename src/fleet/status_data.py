@@ -7,6 +7,8 @@ dependency on ``commands/*``.  No ANSI, no HTML, no argparse here.
 from __future__ import annotations
 
 import json
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import heartbeat
@@ -15,6 +17,15 @@ from . import state as state_mod
 from . import tmux as tmux_mod
 from .events import read_events, utcnow_iso
 from . import __version__
+
+
+# Event types whose latest occurrence marks a task's terminal transition. The
+# completion timestamp for the dashboard's Completed section is the max ``ts``
+# among a task's events of these types.
+_TERMINAL_EVENT_TYPES = frozenset({"merge", "cleanup", "done"})
+
+# Hard cap on rendered completed rows (regardless of window) to bound HTML size.
+COMPLETED_ROW_CAP = 200
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +312,99 @@ def collect_recent_events(limit: int = 15) -> list[dict]:
     return all_events[-limit:]
 
 
+def _terminal_ts_by_task(events: list[dict]) -> dict[str, str]:
+    """Map ``task_id`` → max ``ts`` among its terminal events.
+
+    Terminal events are ``merge`` / ``cleanup`` / ``done`` (:data:`_TERMINAL_EVENT_TYPES`).
+    The ISO-8601 UTC strings produced by :func:`events.utcnow_iso` sort
+    lexicographically by time, so a plain string ``max`` is the latest event.
+    """
+    latest: dict[str, str] = {}
+    for ev in events:
+        if ev.get("type") not in _TERMINAL_EVENT_TYPES:
+            continue
+        tid = ev.get("task_id")
+        ts = ev.get("ts")
+        if tid is None or not ts:
+            continue
+        tid = str(tid)
+        if tid not in latest or ts > latest[tid]:
+            latest[tid] = ts
+    return latest
+
+
+def collect_completed(
+    within_days: int = 30, *, row_cap: int = COMPLETED_ROW_CAP
+) -> dict:
+    """Return archived (terminal) tasks completed within *within_days*.
+
+    Enumerates each project's ``tasks/_archive/task-*/task.yaml``, derives each
+    task's completion timestamp from the project ``events.jsonl`` (the max
+    ``ts`` of its terminal ``merge`` / ``cleanup`` / ``done`` events, falling
+    back to the archive dir mtime), filters to the ``within_days`` window,
+    sorts most-recent-first, and caps the result at *row_cap* rows to bound
+    HTML size.
+
+    Returns ``{"tasks": [...], "within_days": int, "truncated": int}`` where
+    ``truncated`` counts in-window rows dropped by the cap (logged, never
+    silently). Each task row carries ``completed_ts`` (ISO) and
+    ``completed_epoch`` (int seconds) for the client-side window selector.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=within_days)
+    reg = state_mod.load_registry()
+    rows: list[dict] = []
+    for name in sorted(reg.get("projects", {})):
+        state_dir = state_mod.project_state_dir(name)
+        if not state_dir.is_dir():
+            continue
+        try:
+            archived = state_mod.list_archived_tasks(state_dir)
+        except Exception:  # noqa: BLE001
+            continue
+        if not archived:
+            continue
+        try:
+            events = read_events(state_dir / "events.jsonl")
+        except Exception:  # noqa: BLE001
+            events = []
+        terminal_ts = _terminal_ts_by_task(events)
+        for t in archived:
+            tid = str(t.get("id", "?"))
+            ts_iso = terminal_ts.get(tid)
+            completed_dt = heartbeat.parse_ts(ts_iso) if ts_iso else None
+            if completed_dt is None:
+                mtime = t.get("archive_mtime")
+                if mtime is not None:
+                    completed_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+            if completed_dt is None or completed_dt < cutoff:
+                continue
+            status = str(t.get("status") or "?")
+            rows.append(
+                {
+                    "project": name,
+                    "id": tid,
+                    "title": str(t.get("title") or "-"),
+                    "status": status,
+                    "severity": status_severity(status),
+                    "formation": str(t.get("formation") or "-"),
+                    "completed_ts": completed_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "completed_epoch": int(completed_dt.timestamp()),
+                }
+            )
+    rows.sort(key=lambda r: r["completed_ts"], reverse=True)
+    truncated = 0
+    if len(rows) > row_cap:
+        truncated = len(rows) - row_cap
+        print(
+            f"warn: completed section capped at {row_cap} rows "
+            f"({truncated} older in-window row(s) dropped)",
+            file=sys.stderr,
+        )
+        rows = rows[:row_cap]
+    return {"tasks": rows, "within_days": within_days, "truncated": truncated}
+
+
 def collect_global_snapshot() -> dict:
     """Return the full cross-project snapshot used by the HTML renderer."""
     return {
@@ -311,4 +415,7 @@ def collect_global_snapshot() -> dict:
         # Collect extra so the renderer can filter noise and still show
         # RECENT_EVENTS_DISPLAYED significant events.
         "recent_events": collect_recent_events(limit=100),
+        # Archived tasks within the largest selector window (30 days); the
+        # client-side time-window selector filters within this server-side bound.
+        "completed": collect_completed(within_days=30),
     }

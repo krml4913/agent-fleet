@@ -7,6 +7,29 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: show recently-completed tasks on the dashboard with a time-window selector
+
+`fleet dashboard` now has a **Completed** section listing archived (terminal)
+tasks — title, project, status tag, formation, and a relative completion time —
+separate from the active task-board lanes. Each task's completion time is the max
+`ts` of its terminal `merge` / `cleanup` / `done` event in the project
+`events.jsonl` (falling back to the archive dir mtime). A client-side time-window
+selector (1 day default / 7 days / 30 days) hides rows outside the window and, like
+the session selector, persists in `sessionStorage` across the 15-second meta
+refresh. The server renders only archived tasks within the largest window (30 days)
+and caps the rendered set at 200 rows (logged when it trims), keeping the single
+static HTML file bounded. New `status_data.collect_completed()` and
+`state.list_archived_tasks()` back the section. No daemon, server, Node, build
+step, or schema change.
+
+### change: fold the dashboard "Needs attention" lane into "Other"
+
+The task board's dedicated "Needs attention" lane was removed; its statuses
+(`failed`, `changes-requested`, `rejected`) now route to the previously
+near-empty "Other" lane (alongside the catch-all). Individual cards still flag
+severity via their colored left border, so attention-worthy tasks remain visually
+distinct. Lane order is now Your turn / Running / In review / Other.
+
 ### feat: filter the HTML dashboard by leader session scope
 
 `fleet dashboard` now includes a client-side session selector for the
