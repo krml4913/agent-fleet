@@ -7,6 +7,15 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### docs: have the designer state its design output path before calling done
+
+The designer role prompt (`docs/prompts/roles/designer.md`) now instructs the
+designer to state where it wrote the design — the actual resolved `outbox.md`
+path — in its final message before calling `fleet-agent done`. The designer
+already writes its deliverable to `outbox.md`, but never said *where*, so the
+leader and user had to hunt for it every time. No behavior or schema change; a
+single instruction line added to the role prompt.
+
 ### fix: report a running task as `running`, not a stale `spawning`, from birth
 
 `fleet-agent start` set `stage[0].status = "running"` but hardcoded the task-level
