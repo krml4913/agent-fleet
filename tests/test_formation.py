@@ -22,6 +22,7 @@ class FormationTemplateTests(unittest.TestCase):
         self.assertIn("solo", names)
         self.assertIn("pair_review", names)
         self.assertIn("multi_stage", names)
+        self.assertIn("research", names)
         self.assertNotIn("race", names)
 
     # ---- loading + validating templates ----
@@ -70,6 +71,19 @@ class FormationTemplateTests(unittest.TestCase):
             (state / "formations").mkdir(parents=True)
             data = formation.load_formation("pair_review", state)
             self.assertEqual(data["name"], "pair_review")
+
+    def test_research_resolves_via_cascade_with_no_project_copy(self) -> None:
+        # `--formation research` must resolve from the shipped template alone,
+        # with no per-project copy in the cascade (Issue #202 dogfoods #198).
+        with TemporaryDirectory() as tmp:
+            state = Path(tmp) / ".fleet-state"
+            (state / "formations").mkdir(parents=True)
+            name, data = formation.resolve_formation(state, "research")
+            self.assertEqual(name, "research")
+            formation.validate(data)
+            self.assertEqual(data["name"], "research")
+            self.assertEqual(data["stages"][0]["role"], "researcher")
+            self.assertEqual(data["stages"][0]["peer_review"]["role"], "fact-checker")
 
     def test_load_formation_global_shadows_template(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -290,6 +304,21 @@ class FormationTemplateTests(unittest.TestCase):
         implementer = stages[0]
         self.assertIn("user_approval", implementer)
         ua = implementer["user_approval"]
+        self.assertIsInstance(ua, dict)
+        self.assertTrue(ua["required"])
+        self.assertEqual(ua["status"], "pending")
+
+    def test_expand_stages_research(self) -> None:
+        data = formation.load_template("research")
+        stages = formation.expand_stages(data)
+        self.assertEqual(len(stages), 1)
+        researcher = stages[0]
+        self.assertEqual(researcher["role"], "researcher")
+        self.assertEqual(researcher["agent"], "claude:opus")
+        self.assertEqual(researcher["status"], "pending")
+        self.assertEqual(researcher["peer_review"]["role"], "fact-checker")
+        self.assertEqual(researcher["peer_review"]["agent"], "claude:opus")
+        ua = researcher["user_approval"]
         self.assertIsInstance(ua, dict)
         self.assertTrue(ua["required"])
         self.assertEqual(ua["status"], "pending")

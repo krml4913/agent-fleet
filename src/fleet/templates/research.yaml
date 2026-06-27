@@ -1,0 +1,10 @@
+# Research — investigate a topic via web research, with an independent fact-check before delivery.
+name: research
+description: Investigate a topic via web research, with an independent fact-check pass before delivery.
+stages:
+  - role: researcher
+    agent: claude:opus
+    peer_review:
+      role: fact-checker
+      agent: claude:opus
+    user_approval: required

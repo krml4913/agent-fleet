@@ -603,7 +603,25 @@ stages:
       role: code-reviewer
       agent: claude:opus
     user_approval: required
+
+# Formation D: research (web investigation + independent fact-check + user approval)
+name: research
+stages:
+  - role: researcher
+    agent: claude:opus
+    peer_review:
+      role: fact-checker
+      agent: claude:opus
+    user_approval: required
 ```
+
+The `research` formation targets investigation tasks whose deliverable is a
+sourced written summary rather than code. The `researcher` role investigates the
+topic over web search/fetch and writes the summary to `outbox.md`; the
+`fact-checker` peer_review independently verifies each claim against its cited
+source before the `user_approval` gate lets the leader deliver it. Both stages
+are `claude:opus` because the work needs web access. Roles are plain prompt files
+under `docs/prompts/roles/` (§10.2); the formation adds no machinery.
 
 Execution order within each stage:
 ```
@@ -692,8 +710,8 @@ gate aborts the start rather than running ungated.
   cross-project formations. They define a formation once for every project, but
   remain shadowed by a project override with the same name.
 - **Formation templates** (`src/fleet/templates/<name>.yaml`): shipped defaults.
-  Three ship with fleet: `solo` / `pair_review` / `multi_stage`. They are
-  directly usable by explicit name when neither project nor global overrides
+  Four ship with fleet: `solo` / `pair_review` / `multi_stage` / `research`. They
+  are directly usable by explicit name when neither project nor global overrides
   exist.
 - Copying a template via `fleet init --formation <name>` or `fleet formation init
   --from <name>` makes it a project formation, independent thereafter (no
