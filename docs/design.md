@@ -390,7 +390,7 @@ interval.
   can be introduced later
 
 **Cross-project HTML dashboard** (`global/dashboard.html`) — confirmed design
-(Issues #182, #200):
+(Issues #182, #200, #203):
 - Generated on demand by `fleet dashboard` (opens the browser via `file://` URI).
 - Refreshed automatically by the same write hook (`dashboard.rebuild`) **while
   the file exists** (opt-in by presence; zero cross-project scan cost until the
@@ -403,6 +403,22 @@ interval.
   The selected value is stored in `sessionStorage` and reapplied after the
   15-second meta refresh. The filter is vanilla inline JavaScript only; no server,
   daemon, Node, build step, or alternate dashboard file is introduced.
+- A **Completed** section (Issue #203) lists archived (terminal) tasks —
+  title, project, status tag, formation, and a relative completion time —
+  separate from the active task-board lanes. The completion timestamp is the max
+  `ts` of the task's terminal `merge` / `cleanup` / `done` event in the project
+  `events.jsonl`, falling back to the archive dir mtime. The server renders only
+  archived tasks within the largest window (30 days) and caps the rendered set at
+  200 rows (logged when it trims), so the HTML stays bounded. A client-side
+  time-window selector (1 day default / 7 days / 30 days) hides rows by
+  `now - data-completed-ts` epoch comparison; like the session selector it
+  persists in `sessionStorage` across the meta refresh. Same no-daemon /
+  no-Node / single-static-file constraint as above.
+- Task-board lanes are **Your turn** (awaiting_orders) / **Running**
+  (running, spawning) / **In review** (completed, done, approved, cancelled) /
+  **Other** (failed, changes-requested, rejected, plus the catch-all). The former
+  dedicated "Needs attention" lane was folded into "Other"; individual cards still
+  flag severity via their colored left border.
 - Complement to `dashboard.md` (per-project markdown stays); `global/dashboard.html`
   is the cross-project GUI view.
 - `global/dashboard.html` is in `fleet-state/` which is already `.gitignore`d —

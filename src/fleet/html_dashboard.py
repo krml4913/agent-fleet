@@ -48,9 +48,10 @@ _EVENT_CSS: dict[str, str] = {
 _LANE_ORDER: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("awaiting_orders", "Your turn", ("awaiting_orders",)),
     ("running", "Running", ("running", "spawning")),
-    ("attention", "Needs attention", ("failed", "changes-requested", "rejected")),
     ("done", "In review", ("completed", "done", "approved", "cancelled")),
-    ("other", "Other", ()),
+    # "Other" absorbs the former "Needs attention" statuses plus the catch-all;
+    # individual cards still flag severity via their card-attention left border.
+    ("other", "Other", ("failed", "changes-requested", "rejected")),
 )
 _STATUS_TO_LANE = {
     status: lane
@@ -107,6 +108,23 @@ h3 { font-size: .92rem; margin: 1rem 0 .3rem; color: #cfd4da; letter-spacing: 0;
   padding: .2rem .45rem;
   font: inherit;
 }
+.completed-controls { margin: -.2rem 0 .5rem; }
+.window-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  color: #c9ced4;
+  font-size: .8rem;
+}
+.window-filter select {
+  border: 1px solid #3f4852;
+  border-radius: 6px;
+  background: #1d2125;
+  color: #e6e8ea;
+  padding: .2rem .45rem;
+  font: inherit;
+}
+.completed-time { color: #99a1aa; white-space: nowrap; }
 .summary-stats { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .stat-pill {
   display: inline-flex;
@@ -395,7 +413,6 @@ def _lane_severity(lane: str) -> str:
     return {
         "awaiting_orders": "attention",
         "running": "active",
-        "attention": "attention",
         "done": "ok",
     }.get(lane, "neutral")
 
@@ -532,6 +549,73 @@ def _render_project_summaries(
     parts.append("</div>\n")
 
 
+_COMPLETED_WINDOWS: tuple[tuple[str, str], ...] = (
+    ("1", "Last 1 day"),
+    ("7", "Last 7 days"),
+    ("30", "Last 30 days"),
+)
+
+
+def _render_completed(parts: list[str], completed: dict, generated_at: str) -> None:
+    """Render the recently-completed (archived) tasks section.
+
+    Rows are server-rendered within the largest window (30 days); the inline
+    ``#completed-window`` selector hides rows outside the chosen window
+    client-side. Each row carries an escaped ``data-completed-ts`` (epoch
+    seconds) the JS compares against ``now``.
+    """
+    rows: list[dict] = completed.get("tasks") or []
+    truncated = int(completed.get("truncated") or 0)
+
+    parts.append("<h2>Completed</h2>\n")
+    parts.append('<div class="completed-controls">')
+    parts.append(
+        '<label class="window-filter" for="completed-window">'
+        "<span>Window</span>"
+        '<select id="completed-window">'
+    )
+    for value, label in _COMPLETED_WINDOWS:
+        parts.append(f'<option value="{_attr(value)}">{_e(label)}</option>')
+    parts.append("</select></label></div>\n")
+
+    if truncated:
+        parts.append(
+            f'<p class="scope-line">Showing the {_e(len(rows))} most recent; '
+            f"{_e(truncated)} older completed task(s) in range are not shown.</p>\n"
+        )
+
+    if not rows:
+        parts.append(
+            '<p class="no-tasks">(no recently-completed tasks)</p>\n'
+        )
+        return
+
+    parts.append("<table class=\"completed-table\">\n")
+    parts.append(
+        "<tr><th>Completed</th><th>Project</th><th>Status</th>"
+        "<th>Formation</th><th>Title</th></tr>\n"
+    )
+    for r in rows:
+        sev = status_data.status_severity(str(r.get("status") or "?"))
+        rel, abs_ts = _relative_time(str(r.get("completed_ts") or ""), generated_at)
+        disp, full = _clean_title(str(r.get("title") or "-"))
+        title_attr = f' title="{_attr(full)}"' if full else ""
+        parts.append(
+            f'<tr data-completed-ts="{_attr(r.get("completed_epoch", 0))}">'
+            f'<td class="completed-time" title="{_attr(abs_ts)}">{_e(rel)}</td>'
+            f'<td>{_e(r.get("project", "?"))}</td>'
+            f"<td><span class='{_attr(sev)}'>{_e(r.get('status', '?'))}</span></td>"
+            f'<td>{_e(r.get("formation", "-"))}</td>'
+            f"<td><span{title_attr}>{_e(disp)}</span></td>"
+            f"</tr>\n"
+        )
+    parts.append("</table>\n")
+    parts.append(
+        '<p class="no-tasks" id="completed-window-empty" hidden>'
+        "(no completed tasks in this window)</p>\n"
+    )
+
+
 def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
     """Return a complete, self-contained HTML document for *snapshot*."""
     generated_at: str = snapshot.get("generated_at", "")
@@ -539,6 +623,7 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
     projects: list[dict] = snapshot.get("projects") or []
     sessions: list[dict] = snapshot.get("sessions") or []
     raw_events: list[dict] = snapshot.get("recent_events") or []
+    completed: dict = snapshot.get("completed") or {}
 
     # Aggregate counts for the header summary and awaiting banner.
     total_running = sum(
@@ -650,6 +735,9 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
                 f"</div>\n"
             )
         parts.append("</div>\n")
+
+    # Recently-completed (archived) tasks, time-window filtered client-side.
+    _render_completed(parts, completed, generated_at)
 
     # Sessions
     parts.append("<h2>Sessions</h2>\n")
@@ -813,6 +901,72 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
     document.addEventListener("DOMContentLoaded", initSessionFilter);
   } else {
     initSessionFilter();
+  }
+}());
+(function () {
+  var storageKey = "fleet.dashboard.completedWindow";
+  var defaultWindow = "1";
+
+  function storedWindow() {
+    try {
+      return sessionStorage.getItem(storageKey) || "";
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function saveWindow(value) {
+    try {
+      sessionStorage.setItem(storageKey, value);
+    } catch (err) {
+      return;
+    }
+  }
+
+  function applyWindow(days) {
+    var cutoff = (Date.now() / 1000) - (days * 86400);
+    var rows = document.querySelectorAll("[data-completed-ts]");
+    var visible = 0;
+    for (var i = 0; i < rows.length; i += 1) {
+      var ts = parseFloat(rows[i].getAttribute("data-completed-ts"));
+      var show = !isNaN(ts) && ts >= cutoff;
+      rows[i].hidden = !show;
+      if (show) {
+        visible += 1;
+      }
+    }
+    var empty = document.getElementById("completed-window-empty");
+    if (empty) {
+      empty.hidden = visible !== 0 || rows.length === 0;
+    }
+  }
+
+  function initCompletedWindow() {
+    var select = document.getElementById("completed-window");
+    if (!select) {
+      return;
+    }
+    var saved = storedWindow();
+    var hasSaved = false;
+    for (var i = 0; i < select.options.length; i += 1) {
+      if (select.options[i].value === saved) {
+        hasSaved = true;
+        break;
+      }
+    }
+    select.value = hasSaved ? saved : defaultWindow;
+    saveWindow(select.value);
+    applyWindow(parseInt(select.value, 10));
+    select.addEventListener("change", function () {
+      saveWindow(select.value);
+      applyWindow(parseInt(select.value, 10));
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initCompletedWindow);
+  } else {
+    initCompletedWindow();
   }
 }());
 </script>

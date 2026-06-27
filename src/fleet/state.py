@@ -571,6 +571,36 @@ def list_tasks(state_dir: Path) -> list[dict]:
     return out
 
 
+def list_archived_tasks(state_dir: Path) -> list[dict]:
+    """Return archived task dicts from ``tasks/_archive/task-*/task.yaml``.
+
+    Mirrors :func:`list_tasks` but reads the retirement archive cleanup writes
+    on success. Each dict carries the parsed ``task.yaml`` plus an injected
+    ``id`` (the original task id from the file, falling back to the dir name)
+    and ``archive_mtime`` (the archive dir's mtime as a float epoch) so callers
+    can use it as a completion-time fallback when ``events.jsonl`` has no
+    terminal event for the task.
+    """
+    archive_root = state_dir / "tasks" / "_archive"
+    if not archive_root.is_dir():
+        return []
+    out: list[dict] = []
+    for child in sorted(archive_root.iterdir()):
+        if not child.is_dir() or not child.name.startswith("task-"):
+            continue
+        task_yaml_file = child / "task.yaml"
+        if not task_yaml_file.is_file():
+            continue
+        data = _yaml.safe_load(task_yaml_file.read_text(encoding="utf-8")) or {}
+        data.setdefault("id", child.name[len("task-"):])
+        try:
+            data["archive_mtime"] = child.stat().st_mtime
+        except OSError:
+            data["archive_mtime"] = None
+        out.append(data)
+    return out
+
+
 def load_task(state_dir: Path, task_id: str) -> dict:
     path = task_yaml_path(state_dir, task_id)
     if not path.exists():

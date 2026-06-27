@@ -251,6 +251,98 @@ class RenderTests(unittest.TestCase):
         self.assertIn('select.addEventListener("change"', html)
 
 
+def _completed_snapshot(rows: list[dict] | None = None, *, truncated: int = 0) -> dict:
+    snap = _minimal_snapshot(project_name="alpha")
+    if rows is None:
+        rows = [
+            {
+                "project": "alpha",
+                "id": "old-feature",
+                "title": "ship the old feature",
+                "status": "completed",
+                "severity": status_data.status_severity("completed"),
+                "formation": "solo",
+                "completed_ts": "2026-06-19T12:00:00Z",
+                "completed_epoch": 1750334400,
+            }
+        ]
+    snap["completed"] = {
+        "tasks": rows,
+        "within_days": 30,
+        "truncated": truncated,
+    }
+    return snap
+
+
+class CompletedSectionTests(unittest.TestCase):
+    def test_completed_section_heading_and_selector(self) -> None:
+        out = html_dashboard.render(_completed_snapshot())
+        self.assertIn("<h2>Completed</h2>", out)
+        self.assertIn('<select id="completed-window">', out)
+        self.assertIn('<option value="1">Last 1 day</option>', out)
+        self.assertIn('<option value="7">Last 7 days</option>', out)
+        self.assertIn('<option value="30">Last 30 days</option>', out)
+
+    def test_completed_row_fields(self) -> None:
+        out = html_dashboard.render(_completed_snapshot())
+        self.assertIn("ship the old feature", out)
+        self.assertIn("completed", out)
+        self.assertIn("solo", out)
+        # Project shown in the row.
+        self.assertIn("alpha", out)
+
+    def test_completed_row_has_escaped_data_ts(self) -> None:
+        out = html_dashboard.render(_completed_snapshot())
+        self.assertIn('data-completed-ts="1750334400"', out)
+
+    def test_completed_relative_time(self) -> None:
+        # generated_at is 2026-06-20T00:00:00Z; completion 12h earlier.
+        out = html_dashboard.render(_completed_snapshot())
+        self.assertIn("12h ago", out)
+
+    def test_completed_title_escaped(self) -> None:
+        rows = [
+            {
+                "project": "alpha",
+                "id": "x",
+                "title": '<script>alert("xss")</script>',
+                "status": "completed",
+                "severity": "ok",
+                "formation": "solo",
+                "completed_ts": "2026-06-19T12:00:00Z",
+                "completed_epoch": 1750334400,
+            }
+        ]
+        out = html_dashboard.render(_completed_snapshot(rows))
+        self.assertNotIn("<script>alert", out)
+        self.assertIn("&lt;script&gt;", out)
+
+    def test_completed_empty_shows_note_no_table(self) -> None:
+        out = html_dashboard.render(_completed_snapshot(rows=[]))
+        self.assertIn("no recently-completed tasks", out)
+        self.assertNotIn('class="completed-table"', out)
+
+    def test_completed_truncation_note(self) -> None:
+        out = html_dashboard.render(_completed_snapshot(truncated=5))
+        self.assertIn("5 older completed task(s) in range are not shown", out)
+
+    def test_completed_section_present_when_snapshot_lacks_key(self) -> None:
+        # Backward-compatible: a snapshot with no "completed" key still renders
+        # the section with the empty note rather than crashing.
+        snap = _minimal_snapshot()
+        snap.pop("completed", None)
+        out = html_dashboard.render(snap)
+        self.assertIn("<h2>Completed</h2>", out)
+        self.assertIn("no recently-completed tasks", out)
+
+    def test_completed_window_script_persistence(self) -> None:
+        out = html_dashboard.render(_completed_snapshot())
+        self.assertIn("fleet.dashboard.completedWindow", out)
+        self.assertIn('document.querySelectorAll("[data-completed-ts]")', out)
+        self.assertIn("Date.now()", out)
+        self.assertIn("completed-window-empty", out)
+
+
 class RebuildGlobalTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -361,8 +453,14 @@ class UXImprovementTests(unittest.TestCase):
         self.assertIn('class="task-board"', out)
         self.assertIn("Your turn", out)
         self.assertIn("Running", out)
-        self.assertIn("Needs attention", out)
         self.assertIn("In review", out)
+        # "Needs attention" lane folded into "Other" (failed/changes-requested/rejected).
+        self.assertIn("Other", out)
+        self.assertNotIn("Needs attention", out)
+
+    def test_attention_statuses_route_to_other_lane(self) -> None:
+        for status in ("failed", "changes-requested", "rejected"):
+            self.assertEqual(html_dashboard._lane_for_status(status), "other", status)
 
     def test_banner_absent_when_zero_awaiting(self) -> None:
         snap = _minimal_snapshot(task_status="running")
