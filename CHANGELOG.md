@@ -60,6 +60,15 @@ defensively (`stage.get(...)`). `validate()` now also, fail-loud:
 `validate()` runs once at `fleet-agent start` (P4 wiring), so a botched gate now
 aborts the start instead of running ungated.
 
+### feat: reshape the HTML dashboard into a task board
+
+`fleet dashboard` now renders active tasks as status lanes with cards instead of
+per-project tables. Awaiting-order tasks are promoted into the first "Your turn"
+lane and keep the top banner links, while each card preserves project, task ID,
+title, status, formation, stage, last-seen, and PR information. Project metadata,
+leader sessions, recent events, the legend, inline CSS, meta refresh, and safe
+escaping all remain self-contained in the generated static HTML.
+
 ### docs: route project knowledge to fleet memory, not a vendor's own auto-memory
 
 `AGENTS.md` now has a **memory** section stating that drivers and the leader must
