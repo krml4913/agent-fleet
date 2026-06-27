@@ -70,7 +70,9 @@ class StartTests(unittest.TestCase):
             task_data["status"], state.derive_task_status(task_data["stages"])
         )
         events_path = self.state_dir / "events.jsonl"
-        lines = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        lines = [
+            json.loads(line) for line in events_path.read_text().splitlines() if line
+        ]
         starts = [e for e in lines if e.get("type") == "start"]
         self.assertEqual(len(starts), 1)
         self.assertEqual(starts[0]["task_id"], "7")
@@ -95,9 +97,9 @@ class StartTests(unittest.TestCase):
         prompt = (tdir / "driver-prompt.md").read_text()
         self.assertIn(prompt_text, prompt)
         lines = [
-            json.loads(l)
-            for l in (self.state_dir / "events.jsonl").read_text().splitlines()
-            if l
+            json.loads(line)
+            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            if line
         ]
         starts = [e for e in lines if e.get("type") == "start"]
         self.assertEqual(starts[-1]["description"], prompt_text)
@@ -228,12 +230,7 @@ class StartTests(unittest.TestCase):
         on_pre_start.assert_not_called()
 
     def test_formation_pair_review_starts_first_stage(self) -> None:
-        import shutil
-        from fleet import formation as formation_mod
         from fleet.commands import start
-
-        src = formation_mod.TEMPLATES_DIR / "pair_review.yaml"
-        shutil.copyfile(src, self.state_dir / "formations" / "pair_review.yaml")
 
         args = argparse.Namespace(
             project="demo",

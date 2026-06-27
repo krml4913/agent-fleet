@@ -560,8 +560,8 @@ procedure / staleness countermeasures) live in the memory directory's
 ### 7.1 Design Policy
 
 - Defined in **YAML** (start simple)
-- A two-tier structure: **formation templates** (shipped with fleet) +
-  **formations** (owned by the project)
+- A cascade structure: **project formations** override **global formations**,
+  which override shipped **formation templates**
 - **No count** (the leader decides on dynamic parallel launch as needed)
 - Can express **user_approval** (human approval points made explicit via a
   stage attribute)
@@ -677,16 +677,22 @@ unvalidated, so the open schema (no schema language; custom keys allowed) above
 is preserved. `validate()` runs once at `fleet-agent start` (P4), so a botched
 gate aborts the start rather than running ungated.
 
-### 7.5 Formation Templates / Formations
+### 7.5 Formation Resolution
 
-- **Formation templates** (`src/fleet/templates/`): shipped with fleet. Three:
-  `solo` / `pair_review` / `multi_stage`. Not directly executable.
-- **Formations** (`<state>/formations/<name>.yaml`): the actual instances owned
-  by the project. The runtime resolves only these.
-- A template shows recommended defaults — "write it like this and it works."
-  Copying it via `fleet init --formation <name>` or `fleet formation init
+- **Project formations**
+  (`projects/<project>/formations/<name>.yaml`): the most specific runtime tier.
+  They override global formations and shipped templates with the same name.
+- **Global formations** (`global/formations/<name>.yaml`): user-writable
+  cross-project formations. They define a formation once for every project, but
+  remain shadowed by a project override with the same name.
+- **Formation templates** (`src/fleet/templates/<name>.yaml`): shipped defaults.
+  Three ship with fleet: `solo` / `pair_review` / `multi_stage`. They are
+  directly usable by explicit name when neither project nor global overrides
+  exist.
+- Copying a template via `fleet init --formation <name>` or `fleet formation init
   --from <name>` makes it a project formation, independent thereafter (no
-  tracking of the template).
+  tracking of the template). `fleet formation init --from <name> --global`
+  copies it to the global tier instead.
 - After copying, you are free to change the `agent:` defaults, add/remove
   `user_approval`, and so on.
 
@@ -694,10 +700,15 @@ gate aborts the start rather than running ungated.
 
 | Situation | Result |
 |---|---|
-| `--formation <name>` explicit | load `<state>/formations/<name>.yaml`. Absence is an error (no template fallback) |
-| omitted + 1 file in formations/ | auto-adopt that one |
-| omitted + formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6) |
-| omitted + 2+ files in formations/ | ambiguity error (prompts to pass `--formation <name>`) |
+| `--formation <name>` explicit | resolve project → global → shipped template; absence from all three tiers is an error |
+| omitted + 1 project formation | auto-adopt that one |
+| omitted + project formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6) |
+| omitted + 2+ project formations | ambiguity error (prompts to pass `--formation <name>`) |
+
+The omitted-formation auto-pick intentionally considers only the project tier.
+Global formations and shipped templates are reachable only by explicit name, so
+a fresh project with no formation files still falls back to `_leader_solo`
+instead of becoming ambiguous among the shipped defaults.
 
 ---
 

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import formation  # noqa: E402
+from fleet import formation, state as state_mod  # noqa: E402
 
 
 class FormationTemplateTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class FormationTemplateTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             formation.load_template("no-such-template")
 
-    # ---- custom formation loading (no template fallback) ----
+    # ---- formation loading cascade ----
 
     def test_load_formation_from_state_dir(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -57,8 +57,76 @@ class FormationTemplateTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             state = Path(tmp) / ".fleet-state"
             (state / "formations").mkdir(parents=True)
-            with self.assertRaises(FileNotFoundError):
+            with self.assertRaises(FileNotFoundError) as ctx:
                 formation.load_formation("no-such-formation", state)
+            message = str(ctx.exception)
+            self.assertIn(str(state / "formations" / "no-such-formation.yaml"), message)
+            self.assertIn("global/formations/no-such-formation.yaml", message)
+            self.assertIn("templates/no-such-formation.yaml", message)
+
+    def test_load_formation_falls_back_to_template(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state = Path(tmp) / ".fleet-state"
+            (state / "formations").mkdir(parents=True)
+            data = formation.load_formation("pair_review", state)
+            self.assertEqual(data["name"], "pair_review")
+
+    def test_load_formation_global_shadows_template(self) -> None:
+        with TemporaryDirectory() as tmp:
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state = Path(tmp) / ".fleet-state"
+                (state / "formations").mkdir(parents=True)
+                global_dir = state_mod.global_formations_dir()
+                global_dir.mkdir(parents=True)
+                (global_dir / "solo.yaml").write_text(
+                    "name: solo\n"
+                    "description: global\n"
+                    "stages:\n"
+                    "  - role: driver\n"
+                    "    agent: codex:o4-mini\n"
+                )
+                data = formation.load_formation("solo", state)
+                self.assertEqual(data["description"], "global")
+                self.assertEqual(data["stages"][0]["agent"], "codex:o4-mini")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
+
+    def test_load_formation_project_shadows_global(self) -> None:
+        with TemporaryDirectory() as tmp:
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state = Path(tmp) / ".fleet-state"
+                (state / "formations").mkdir(parents=True)
+                global_dir = state_mod.global_formations_dir()
+                global_dir.mkdir(parents=True)
+                (global_dir / "solo.yaml").write_text(
+                    "name: solo\n"
+                    "description: global\n"
+                    "stages:\n"
+                    "  - role: driver\n"
+                    "    agent: claude:opus\n"
+                )
+                (state / "formations" / "solo.yaml").write_text(
+                    "name: solo\n"
+                    "description: project\n"
+                    "stages:\n"
+                    "  - role: driver\n"
+                    "    agent: codex:gpt-5.5\n"
+                )
+                data = formation.load_formation("solo", state)
+                self.assertEqual(data["description"], "project")
+                self.assertEqual(data["stages"][0]["agent"], "codex:gpt-5.5")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
 
     def test_list_custom_handles_missing_dir(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -81,8 +149,13 @@ class FormationTemplateTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             state = Path(tmp) / ".fleet-state"
             (state / "formations").mkdir(parents=True)
-            with self.assertRaises(formation.ResolutionError):
+            with self.assertRaises(formation.ResolutionError) as ctx:
                 formation.resolve_formation(state, "no-such")
+            message = str(ctx.exception)
+            self.assertIn("Looked in:", message)
+            self.assertIn("formations/no-such.yaml", message)
+            self.assertIn("global/formations/no-such.yaml", message)
+            self.assertIn("templates/no-such.yaml", message)
 
     def test_resolve_formation_single_custom_auto(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -93,6 +166,46 @@ class FormationTemplateTests(unittest.TestCase):
             )
             name, data = formation.resolve_formation(state, None)
             self.assertEqual(name, "solo")
+            self.assertEqual(data["stages"][0]["agent"], "claude:sonnet")
+
+    def test_resolve_formation_omitted_ignores_global_and_templates(self) -> None:
+        import contextlib
+        import io
+        import json
+
+        with TemporaryDirectory() as tmp:
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state_path = Path(tmp) / ".fleet-state"
+                (state_path / "formations").mkdir(parents=True)
+                global_dir = state_mod.global_formations_dir()
+                global_dir.mkdir(parents=True)
+                (global_dir / "solo.yaml").write_text(
+                    "name: solo\n"
+                    "stages:\n"
+                    "  - role: driver\n"
+                    "    agent: codex:o4-mini\n"
+                )
+                rec = state_mod.session_record_path("main")
+                rec.parent.mkdir(parents=True, exist_ok=True)
+                rec.write_text(json.dumps({
+                    "label": "main",
+                    "agent": "claude:opus",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                }))
+                buf = io.StringIO()
+                with contextlib.redirect_stderr(buf):
+                    name, data = formation.resolve_formation(
+                        state_path, None, owner_session="main"
+                    )
+                self.assertEqual(name, "_leader_solo")
+                self.assertEqual(data["stages"][0]["agent"], "claude:opus")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
 
     def test_resolve_formation_multiple_customs_raises(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -108,8 +221,9 @@ class FormationTemplateTests(unittest.TestCase):
     def test_resolve_formation_zero_customs_with_leader_session(self) -> None:
         # The _leader_solo fallback reads the owner session's record under
         # global/sessions/<label>/ (Issue #166), not a per-project leader-session.json.
-        import json, io, contextlib
-        from fleet import state as state_mod
+        import contextlib
+        import io
+        import json
 
         with TemporaryDirectory() as tmp:
             old_home = os.environ.get("FLEET_HOME")

@@ -20,11 +20,11 @@ _VENDOR = Path(__file__).resolve().parent.parent.parent / "vendor"
 if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
 
-import yaml as _yaml
+import yaml as _yaml  # noqa: E402
 
-from .events import utcnow_iso
-from .locking import atomic_update, atomic_write
-from . import simple_yaml  # kept for flat project.yaml
+from .events import utcnow_iso  # noqa: E402
+from .locking import atomic_update, atomic_write  # noqa: E402
+from . import simple_yaml  # kept for flat project.yaml  # noqa: E402
 
 
 # Name of the central state directory inside the agent-fleet clone, and the
@@ -44,6 +44,7 @@ GLOBAL_SUBDIR = "global"
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 LEADER_MEMORY_SUBDIR = "leader-memory"
 SESSIONS_SUBDIR = "sessions"
+FORMATIONS_SUBDIR = "formations"
 SESSION_RECORD_NAME = "session.json"
 SESSION_SCOPE_KEY = "scope"
 
@@ -124,6 +125,11 @@ def global_sessions_dir() -> Path:
     belongs to the session — not to any one project's ``state_dir``.
     """
     return global_dir() / SESSIONS_SUBDIR
+
+
+def global_formations_dir() -> Path:
+    """Return ``global/formations/`` — reusable formations across projects."""
+    return global_dir() / FORMATIONS_SUBDIR
 
 
 def session_dir(label: str) -> Path:

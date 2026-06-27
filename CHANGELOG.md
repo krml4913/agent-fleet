@@ -7,6 +7,20 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: resolve named formations through project, global, and template tiers
+
+Named formations now resolve by cascade: project overrides first, then
+`global/formations/`, then the shipped templates in `src/fleet/templates/`.
+Fresh projects no longer need copied template YAML just to start with
+`--formation pair_review`, while existing per-project copies remain the highest
+precedence override. The omitted-formation auto-pick remains project-only: zero
+project formations still falls back to `_leader_solo`, one is auto-adopted, and
+multiple remain ambiguous. `fleet init` now creates no formation copies by
+default; `fleet init --formation <name>` still seeds a project override, and
+`fleet formation init --from <name> --global` seeds the global tier. `fleet
+formation list` now shows reachable project/global/template entries with
+provenance and winner/shadowed status.
+
 ### docs: have the designer state its design output path before calling done
 
 The designer role prompt (`docs/prompts/roles/designer.md`) now instructs the
