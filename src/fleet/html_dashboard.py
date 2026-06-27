@@ -89,6 +89,23 @@ h2 { font-size: 1rem; margin: 1.4rem 0 .6rem; color: #c6ccd2; border-bottom: 1px
 h3 { font-size: .92rem; margin: 1rem 0 .3rem; color: #cfd4da; letter-spacing: 0; }
 .header { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: .75rem; flex-wrap: wrap; }
 .header-meta { font-size: .8rem; color: #99a1aa; }
+.session-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: 1.7rem;
+  color: #c9ced4;
+  font-size: .8rem;
+}
+.session-filter select {
+  max-width: 14rem;
+  border: 1px solid #3f4852;
+  border-radius: 6px;
+  background: #1d2125;
+  color: #e6e8ea;
+  padding: .2rem .45rem;
+  font: inherit;
+}
 .summary-stats { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-left: auto; }
 .stat-pill {
   display: inline-flex;
@@ -393,7 +410,33 @@ def _project_status_summary(proj: dict) -> str:
     return " &nbsp; ".join(summary_parts)
 
 
-def _task_card(parts: list[str], proj: dict, task: dict) -> None:
+def _project_session_labels(projects: list[dict], sessions: list[dict]) -> dict[str, list[str]]:
+    """Return session labels whose scope includes each project."""
+    names = {str(p["name"]) for p in projects}
+    labels_by_project: dict[str, list[str]] = {name: [] for name in names}
+    for sess in sessions:
+        label = str(sess.get("label") or "")
+        if not label:
+            continue
+        scope = sess.get("scope")
+        scoped_names = names if scope is None else {str(name) for name in scope}
+        for name in names:
+            if name in scoped_names:
+                labels_by_project[name].append(label)
+    return labels_by_project
+
+
+def _project_lane_attrs(project_sessions: dict[str, list[str]], pname: str) -> str:
+    sessions = " ".join(project_sessions.get(pname, []))
+    return f'data-project-lane="1" data-sessions="{_attr(sessions)}"'
+
+
+def _task_card(
+    parts: list[str],
+    proj: dict,
+    task: dict,
+    project_sessions: dict[str, list[str]],
+) -> None:
     """Render one task as a board card into *parts*."""
     pname = proj["name"]
     sev = task["severity"]
@@ -408,10 +451,13 @@ def _task_card(parts: list[str], proj: dict, task: dict) -> None:
     else:
         pr_cell = "—"
     repo_warn = '<span class="tag">repo missing</span>' if not proj.get("repo_exists") else ""
-    card_classes = f"task-card card-{sev}"
+    card_classes = f"task-card card-{sev} project-lane"
     if status == "awaiting_orders":
         card_classes += " awaiting-card"
-    parts.append(f'<article class="{_attr(card_classes)}" id="{_attr(anchor)}">\n')
+    lane_attrs = _project_lane_attrs(project_sessions, pname)
+    parts.append(
+        f'<article class="{_attr(card_classes)}" id="{_attr(anchor)}" {lane_attrs}>\n'
+    )
     parts.append('<div class="card-top">')
     parts.append(f'<span class="project-chip">{_e(pname)}</span>')
     parts.append(f'<span class="task-id">task-{_e(task["id"])}</span>')
@@ -429,7 +475,11 @@ def _task_card(parts: list[str], proj: dict, task: dict) -> None:
     parts.append("</article>\n")
 
 
-def _render_task_board(parts: list[str], projects: list[dict]) -> None:
+def _render_task_board(
+    parts: list[str],
+    projects: list[dict],
+    project_sessions: dict[str, list[str]],
+) -> None:
     """Render all active project tasks as status lanes."""
     grouped: dict[str, list[tuple[dict, dict]]] = {lane: [] for lane, _label, _st in _LANE_ORDER}
     for proj in projects:
@@ -451,12 +501,16 @@ def _render_task_board(parts: list[str], projects: list[dict]) -> None:
             parts.append('<div class="lane-empty">No tasks in this lane</div>\n')
         else:
             for proj, task in cards:
-                _task_card(parts, proj, task)
+                _task_card(parts, proj, task, project_sessions)
         parts.append("</section>\n")
     parts.append("</div>\n")
 
 
-def _render_project_summaries(parts: list[str], projects: list[dict]) -> None:
+def _render_project_summaries(
+    parts: list[str],
+    projects: list[dict],
+    project_sessions: dict[str, list[str]],
+) -> None:
     """Render compact per-project metadata so the board does not lose context."""
     if not projects:
         return
@@ -465,7 +519,8 @@ def _render_project_summaries(parts: list[str], projects: list[dict]) -> None:
         pname = proj["name"]
         repo_warn = '<span class="tag">repo missing</span>' if not proj.get("repo_exists") else ""
         state_warn = '<span class="tag">state dir not found</span>' if not proj.get("state_exists") else ""
-        parts.append('<div class="project-line">\n')
+        lane_attrs = _project_lane_attrs(project_sessions, pname)
+        parts.append(f'<div class="project-line project-lane" {lane_attrs}>\n')
         parts.append(
             f'<div class="project-line-title"><span>{_e(pname)}</span>'
             f'<span>{repo_warn}{state_warn}</span></div>\n'
@@ -503,6 +558,7 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
     # Sort projects: those with tasks first; empty (no tasks) last.
     active_projects = [p for p in projects if p.get("tasks")]
     empty_projects = [p for p in projects if not p.get("tasks")]
+    project_sessions = _project_session_labels(projects, sessions)
 
     parts: list[str] = []
 
@@ -530,6 +586,18 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
         f" &nbsp;·&nbsp; fleet {version}"
         f" &nbsp;·&nbsp; auto-refreshes every {refresh_seconds}s"
         f"</span>"
+        f'<label class="session-filter" for="session-filter">'
+        f"<span>Session</span>"
+        f'<select id="session-filter">'
+        f'<option value="">All</option>'
+    )
+    for sess in sessions:
+        label = str(sess.get("label") or "")
+        if not label:
+            continue
+        parts.append(f'<option value="{_attr(label)}">{_e(label)}</option>')
+    parts.append(
+        f"</select></label>"
         f'<span class="summary-stats">'
         f'<span class="stat-pill">{_dot("active")} running {total_running}</span>'
         f'<span class="stat-pill">{_dot("attention")} awaiting {len(all_awaiting)}</span>'
@@ -559,9 +627,9 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
         parts.append('<p class="no-tasks">(no registered projects)</p>\n')
 
     if active_projects:
-        _render_task_board(parts, active_projects)
+        _render_task_board(parts, active_projects, project_sessions)
         parts.append("<h2>Projects</h2>\n")
-        _render_project_summaries(parts, active_projects)
+        _render_project_summaries(parts, active_projects, project_sessions)
 
     if empty_projects:
         if not active_projects:
@@ -572,8 +640,9 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
             repo = proj["repo"]
             repo_warn = " &#9888; repo missing" if not proj.get("repo_exists") else ""
             state_warn = " (state dir not found)" if not proj.get("state_exists") else ""
+            lane_attrs = _project_lane_attrs(project_sessions, pname)
             parts.append(
-                f'<div class="idle-row">'
+                f'<div class="idle-row project-lane" {lane_attrs}>'
                 f'<span class="idle-name">{_e(pname)}</span>'
                 f'<span class="idle-detail">{_e(repo)}'
                 f"{repo_warn}{_e(state_warn)} &mdash; (no tasks)</span>"
@@ -671,6 +740,82 @@ def render(snapshot: dict, *, refresh_seconds: int = REFRESH_SECONDS) -> str:
         '<span class="dot active">&#9679;</span> active &nbsp;&nbsp;'
         '<span class="dot attention">&#9679;</span> attention'
         "</div>\n"
+    )
+
+    parts.append(
+        """<script>
+(function () {
+  var storageKey = "fleet.dashboard.sessionFilter";
+
+  function hasOption(select, value) {
+    for (var i = 0; i < select.options.length; i += 1) {
+      if (select.options[i].value === value) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function storedSelection() {
+    try {
+      return sessionStorage.getItem(storageKey) || "";
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function saveSelection(value) {
+    try {
+      if (value) {
+        sessionStorage.setItem(storageKey, value);
+      } else {
+        sessionStorage.removeItem(storageKey);
+      }
+    } catch (err) {
+      return;
+    }
+  }
+
+  function applyFilter(value) {
+    var lanes = document.querySelectorAll('[data-project-lane="1"]');
+    for (var i = 0; i < lanes.length; i += 1) {
+      var lane = lanes[i];
+      if (!value) {
+        lane.hidden = false;
+        continue;
+      }
+      var sessions = (lane.getAttribute("data-sessions") || "").split(/\\s+/);
+      lane.hidden = sessions.indexOf(value) === -1;
+    }
+  }
+
+  function initSessionFilter() {
+    var select = document.getElementById("session-filter");
+    if (!select) {
+      return;
+    }
+    var saved = storedSelection();
+    if (saved && hasOption(select, saved)) {
+      select.value = saved;
+    } else {
+      select.value = "";
+      saveSelection("");
+    }
+    applyFilter(select.value);
+    select.addEventListener("change", function () {
+      saveSelection(select.value);
+      applyFilter(select.value);
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initSessionFilter);
+  } else {
+    initSessionFilter();
+  }
+}());
+</script>
+"""
     )
 
     parts.append("</body>\n</html>\n")

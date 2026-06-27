@@ -7,6 +7,16 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: filter the HTML dashboard by leader session scope
+
+`fleet dashboard` now includes a client-side session selector for the
+cross-project HTML dashboard. `All` remains the default global overview, while a
+selected leader session hides project lanes outside that session's scope; unscoped
+sessions still match every project. The selection is stored in `sessionStorage`
+and reapplied across the existing 15-second meta refresh. The dashboard remains a
+single static HTML file with inline vanilla JavaScript and no daemon, server,
+Node, build step, or schema change.
+
 ### feat: resolve named formations through project, global, and template tiers
 
 Named formations now resolve by cascade: project overrides first, then

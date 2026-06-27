@@ -390,13 +390,19 @@ interval.
   can be introduced later
 
 **Cross-project HTML dashboard** (`global/dashboard.html`) — confirmed design
-(Issue #182):
+(Issues #182, #200):
 - Generated on demand by `fleet dashboard` (opens the browser via `file://` URI).
 - Refreshed automatically by the same write hook (`dashboard.rebuild`) **while
   the file exists** (opt-in by presence; zero cross-project scan cost until the
   user first runs `fleet dashboard`).
 - Browser liveness via `<meta http-equiv="refresh" content="15">` — no daemon,
   no resident process.
+- A client-side session selector filters the already-rendered project lanes by
+  session scope. `All` is the default unfiltered view; selecting a session shows
+  projects in that session's scope, and an unscoped session matches every project.
+  The selected value is stored in `sessionStorage` and reapplied after the
+  15-second meta refresh. The filter is vanilla inline JavaScript only; no server,
+  daemon, Node, build step, or alternate dashboard file is introduced.
 - Complement to `dashboard.md` (per-project markdown stays); `global/dashboard.html`
   is the cross-project GUI view.
 - `global/dashboard.html` is in `fleet-state/` which is already `.gitignore`d —

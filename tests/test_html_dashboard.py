@@ -72,6 +72,54 @@ def _minimal_snapshot(
     }
 
 
+def _session_filter_snapshot() -> dict:
+    snap = _minimal_snapshot(project_name="alpha", session_label="main")
+    snap["projects"].append(
+        {
+            "name": "beta",
+            "repo": "/tmp/beta",
+            "repo_exists": True,
+            "state_exists": True,
+            "by_status": {},
+            "awaiting": [],
+            "tasks": [],
+        }
+    )
+    snap["sessions"] = [
+        {
+            "label": "main",
+            "live": True,
+            "agent": "claude:opus",
+            "pane": "fleet-main:leader",
+            "since": "2026-06-20T00:00:00Z",
+            "has_record": True,
+            "scope": ["alpha"],
+            "tasks": [],
+        },
+        {
+            "label": "all-projects",
+            "live": True,
+            "agent": "codex:gpt-5.5",
+            "pane": "fleet-all-projects:leader",
+            "since": "2026-06-20T00:00:00Z",
+            "has_record": True,
+            "scope": None,
+            "tasks": [],
+        },
+        {
+            "label": "ops",
+            "live": True,
+            "agent": "claude:opus",
+            "pane": "fleet-ops:leader",
+            "since": "2026-06-20T00:00:00Z",
+            "has_record": True,
+            "scope": ["beta"],
+            "tasks": [],
+        },
+    ]
+    return snap
+
+
 class RenderTests(unittest.TestCase):
     def test_contains_project_name(self) -> None:
         snap = _minimal_snapshot(project_name="myproject")
@@ -107,7 +155,7 @@ class RenderTests(unittest.TestCase):
     def test_html_escaping_title(self) -> None:
         snap = _minimal_snapshot(task_title='<script>alert("xss")</script>')
         html = html_dashboard.render(snap)
-        self.assertNotIn("<script>", html)
+        self.assertNotIn("<script>alert", html)
         self.assertIn("&lt;script&gt;", html)
 
     def test_html_escaping_ampersand(self) -> None:
@@ -165,6 +213,41 @@ class RenderTests(unittest.TestCase):
         }
         html = html_dashboard.render(snap)
         self.assertIn("state dir not found", html)
+
+    def test_session_filter_select_contains_all_and_sessions(self) -> None:
+        snap = _session_filter_snapshot()
+        html = html_dashboard.render(snap)
+        self.assertIn('<select id="session-filter">', html)
+        self.assertIn('<option value="">All</option>', html)
+        self.assertIn('<option value="main">main</option>', html)
+        self.assertIn('<option value="all-projects">all-projects</option>', html)
+        self.assertIn('<option value="ops">ops</option>', html)
+
+    def test_project_lanes_have_scope_session_data(self) -> None:
+        snap = _session_filter_snapshot()
+        html = html_dashboard.render(snap)
+        self.assertIn('data-project-lane="1"', html)
+        self.assertIn('data-sessions="main all-projects"', html)
+        self.assertIn('data-sessions="all-projects ops"', html)
+
+    def test_session_filter_escapes_label_in_options_and_data(self) -> None:
+        snap = _minimal_snapshot(session_label='main"<tag>')
+        html = html_dashboard.render(snap)
+        self.assertIn(
+            '<option value="main&quot;&lt;tag&gt;">main&quot;&lt;tag&gt;</option>',
+            html,
+        )
+        self.assertIn('data-sessions="main&quot;&lt;tag&gt;"', html)
+
+    def test_session_filter_script_persists_and_hides_project_lanes(self) -> None:
+        snap = _session_filter_snapshot()
+        html = html_dashboard.render(snap)
+        self.assertIn("fleet.dashboard.sessionFilter", html)
+        self.assertIn("sessionStorage.getItem(storageKey)", html)
+        self.assertIn("sessionStorage.setItem(storageKey, value)", html)
+        self.assertIn('document.querySelectorAll(\'[data-project-lane="1"]\')', html)
+        self.assertIn("lane.hidden = sessions.indexOf(value) === -1", html)
+        self.assertIn('select.addEventListener("change"', html)
 
 
 class RebuildGlobalTests(unittest.TestCase):
@@ -289,7 +372,7 @@ class UXImprovementTests(unittest.TestCase):
         snap = _minimal_snapshot()
         snap["projects"][0]["tasks"][0]["pr_url"] = "https://github.com/x/y/pull/42"
         out = html_dashboard.render(snap)
-        self.assertNotIn("<script", out)
+        self.assertNotIn("<script src=", out)
         self.assertNotIn("<link", out)
         self.assertNotIn("@import", out)
         self.assertNotIn("url(", out)
