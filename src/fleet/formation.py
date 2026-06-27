@@ -1,12 +1,11 @@
 """Load and inspect team formation YAML files (design doc §6).
 
 A *formation template* (``src/fleet/templates/*.yaml``) is a fleet-shipped
-starter; it can be copied into a project via ``fleet init`` or
-``fleet formation init --from``.  Direct execution is not supported.
+default. Explicitly named formations resolve to shipped templates when no
+project or global override exists.
 
-A *formation* lives in ``<state>/formations/<name>.yaml`` — that is the
-runtime source of truth.  Templates and formations are distinct: templates
-are read-only starters; once copied, a formation is fully independent.
+A *formation* can live in a project or global runtime tier. Project formations
+win over global formations, and global formations win over shipped templates.
 """
 from __future__ import annotations
 
@@ -19,9 +18,9 @@ _VENDOR = Path(__file__).resolve().parent.parent.parent / "vendor"
 if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
     sys.path.insert(0, str(_VENDOR))
 
-import yaml
+import yaml  # noqa: E402
 
-from . import state as state_mod
+from . import state as state_mod  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 CUSTOM_SUBDIR = "formations"
@@ -54,6 +53,13 @@ def list_custom(state_dir: Path) -> list[str]:
     return sorted(p.stem for p in d.glob("*.yaml"))
 
 
+def list_global() -> list[str]:
+    d = state_mod.global_formations_dir()
+    if not d.is_dir():
+        return []
+    return sorted(p.stem for p in d.glob("*.yaml"))
+
+
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
@@ -73,19 +79,30 @@ def load_custom(state_dir: Path, name: str) -> dict[str, Any]:
     return _load_yaml(path)
 
 
-def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
-    """Load a formation strictly from ``<state>/formations/<name>.yaml``.
-
-    No template fallback — templates are not directly executable.
-    Raises FileNotFoundError when the formation is missing.
-    """
-    path = state_dir / CUSTOM_SUBDIR / f"{name}.yaml"
+def load_global(name: str) -> dict[str, Any]:
+    path = state_mod.global_formations_dir() / f"{name}.yaml"
     if not path.is_file():
-        raise FileNotFoundError(
-            f"no formation named {name!r} in {state_dir / CUSTOM_SUBDIR}.\n"
-            f"  Run: fleet formation init --from <template>"
-        )
+        raise FileNotFoundError(f"no global formation: {name}")
     return _load_yaml(path)
+
+
+def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
+    """Load a named formation via project → global → template cascade.
+
+    Raises FileNotFoundError when the formation is absent from all tiers.
+    """
+    looked = [
+        state_dir / CUSTOM_SUBDIR / f"{name}.yaml",
+        state_mod.global_formations_dir() / f"{name}.yaml",
+        TEMPLATES_DIR / f"{name}.yaml",
+    ]
+    for path in looked:
+        if path.is_file():
+            return _load_yaml(path)
+    tiers = "\n".join(f"  - {path}" for path in looked)
+    raise FileNotFoundError(
+        f"no formation named {name!r}. Looked in:\n{tiers}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +119,7 @@ def resolve_formation(
     """Return ``(effective_name, formation_dict)`` for start.
 
     Rules:
-    - ``requested`` given: load strictly from formations/; missing → error.
+    - ``requested`` given: load project → global → template; missing → error.
     - ``requested`` is None + 0 customs: synthesise leader-solo from the owner
       session's agent (``global/sessions/<owner_session>/session.json``).
     - ``requested`` is None + 1 custom: use that one (unambiguous).
@@ -119,7 +136,7 @@ def resolve_formation(
     if len(customs) == 0:
         return synth_leader_solo(owner_session)
     if len(customs) == 1:
-        return (customs[0], load_formation(customs[0], state_dir))
+        return (customs[0], load_custom(state_dir, customs[0]))
     raise ResolutionError(
         f"multiple formations in {state_dir / CUSTOM_SUBDIR}: "
         f"{', '.join(customs)}. Pass --formation <name> to choose."

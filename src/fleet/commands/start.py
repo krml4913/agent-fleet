@@ -233,8 +233,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--formation",
         default=None,
         help=(
-            "Formation name. Required unless <state>/formations/ is empty, "
-            "in which case fleet falls back to the leader's agent (1-stage solo)."
+            "Formation name. Explicit names resolve project -> global -> template; "
+            "when omitted, only project formations are auto-picked."
         ),
     )
     p.add_argument(

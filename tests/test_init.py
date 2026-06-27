@@ -1,7 +1,6 @@
 """Tests for ``fleet init`` — stdlib-only (unittest) so they run anywhere."""
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import unittest
@@ -173,6 +172,15 @@ class InitFormationInitCmdTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.state_dir / "formations" / "solo.yaml").is_file())
 
+    def test_formation_init_global_writes_global_formations(self) -> None:
+        result = run_fleet("formation", "init", "--from", "solo", "--global",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(
+            (self.fleet_home / "global" / "formations" / "solo.yaml").is_file()
+        )
+        self.assertFalse((self.state_dir / "formations" / "solo.yaml").exists())
+
     def test_formation_init_from_with_name(self) -> None:
         result = run_fleet("formation", "init", "--from", "solo", "--name", "my-solo",
                            fleet_home=self.fleet_home, cwd=self.project)
@@ -192,6 +200,24 @@ class InitFormationInitCmdTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 1)
         self.assertIn("unknown template", result.stderr)
+
+    def test_formation_list_shows_provenance_and_winner(self) -> None:
+        global_dir = self.fleet_home / "global" / "formations"
+        global_dir.mkdir(parents=True)
+        (global_dir / "solo.yaml").write_text(
+            "name: solo\nstages:\n  - role: driver\n    agent: claude:opus\n"
+        )
+        run_fleet("formation", "init", "--from", "solo",
+                  fleet_home=self.fleet_home, cwd=self.project)
+
+        result = run_fleet("formation", "list",
+                           fleet_home=self.fleet_home, cwd=self.project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("solo [project:demo] (wins)", result.stdout)
+        self.assertIn("solo [global] (shadowed)", result.stdout)
+        self.assertIn("solo [template] (shadowed)", result.stdout)
+        self.assertIn("pair_review [template] (wins)", result.stdout)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from pathlib import Path
 
 from ..state import (
     ensure_global_leader_memory,
-    fleet_home,
     init_state,
     project_state_dir,
     register_project,
@@ -43,7 +42,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         dest="formations",
         metavar="NAME",
         help=(
-            "Formation template(s) to copy into <state>/formations/. "
+            "Formation template(s) to copy into <state>/formations/ as project overrides. "
             "Repeat or use comma-separated names. "
             "Available: solo, pair_review, multi_stage."
         ),
@@ -51,12 +50,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--no-formation",
         action="store_true",
-        help="Create an empty formations/ directory (skip all template copying).",
+        help="Create an empty formations/ directory (the default).",
     )
     p.add_argument(
         "--non-interactive",
         action="store_true",
-        help="Suppress the interactive template picker even when running on a TTY.",
+        help="Accepted for compatibility; init no longer prompts by default.",
     )
     p.set_defaults(func=run)
 
@@ -92,9 +91,9 @@ def _interactive_pick() -> list[str] | None:
         desc = descriptions.get(name, "")
         print(f"  {i}) {name:<14} - {desc}")
     print()
-    print(f"Which to copy into <state>/formations/?")
-    print(f"  Enter numbers (1,2,3), names (solo,pair_review), 'all', or 'none'.")
-    print(f"  Default: all")
+    print("Which to copy into <state>/formations/?")
+    print("  Enter numbers (1,2,3), names (solo,pair_review), 'all', or 'none'.")
+    print("  Default: all")
     print()
 
     for attempt in range(3):
@@ -152,7 +151,7 @@ def _interactive_pick() -> list[str] | None:
     print()
     print(f"Selected: {names_str}")
     try:
-        ans = input(f"Copy these to <state>/formations/? [Y/n] ").strip().lower()
+        ans = input("Copy these to <state>/formations/? [Y/n] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print("\nerror: aborted by user", file=sys.stderr)
         return None
@@ -201,14 +200,8 @@ def run(args: argparse.Namespace) -> int:
         selected_formations = flat
         interactive = False
     else:
-        # Decide: interactive or silent-no-formation
-        is_tty = sys.stdin.isatty()
-        non_interactive = getattr(args, "non_interactive", False)
-        if is_tty and not non_interactive:
-            interactive = True
-        else:
-            selected_formations = []
-            interactive = False
+        selected_formations = []
+        interactive = False
 
     try:
         register_project(name, repo)
@@ -277,7 +270,7 @@ def run(args: argparse.Namespace) -> int:
 
     formations_summary = ", ".join(copied_names) if copied_names else "(none)"
 
-    print(f"Initialized fleet state:")
+    print("Initialized fleet state:")
     print(f"  project name: {name}")
     print(f"  repo:         {repo}")
     print(f"  state dir:    {state_dir}")
