@@ -84,6 +84,7 @@ body {
 }
 a { color: #7eb8f7; text-decoration: none; }
 a:hover { text-decoration: underline; }
+[hidden] { display: none !important; }
 h1 { margin: 0 0 .25rem; font-size: 1.35rem; line-height: 1.2; color: #fff; letter-spacing: 0; }
 h2 { font-size: 1rem; margin: 1.4rem 0 .6rem; color: #c6ccd2; border-bottom: 1px solid #31363b; padding-bottom: .35rem; letter-spacing: 0; }
 h3 { font-size: .92rem; margin: 1rem 0 .3rem; color: #cfd4da; letter-spacing: 0; }

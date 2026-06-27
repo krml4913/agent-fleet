@@ -242,6 +242,7 @@ class RenderTests(unittest.TestCase):
     def test_session_filter_script_persists_and_hides_project_lanes(self) -> None:
         snap = _session_filter_snapshot()
         html = html_dashboard.render(snap)
+        self.assertIn("[hidden] { display: none !important; }", html)
         self.assertIn("fleet.dashboard.sessionFilter", html)
         self.assertIn("sessionStorage.getItem(storageKey)", html)
         self.assertIn("sessionStorage.setItem(storageKey, value)", html)
