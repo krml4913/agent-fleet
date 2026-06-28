@@ -1,6 +1,7 @@
-# Solo driver — one agent works the task end-to-end.
+# Solo driver — one agent works the task end-to-end, then waits for sign-off.
 name: solo
-description: One driver works the task end-to-end.
+description: One driver works the task end-to-end, then waits for sign-off.
 stages:
   - role: driver
     agent: claude:sonnet
+    user_approval: required

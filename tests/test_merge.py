@@ -65,7 +65,7 @@ class MergeCmdTests(unittest.TestCase):
         path = self.state_dir / "events.jsonl"
         if not path.exists():
             return []
-        return [json.loads(l) for l in path.read_text().splitlines() if l]
+        return [json.loads(line) for line in path.read_text().splitlines() if line]
 
     # -- happy path ---------------------------------------------------------
 
@@ -187,6 +187,18 @@ class MergeCmdTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(called, [])  # never reached gh
 
+    def test_refuses_awaiting_orders_without_force(self) -> None:
+        self._save("1", "awaiting_orders", branch="demo/task/1")
+        called: list = []
+
+        with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
+                patch("fleet.commands.merge.subprocess.run",
+                      side_effect=lambda *a, **k: called.append(a) or _ok()):
+            rc = merge_mod.run(self._args("1"))
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(called, [])  # never reached gh
+
     def test_force_overrides_guard(self) -> None:
         self._save("1", "running", branch="demo/task/1")
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
@@ -249,8 +261,11 @@ class MergeLeaderProjectTests(unittest.TestCase):
             mock_tmux.available.return_value = False
             rc = merge_mod.run(self._args())
         self.assertEqual(rc, 0)
-        events = [json.loads(l) for l in
-                  (self.state_dir / "events.jsonl").read_text().splitlines() if l]
+        events = [
+            json.loads(line)
+            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            if line
+        ]
         self.assertTrue(any(e["type"] == "merge" for e in events))
 
 

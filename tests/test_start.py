@@ -64,6 +64,10 @@ class StartTests(unittest.TestCase):
         self.assertIsInstance(task_data.get("stages"), list)
         self.assertEqual(len(task_data["stages"]), 1)
         self.assertEqual(task_data["stages"][0]["status"], "running")
+        self.assertEqual(
+            task_data["stages"][0]["user_approval"],
+            {"required": True, "status": "pending"},
+        )
         # The persisted task status agrees with derive_task_status(stages).
         self.assertEqual(task_data["status"], "running")
         self.assertEqual(

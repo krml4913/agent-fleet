@@ -164,8 +164,11 @@ def synth_leader_solo(owner_session: str) -> tuple[str, dict[str, Any]]:
     print(f"warn: no formation specified, falling back to leader agent ({agent})", file=_sys.stderr)
     data: dict[str, Any] = {
         "name": "_leader_solo",
-        "description": "Synthesized 1-stage solo (no formations defined; using leader agent).",
-        "stages": [{"role": "driver", "agent": agent}],
+        "description": (
+            "Synthesized 1-stage solo with sign-off "
+            "(no formations defined; using leader agent)."
+        ),
+        "stages": [{"role": "driver", "agent": agent, "user_approval": "required"}],
     }
     return ("_leader_solo", data)
 

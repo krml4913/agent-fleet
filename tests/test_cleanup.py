@@ -57,12 +57,20 @@ class CleanupCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("refusing", r.stderr)
 
+    def test_refuses_awaiting_orders_without_force(self) -> None:
+        self._save("1", "awaiting_orders")
+        r = self._run("cleanup", "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("status=awaiting_orders", r.stderr)
+
     def test_completed_cleans_up(self) -> None:
         self._save("1", "completed")
         r = self._run("cleanup", "1")
         self.assertEqual(r.returncode, 0, r.stderr)
         events_path = self.state_dir / "events.jsonl"
-        events = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        events = [
+            json.loads(line) for line in events_path.read_text().splitlines() if line
+        ]
         self.assertTrue(any(e["type"] == "cleanup" for e in events))
 
     def test_force_overrides(self) -> None:

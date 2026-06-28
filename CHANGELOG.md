@@ -7,6 +7,17 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### change: make solo formations stop at the user approval gate
+
+The shipped `solo` template now includes `user_approval: required`, and the
+synthetic `_leader_solo` fallback used when a project has no formation files gets
+the same gate. Single-driver tasks now park at `awaiting_orders` for user or
+delegated-leader sign-off instead of jumping straight to `completed`; `approve`
+then completes them, while `merge` / `cleanup` continue to refuse the parked task
+without `--force`. Docs and tests were updated to describe the gate as the
+development-flow sign-off checkpoint rather than a new status or `finalize:`
+mechanism. Closes #234.
+
 ### test: make live tmux/leader tests opt-in via `FLEET_LIVE_TMUX`
 
 The live-tmux tests (`tests/test_tmux.py`, `tests/test_attach_cmd.py`,

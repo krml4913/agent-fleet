@@ -28,6 +28,18 @@ def _solo_task_data(task_id: str = "1", status: str = "spawning") -> dict:
     }
 
 
+def _gated_solo_task_data(
+    task_id: str = "gated",
+    *,
+    formation: str = "solo",
+    status: str = "running",
+) -> dict:
+    data = _solo_task_data(task_id, status=status)
+    data["formation"] = formation
+    data["stages"][0]["user_approval"] = {"required": True, "status": "pending"}
+    return data
+
+
 class DoneTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -61,7 +73,9 @@ class DoneTests(unittest.TestCase):
         self.assertEqual(task["status"], "completed")
         self.assertEqual(task["stages"][0]["status"], "done")
         events_path = self.state_dir / "events.jsonl"
-        events = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        events = [
+            json.loads(line) for line in events_path.read_text().splitlines() if line
+        ]
         self.assertTrue(any(e["type"] == "done" for e in events))
 
     def test_done_from_cwd(self) -> None:
@@ -123,6 +137,32 @@ class DoneTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         task = state.load_task(self.state_dir, "1")
         self.assertNotEqual(task["status"], "completed")
+
+    def test_done_gated_solo_awaits_orders(self) -> None:
+        state.save_task(self.state_dir, "gated", _gated_solo_task_data("gated"))
+
+        r = self._run("done", "--result", "approved", "gated")
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        task = state.load_task(self.state_dir, "gated")
+        self.assertEqual(task["status"], "awaiting_orders")
+        self.assertEqual(task["stages"][0]["status"], "running")
+        self.assertEqual(task["stages"][0]["user_approval"]["status"], "asked")
+
+    def test_done_synthetic_leader_solo_awaits_orders(self) -> None:
+        state.save_task(
+            self.state_dir,
+            "fallback",
+            _gated_solo_task_data("fallback", formation="_leader_solo"),
+        )
+
+        r = self._run("done", "--result", "approved", "fallback")
+
+        self.assertEqual(r.returncode, 0, r.stderr)
+        task = state.load_task(self.state_dir, "fallback")
+        self.assertEqual(task["formation"], "_leader_solo")
+        self.assertEqual(task["status"], "awaiting_orders")
+        self.assertEqual(task["stages"][0]["user_approval"]["status"], "asked")
 
 
 class DoneNotifyTests(unittest.TestCase):

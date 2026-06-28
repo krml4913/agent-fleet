@@ -4,7 +4,7 @@
 > **settled design decisions**. Open questions and unresolved design
 > issues are tracked in GitHub Issues.
 >
-> Last updated: 2026-06-17
+> Last updated: 2026-06-29
 
 ---
 
@@ -666,11 +666,12 @@ procedure / staleness countermeasures) live in the memory directory's
 ### 7.2 Formation Examples
 
 ```yaml
-# Formation A: solo driver (handles everything through to PR alone)
+# Formation A: solo driver (implements, then waits for sign-off)
 name: solo
 stages:
   - role: driver
     agent: claude:sonnet
+    user_approval: required
 
 # Formation B: pair review (implementer + AI review + user approval)
 name: pair_review
@@ -849,13 +850,16 @@ later inside `fleet-agent done` when a later stage or reviewer is advanced.
 |---|---|
 | `--formation <name>` explicit | resolve project → global; absence from both runtime tiers is an error |
 | omitted + 1 project formation | auto-adopt that one |
-| omitted + project formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6) |
+| omitted + project formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6), with `user_approval: required` |
 | omitted + 2+ project formations | ambiguity error (prompts to pass `--formation <name>`) |
 
 The omitted-formation auto-pick intentionally considers only the project tier.
 Global formations are reachable by explicit name but are not auto-selected, so a
 fresh project with no formation files still falls back to `_leader_solo`. Shipped
 templates are seed sources only and are never used as a runtime fallback.
+Both the shipped `solo` template and the synthetic `_leader_solo` fallback carry
+`user_approval: required`, so a finished single-driver task parks at
+`awaiting_orders` for sign-off instead of jumping straight to `completed`.
 
 ---
 
@@ -915,6 +919,16 @@ This means:
   steps (`driver-base.md` + role fragment + task description only).
 - The fleet does not decide PR merges. If needed, the project writes "merging
   is left to the leader / user" in its `CLAUDE.md`.
+- A `user_approval` gate is the fleet's generic place to host a development-flow
+  sign-off checkpoint. For coding projects, that checkpoint often corresponds to
+  review/merge authority, but the decision remains outside fleet core. Three
+  authority modes exist:
+  1. The user reviews/merges and settles the gate.
+  2. A project delegates that authority to the leader; the leader settles the
+     same gate as project policy.
+  3. Mechanical leaderless auto-merge has no approver and is deferred until a
+     concrete bottleneck requires it; no `finalize:` key or extra task status is
+     part of the design.
 
 ### 8.5 Placement
 
@@ -1115,7 +1129,7 @@ chooses a formation in-context as part of `fleet-agent start` (§4.1: "deciding
 which agent vendor / model / formation to launch"). The heuristics are implicit
 and unwritten, but real:
 
-- A small, low-risk fix → `solo`.
+- A small, low-risk fix → `solo` (one driver, then sign-off).
 - A heavier code change that wants a review gate → `pair_review`.
 - A task that needs a design pass before implementation → `multi_stage`.
 
@@ -1173,13 +1187,16 @@ which is, again, a description of what the leader already does in its head.
 ### 12.5 Failure Behavior
 
 If inference cannot decide, it must fall back deterministically rather than
-stall. The natural fallback is **`solo`**: it is the lightest formation, it is
-what §7.5 already synthesizes when no formation file is present
-(`_leader_solo`), and an under-powered guess (solo when pair_review was wanted)
-is cheaply correctable mid-task — the user can intervene in the driver pane
-(§1.3 principle 8), or the leader can launch a review follow-up. Over-powering
-(pair_review for a typo fix) wastes an agent boot and a review loop. Fail toward
-the lighter formation.
+stall. The natural fallback is **`solo`**: it is the lightest shipped formation
+in terms of agent work, and §7.5 synthesizes the equivalent `_leader_solo` when
+no formation file is present. Both shapes still include `user_approval:
+required`, so the fallback is not a gateless auto-complete path. An under-powered
+guess (solo when pair_review was wanted) is cheaply correctable mid-task — the
+user can intervene in the driver pane (§1.3 principle 8), or the leader can
+launch a review follow-up. Over-powering (pair_review for a typo fix) wastes an
+agent boot and a review loop. Fail toward the lighter formation; if a project
+truly needs gateless fire-and-forget work, add a dedicated formation for that
+case and document when to choose it.
 
 ### 12.6 Mission Consistency — the Key Tension
 
@@ -1222,8 +1239,8 @@ judgment at `start` time — for these reasons:
    (§1.3 principle 4) and are brittle against real task phrasing.
 3. History-based input violates "the leader is light" / no polling
    (§1.3 principle 7, §9).
-4. Hard override (§7.5) and a `solo` fallback (§12.5) are already the right
-   defaults and need no new code.
+4. Hard override (§7.5) and a sign-off-gated `solo` / `_leader_solo` fallback
+   (§12.5) are already the right defaults and need no inference code.
 
 The **one lightweight, mechanism-free** step worth considering — *not* a new
 command — is to **write the implicit heuristics down as guidance** that the
@@ -1234,7 +1251,9 @@ how the fleet steers judgment elsewhere (§8.1).
 
 One correction to the framing above, though: those example heuristics ("small
 fix → solo; heavy change needing review → pair_review; design-before-build →
-multi_stage") read as *universal*, but they are not. The bundled
+multi_stage") read as *universal*, but they are not. Bundled `solo` now means
+"one driver, then sign-off"; gateless work is not the default and should get its
+own formation when a project needs it. The bundled
 `solo` / `pair_review` / `multi_stage` are only **templates** — runtime
 formations may be project overrides or global formations, and a project may
 customize names, stages, roles, or agents (§7). So the *criteria for picking
