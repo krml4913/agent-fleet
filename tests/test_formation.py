@@ -443,6 +443,41 @@ class FormationTemplateTests(unittest.TestCase):
                 "stages": [{"role": "implementer", "peer_review": {"agent": "claude:opus"}}],
             })
 
+    def test_validate_accepts_peer_review_max_iterations(self) -> None:
+        # An optional numeric max_iterations under peer_review is accepted.
+        formation.validate({
+            "name": "x",
+            "stages": [
+                {"role": "implementer",
+                 "peer_review": {"role": "code-reviewer", "max_iterations": 5}},
+            ],
+        })
+
+    def test_validate_rejects_peer_review_max_iterations_non_numeric(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "peer_review": {"role": "r", "max_iterations": "lots"}}],
+            })
+
+    def test_validate_rejects_peer_review_max_iterations_below_one(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "peer_review": {"role": "r", "max_iterations": 0}}],
+            })
+
+    def test_validate_rejects_peer_review_max_iterations_bool(self) -> None:
+        # A bool is not a valid iteration count even though it is an int subtype.
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "peer_review": {"role": "r", "max_iterations": True}}],
+            })
+
     def test_validate_accepts_valid_gates(self) -> None:
         # String shorthand, object form, and a valid peer_review all pass.
         formation.validate({

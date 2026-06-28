@@ -278,6 +278,61 @@ class PeerReviewLoopTests(unittest.TestCase):
         self.assertTrue(qpath.exists())
         self.assertIn("exceeded", qpath.read_text())
 
+    # ── peer_review.max_iterations override ───────────────────────────────
+
+    def test_max_iterations_override_escalates_early(self) -> None:
+        # max_iterations=2 → escalate at iteration 2 instead of the default 3.
+        stages = self._make_pr_stage()
+        stages[0]["peer_review"] = {
+            "role": "code-reviewer",
+            "phase": "reviewing",
+            "iteration": 2,
+            "max_iterations": 2,
+        }
+        task = _make_task(self.sd, "24a", stages)
+        orchestrator.advance(self.sd, "24a", task, result="changes-requested", dry_run=True)
+        updated = state.load_task(self.sd, "24a")
+        self.assertEqual(updated["status"], "awaiting_orders")
+        qpath = state.task_dir(self.sd, "24a") / "questions.md"
+        self.assertIn("maximum 2 iterations", qpath.read_text())
+
+    def test_max_iterations_override_allows_more(self) -> None:
+        # max_iterations=5 → iteration 3 does NOT escalate; it increments to 4.
+        stages = self._make_pr_stage()
+        stages[0]["peer_review"] = {
+            "role": "code-reviewer",
+            "phase": "reviewing",
+            "iteration": 3,
+            "max_iterations": 5,
+        }
+        task = _make_task(self.sd, "24b", stages)
+        orchestrator.advance(self.sd, "24b", task, result="changes-requested", dry_run=True)
+        updated = state.load_task(self.sd, "24b")
+        pr = updated["stages"][0]["peer_review"]
+        self.assertEqual(pr["phase"], "implementing")
+        self.assertEqual(pr["iteration"], 4)
+        self.assertNotEqual(updated["status"], "awaiting_orders")
+
+    def test_approve_resolves_escalation_with_override_cap(self) -> None:
+        # The resume-path escalation predicate honors the override cap, so an
+        # iteration that has hit max_iterations=2 is a settleable escalation.
+        stages = self._make_pr_stage(with_user_approval=True)
+        stages[0]["peer_review"] = {
+            "role": "code-reviewer",
+            "phase": "reviewing",
+            "iteration": 2,
+            "max_iterations": 2,
+        }
+        task = _make_task(self.sd, "24c", stages)
+        task["status"] = "awaiting_orders"
+        state.save_task(self.sd, "24c", task)
+
+        orchestrator.approve_user_approval(self.sd, "24c", task, dry_run=True)
+
+        updated = state.load_task(self.sd, "24c")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "approved")
+        self.assertEqual(updated["status"], "completed")
+
     def test_approve_resolves_peer_review_escalation(self) -> None:
         stages = self._make_pr_stage(with_user_approval=True)
         stages[0]["peer_review"] = {"role": "code-reviewer", "phase": "reviewing", "iteration": 3}

@@ -17,6 +17,17 @@ This gives free-form tasks a fixed target to be measured against (avoiding the
 Prompt-only, mirroring #196's designer-output-path touch — no `task.yaml` schema
 field and no state-machine change.
 
+### refactor: read the peer_review iteration cap from a `peer_review.max_iterations` field
+
+The peer_review loop's iteration cap was the bare literal `3`, hardcoded and
+duplicated across `orchestrator.py` (the live `reviewing` → escalate decision and
+the resume-path escalation predicate). The orchestrator now reads the cap from the
+resolved stage's `peer_review` block as `max_iterations`, defaulting to `3` when
+absent — so all existing formations behave identically (full back-compat). A
+formation may now set `peer_review.max_iterations` to a positive integer and the
+loop honors it; `formation.validate()` accepts and type-checks the optional field.
+The escalation message and surrounding comments no longer restate the constant.
+
 ### feat: show recently-completed tasks on the dashboard with a time-window selector
 
 `fleet dashboard` now has a **Completed** section listing archived (terminal)
