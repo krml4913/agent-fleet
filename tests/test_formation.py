@@ -1,4 +1,4 @@
-"""Tests for ``fleet.formation`` — load / validate / list (templates + custom)."""
+"""Tests for ``fleet.formation`` — load / validate / list templates and formations."""
 from __future__ import annotations
 
 import os
@@ -64,40 +64,44 @@ class FormationTemplateTests(unittest.TestCase):
             message = str(ctx.exception)
             self.assertIn(str(state / "formations" / "no-such-formation.yaml"), message)
             self.assertIn("global/formations/no-such-formation.yaml", message)
-            self.assertIn("templates/no-such-formation.yaml", message)
+            self.assertNotIn("templates/no-such-formation.yaml", message)
 
-    def test_load_formation_falls_back_to_template(self) -> None:
+    def test_load_formation_does_not_fall_back_to_template(self) -> None:
         with TemporaryDirectory() as tmp:
             state = Path(tmp) / ".fleet-state"
             (state / "formations").mkdir(parents=True)
-            data = formation.load_formation("pair_review", state)
-            self.assertEqual(data["name"], "pair_review")
+            with self.assertRaises(FileNotFoundError) as ctx:
+                formation.load_formation("pair_review", state)
+            self.assertNotIn("templates/pair_review.yaml", str(ctx.exception))
 
-    def test_research_resolves_via_cascade_with_no_project_copy(self) -> None:
-        # `--formation research` must resolve from the shipped template alone,
-        # with no per-project copy in the cascade (Issue #202 dogfoods #198).
+    def test_resolve_formation_explicit_from_global(self) -> None:
         with TemporaryDirectory() as tmp:
-            state = Path(tmp) / ".fleet-state"
-            (state / "formations").mkdir(parents=True)
-            name, data = formation.resolve_formation(state, "research")
-            self.assertEqual(name, "research")
-            formation.validate(data)
-            self.assertEqual(data["name"], "research")
-            self.assertEqual(data["stages"][0]["role"], "researcher")
-            self.assertEqual(data["stages"][0]["peer_review"]["role"], "fact-checker")
-
-    def test_scoping_resolves_via_cascade_with_no_project_copy(self) -> None:
-        # `--formation scoping` must resolve from the shipped template alone,
-        # with no per-project copy in the cascade (Issue #212 dogfoods #198).
-        with TemporaryDirectory() as tmp:
-            state = Path(tmp) / ".fleet-state"
-            (state / "formations").mkdir(parents=True)
-            name, data = formation.resolve_formation(state, "scoping")
-            self.assertEqual(name, "scoping")
-            formation.validate(data)
-            self.assertEqual(data["name"], "scoping")
-            self.assertEqual(data["stages"][0]["role"], "scoper")
-            self.assertEqual(data["stages"][0]["peer_review"]["role"], "devils-advocate")
+            old_home = os.environ.get("FLEET_HOME")
+            os.environ["FLEET_HOME"] = str(Path(tmp) / "fleet-state")
+            try:
+                state = Path(tmp) / ".fleet-state"
+                (state / "formations").mkdir(parents=True)
+                global_dir = state_mod.global_formations_dir()
+                global_dir.mkdir(parents=True)
+                (global_dir / "research.yaml").write_text(
+                    "name: research\n"
+                    "stages:\n"
+                    "  - role: researcher\n"
+                    "    agent: claude:opus\n"
+                    "    peer_review:\n"
+                    "      role: fact-checker\n"
+                )
+                name, data = formation.resolve_formation(state, "research")
+                self.assertEqual(name, "research")
+                formation.validate(data)
+                self.assertEqual(data["name"], "research")
+                self.assertEqual(data["stages"][0]["role"], "researcher")
+                self.assertEqual(data["stages"][0]["peer_review"]["role"], "fact-checker")
+            finally:
+                if old_home is None:
+                    os.environ.pop("FLEET_HOME", None)
+                else:
+                    os.environ["FLEET_HOME"] = old_home
 
     def test_load_formation_global_shadows_template(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -183,7 +187,7 @@ class FormationTemplateTests(unittest.TestCase):
             self.assertIn("Looked in:", message)
             self.assertIn("formations/no-such.yaml", message)
             self.assertIn("global/formations/no-such.yaml", message)
-            self.assertIn("templates/no-such.yaml", message)
+            self.assertNotIn("templates/no-such.yaml", message)
 
     def test_resolve_formation_single_custom_auto(self) -> None:
         with TemporaryDirectory() as tmp:

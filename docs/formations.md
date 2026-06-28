@@ -2,7 +2,7 @@
 
 > A practical guide for **reading and editing formations**, aimed at leaders
 > (claude / codex). For design rationale and finalized decisions, see
-> `docs/design.md` §6 — this doc is about how to *use* them.
+> `docs/design.md` §7 — this doc is about how to *use* them.
 >
 > Audience: leaders only. Users do not edit formations directly; they ask the
 > leader to do it. The leader (claude or codex) reads this doc and applies
@@ -19,17 +19,19 @@ walks the formation's `stages` and launches drivers in order. Human approval
 points (`user_approval`) and AI peer review (`peer_review`) are expressed in
 the same file.
 
-### Template vs. formation (finalized in Issue #105)
+### Template vs. formation
 
 | Kind | Path | Role |
 |---|---|---|
-| **formation template** | `src/fleet/templates/<name>.yaml` (shipped with fleet) | Starter file. Not directly executable. Used as the source for `fleet formation init --from`. |
-| **formation** | `<state>/formations/<name>.yaml` (per project) | The runtime source of truth. The orchestrator only resolves these. |
+| **project formation** | `projects/<project>/formations/<name>.yaml` | Most specific runtime source. Wins over a global formation with the same name. |
+| **global formation** | `global/formations/<name>.yaml` | Cross-project runtime source. Used when the project has no formation with that name. |
+| **formation template** | `src/fleet/templates/<name>.yaml` (shipped with fleet) | Seed source only. Copy it into project or global formations before runtime use. |
 
-- Fleet ships three templates: `solo`, `pair_review`, `multi_stage`. Do not edit them in place.
+- Fleet ships five templates: `solo`, `pair_review`, `multi_stage`, `research`, and `scoping`. Do not edit them in place.
+- Runtime resolution for an explicit name is **project → global**. Shipped templates are not a fallback tier.
 - Once copied, a template and the resulting formation are **independent** — there is no inheritance or follow-up.
-- A project's formations can be edited freely: swap agents, add stages, drop gates, etc.
-- To rebuild from scratch: `rm <state>/formations/<name>.yaml && fleet formation init --from <template>`.
+- Project and global formations can be edited freely: swap agents, add stages, drop gates, etc.
+- To rebuild from scratch, remove the runtime YAML and copy the desired template file from `src/fleet/templates/` into `projects/<project>/formations/` or `global/formations/`.
 
 ---
 
@@ -107,7 +109,7 @@ implement → peer_review loop (max 3 iter) → user_approval gate (if any) → 
 - After 3 iterations the task transitions to `awaiting_orders` and the user is escalated.
 
 Within a stage, both the implementer and reviewer agent panes are **kept
-alive** across iterations (`design.md` §6.2). This preserves the agent's
+alive** across iterations (`design.md` §7). This preserves the agent's
 context between rounds.
 
 ### 2.6 `user_approval` (human approval gate)
@@ -282,7 +284,7 @@ the vendors should differ, set it explicitly.
 
 ### 5.1 `fleet formation show <name>`
 
-- Loads `<state>/formations/<name>.yaml` and runs `formation.validate()`.
+- Loads `<name>` from project formations first, then global formations, and runs `formation.validate()`.
 - Schema errors are printed to stderr as `warn: formation validation failed: <reason>`, but the YAML body is still emitted to stdout for inspection.
 
 ### 5.2 What `validate()` checks (`src/fleet/formation.py`)
@@ -293,15 +295,15 @@ the vendors should differ, set it explicitly.
 
 Stricter checks — `peer_review` structure, `agent` parseability,
 `user_approval` shape — are deferred to **runtime in the orchestrator**
-(`design.md` §6.4). They are not done statically.
+(`design.md` §7.4). They are not done statically.
 
 ### 5.3 Possible errors
 
 | situation | error / behavior |
 |---|---|
-| `formations/<name>.yaml` missing | `fleet-agent start --formation <name>` raises `ResolutionError`. No template fallback. |
-| `formations/` empty + no `--formation` | A synthetic `_leader_solo` 1-stage formation is built from the leader-session agent. |
-| `formations/` has 2+ entries + no `--formation` | Ambiguity error; tells you to pass `--formation <name>`. |
+| `<name>` missing from project and global formations | `fleet-agent start --formation <name>` raises `ResolutionError`. No template fallback. |
+| project `formations/` empty + no `--formation` | A synthetic `_leader_solo` 1-stage formation is built from the leader-session agent, even if global formations exist. |
+| project `formations/` has 2+ entries + no `--formation` | Ambiguity error; tells you to pass `--formation <name>`. |
 | YAML parse failure | `formation file must be a YAML mapping: <path>` |
 | missing `name` | `formation missing required field: name` |
 | missing / empty `stages` | `formation 'stages' must be a non-empty list` |
@@ -315,10 +317,11 @@ Stricter checks — `peer_review` structure, `agent` parseability,
 
 - **Read the current file first.** Run `fleet formation show <name>` before editing — someone may have customized it already.
 - **Validate after editing.** Run `fleet formation show <name>` again. It is a cheap top-level check.
-- **For big rewrites, regenerate.** `rm <state>/formations/<name>.yaml && fleet formation init --from <template>` is faster than reshaping a heavily edited file.
+- **For big rewrites, reseed from a template.** Remove the runtime YAML and copy the desired file from `src/fleet/templates/` into the project or global formations directory. This is faster than reshaping a heavily edited file.
 - **Avoid relying on `agent:` omission.** The `--agent` fallback is convenient but easy to forget. Be explicit per stage, especially for `peer_review.agent`.
 - **Do not put vendor-specific notes in `role` or `description`.** Formations are read by both claude and codex leaders; keep vendor-specific guidance in the driver prompt (role fragment).
 - **Keep `role` names aligned with `docs/prompts/roles/<role>.md`.** If the role fragment is missing, the driver starts without a clear sense of its role.
+- **Pass `--formation` for global-only formations.** The omitted-formation auto-pick intentionally considers only project formations; a single global-only formation is not auto-selected.
 
 ---
 
@@ -326,9 +329,8 @@ Stricter checks — `peer_review` structure, `agent` parseability,
 
 | command | description |
 |---|---|
-| `fleet formation list` | List both templates and custom formations. |
-| `fleet formation show <name>` | Print a custom formation's YAML and run validate. |
-| `fleet formation init --from <template> [--name <name>]` | Copy a template into `<state>/formations/<name>.yaml` (defaults to the template name). |
+| `fleet formation list` | List project/global runtime formations plus shipped template seed sources. |
+| `fleet formation show <name>` | Print a project/global formation's YAML and run validate. |
 | `fleet-agent start <task-id> --formation <name>` | Resolve the formation and launch the task. |
 | `fleet-agent approve <task-id>` | Relay user approval for the current `user_approval` gate. |
 | `fleet-agent reject <task-id>` | Relay user rejection; the stage returns to implementation. |
@@ -343,4 +345,4 @@ This guide intentionally does not cover:
 
 - Skills or CLI helpers like `fleet formation edit`. Skills are a Claude Code-specific feature, which conflicts with the multi-vendor pillar.
 - Partial overlay or inheritance between formations. Declined in Issue #105 and not part of the current spec.
-- A `count` field or dynamic parallel launching. `design.md` §6.1 finalized **no count**.
+- A `count` field or dynamic parallel launching. `design.md` §7.1 finalized **no count**.

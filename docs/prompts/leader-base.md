@@ -24,8 +24,8 @@ Project-agnostic discipline:
     read its discipline **once** and keep it for the session — do not reload on a
     later switch:
       - `projects/<name>/memory/MEMORY.md` — per-project knowledge.
-      - `projects/<name>/formations/SELECTION.md` (when present) — the formation
-        guide, read with the project's real formation files.
+      - `projects/<name>/formations/SELECTION.md` (when present) — read it with
+        the project's real formation files and relevant global formations.
   - **Act under the active project's policy.** Per-project policy differs (one
     project delegates PR merge to you; another has the user review/merge). Always
     operate under the policy you loaded first-touch for the project in hand.
@@ -43,11 +43,11 @@ Role:
   - The orchestrator owns task progression. You do not track or advance it.
 
 Choosing a formation:
-  - Formations are per-project. The bundled `solo` / `pair_review` / `multi_stage`
-    are only starting points — read the project's real formation files
-    (first-touch, above) before assuming a name.
+  - Runtime formations resolve project → global. Bundled templates are only seed
+    sources — read project files and relevant global formations (first-touch,
+    above) before assuming a name.
   - When a project's `formations/SELECTION.md` exists, consult it (with the real
-    formation files) when picking a formation. It is guidance, not a mechanism.
+    project/global formation files) when picking a formation. It is guidance, not a mechanism.
   - When the user wants to define / refine how a project picks formations,
     co-author its `SELECTION.md` with them and save it there.
 

@@ -657,8 +657,8 @@ procedure / staleness countermeasures) live in the memory directory's
 ### 7.1 Design Policy
 
 - Defined in **YAML** (start simple)
-- A cascade structure: **project formations** override **global formations**,
-  which override shipped **formation templates**
+- A runtime cascade structure: **project formations** override **global formations**.
+  Shipped **formation templates** are seed sources, not a runtime fallback tier.
 - **No count** (the leader decides on dynamic parallel launch as needed)
 - Can express **user_approval** (human approval points made explicit via a
   stage attribute)
@@ -829,18 +829,17 @@ later inside `fleet-agent done` when a later stage or reviewer is advanced.
 
 - **Project formations**
   (`projects/<project>/formations/<name>.yaml`): the most specific runtime tier.
-  They override global formations and shipped templates with the same name.
+  They override global formations with the same name.
 - **Global formations** (`global/formations/<name>.yaml`): user-writable
   cross-project formations. They define a formation once for every project, but
   remain shadowed by a project override with the same name.
-- **Formation templates** (`src/fleet/templates/<name>.yaml`): shipped defaults.
+- **Formation templates** (`src/fleet/templates/<name>.yaml`): shipped seed sources.
   Five ship with fleet: `solo` / `pair_review` / `multi_stage` / `research` /
-  `scoping`. They are directly usable by explicit name when neither project nor
-  global overrides exist.
-- Copying a template via `fleet init --formation <name>` or `fleet formation init
-  --from <name>` makes it a project formation, independent thereafter (no
-  tracking of the template). `fleet formation init --from <name> --global`
-  copies it to the global tier instead.
+  `scoping`. They are not a runtime resolution tier; copy one into project or
+  global formations before using it by name.
+- Copying a template via `fleet init --formation <name>` makes it a project
+  formation, independent thereafter (no tracking of the template). Global
+  formation seeds are plain file copies into `global/formations/`.
 - After copying, you are free to change the `agent:` defaults, add/remove
   `user_approval`, and so on.
 
@@ -848,15 +847,15 @@ later inside `fleet-agent done` when a later stage or reviewer is advanced.
 
 | Situation | Result |
 |---|---|
-| `--formation <name>` explicit | resolve project → global → shipped template; absence from all three tiers is an error |
+| `--formation <name>` explicit | resolve project → global; absence from both runtime tiers is an error |
 | omitted + 1 project formation | auto-adopt that one |
 | omitted + project formations/ empty | synthesize a 1-stage solo on the fly (`_leader_solo`) using the agent from the owner session's record (`global/sessions/<owner_session>/session.json`, §5.6) |
 | omitted + 2+ project formations | ambiguity error (prompts to pass `--formation <name>`) |
 
 The omitted-formation auto-pick intentionally considers only the project tier.
-Global formations and shipped templates are reachable only by explicit name, so
-a fresh project with no formation files still falls back to `_leader_solo`
-instead of becoming ambiguous among the shipped defaults.
+Global formations are reachable by explicit name but are not auto-selected, so a
+fresh project with no formation files still falls back to `_leader_solo`. Shipped
+templates are seed sources only and are never used as a runtime fallback.
 
 ---
 
@@ -1236,12 +1235,13 @@ how the fleet steers judgment elsewhere (§8.1).
 One correction to the framing above, though: those example heuristics ("small
 fix → solo; heavy change needing review → pair_review; design-before-build →
 multi_stage") read as *universal*, but they are not. The bundled
-`solo` / `pair_review` / `multi_stage` are only **templates** — every project
-customizes its formations (names, stages, roles, agents; §7). So the *criteria
-for picking among them* are equally **per-project**. A universal "small fix →
-solo" rule baked into the leader base prompt would be wrong for a project that
-renamed `solo` or whose cheapest formation is something else. The guidance must
-therefore be per-project, not a global constant.
+`solo` / `pair_review` / `multi_stage` are only **templates** — runtime
+formations may be project overrides or global formations, and a project may
+customize names, stages, roles, or agents (§7). So the *criteria for picking
+among them* are equally **project-specific**. A universal "small fix → solo" rule
+baked into the leader base prompt would be wrong for a project that renamed
+`solo` or whose cheapest formation is something else. The guidance must
+therefore stay with the project, not become a global constant.
 
 ### 12.8 Adopted Decision — per-project `SELECTION.md`
 
@@ -1250,11 +1250,13 @@ The repo owner adopted the lightweight prompt-guidance step from §12.7, made
 
 - **Where.** A plain-markdown guide at `<state>/formations/SELECTION.md`,
   alongside the project's actual formation files. It is per-project because
-  formations are per-project (§12.7 correction).
+  selection criteria are project-specific (§12.7 correction), even when some
+  candidate runtime formations come from `global/formations/`.
 - **How it reaches the leader.** The guide is read on **first touch** of its
   project (§4.1, §5.6) — the leader is pointed at
   `projects/<name>/formations/SELECTION.md` and reads it (with the real formation
-  files) the first time it acts on that project, retaining it for the session.
+  files from the project and relevant global tier) the first time it acts on that
+  project, retaining it for the session.
   - *Superseded delivery (≤ #166):* originally `leader_prompt.render` injected
     the file at **startup** under the heading `## Formation selection guide (this
     project)`, mirroring the MEMORY.md index injection (Issue #114). That worked
@@ -1266,10 +1268,10 @@ The repo owner adopted the lightweight prompt-guidance step from §12.7, made
     called out as a highest-risk surface in the implementation plan.
 - **How it is authored.** Co-authored by the leader and user: when the user
   wants to define or refine the project's selection criteria, the leader proposes
-  a draft from the project's real formations, refines it in chat, and saves it to
-  that path. `docs/prompts/leader-base.md` carries the standing instruction to do
-  this and to consult the injected guide (with the real formation files) when
-  choosing a formation.
+  a draft from the project's real project/global formations, refines it in chat,
+  and saves it to that path. `docs/prompts/leader-base.md` carries the standing
+  instruction to do this and to consult the injected guide (with the real
+  formation files) when choosing a formation.
 - **Why this and not a mechanism.** This is exactly the "lightweight
   prompt-guidance" of §12.7, kept consistent with the principle analysis: the
   leader (an LLM) still makes the judgment (§12.6, principle 4); nothing polls or

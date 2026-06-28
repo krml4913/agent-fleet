@@ -232,6 +232,19 @@ class StartTests(unittest.TestCase):
     def test_formation_pair_review_starts_first_stage(self) -> None:
         from fleet.commands import start
 
+        global_formations = state.global_formations_dir()
+        global_formations.mkdir(parents=True)
+        (global_formations / "pair_review.yaml").write_text(
+            "name: pair_review\n"
+            "description: Implementer with AI peer review; the user has the final say.\n"
+            "stages:\n"
+            "  - role: implementer\n"
+            "    agent: codex:gpt-5.5\n"
+            "    peer_review:\n"
+            "      role: code-reviewer\n"
+            "      agent: claude:opus\n"
+            "    user_approval: required\n"
+        )
         args = argparse.Namespace(
             project="demo",
             task_id="3",

@@ -151,8 +151,8 @@ class InitCommandTests(unittest.TestCase):
         self.assertEqual(yamls, [])
 
 
-class InitFormationInitCmdTests(unittest.TestCase):
-    """Tests for ``fleet formation init --from``."""
+class FormationListCmdTests(unittest.TestCase):
+    """Tests for ``fleet formation list``."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -167,49 +167,21 @@ class InitFormationInitCmdTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def test_formation_init_from_solo(self) -> None:
+    def test_formation_init_subcommand_is_removed(self) -> None:
         result = run_fleet("formation", "init", "--from", "solo",
                            fleet_home=self.fleet_home, cwd=self.project)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.state_dir / "formations" / "solo.yaml").is_file())
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid choice", result.stderr)
 
-    def test_formation_init_global_writes_global_formations(self) -> None:
-        result = run_fleet("formation", "init", "--from", "solo", "--global",
-                           fleet_home=self.fleet_home, cwd=self.project)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(
-            (self.fleet_home / "global" / "formations" / "solo.yaml").is_file()
-        )
-        self.assertFalse((self.state_dir / "formations" / "solo.yaml").exists())
-
-    def test_formation_init_from_with_name(self) -> None:
-        result = run_fleet("formation", "init", "--from", "solo", "--name", "my-solo",
-                           fleet_home=self.fleet_home, cwd=self.project)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((self.state_dir / "formations" / "my-solo.yaml").is_file())
-
-    def test_formation_init_existing_errors(self) -> None:
-        run_fleet("formation", "init", "--from", "solo",
-                  fleet_home=self.fleet_home, cwd=self.project)
-        result = run_fleet("formation", "init", "--from", "solo",
-                           fleet_home=self.fleet_home, cwd=self.project)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("already exists", result.stderr)
-
-    def test_formation_init_unknown_template_errors(self) -> None:
-        result = run_fleet("formation", "init", "--from", "bogus",
-                           fleet_home=self.fleet_home, cwd=self.project)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("unknown template", result.stderr)
-
-    def test_formation_list_shows_provenance_and_winner(self) -> None:
+    def test_formation_list_shows_runtime_provenance_and_seed_sources(self) -> None:
         global_dir = self.fleet_home / "global" / "formations"
         global_dir.mkdir(parents=True)
         (global_dir / "solo.yaml").write_text(
             "name: solo\nstages:\n  - role: driver\n    agent: claude:opus\n"
         )
-        run_fleet("formation", "init", "--from", "solo",
-                  fleet_home=self.fleet_home, cwd=self.project)
+        (self.state_dir / "formations" / "solo.yaml").write_text(
+            "name: solo\nstages:\n  - role: driver\n    agent: codex:gpt-5.5\n"
+        )
 
         result = run_fleet("formation", "list",
                            fleet_home=self.fleet_home, cwd=self.project)
@@ -217,8 +189,10 @@ class InitFormationInitCmdTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("solo [project:demo] (wins)", result.stdout)
         self.assertIn("solo [global] (shadowed)", result.stdout)
-        self.assertIn("solo [template] (shadowed)", result.stdout)
-        self.assertIn("pair_review [template] (wins)", result.stdout)
+        self.assertIn("solo [seed:template]", result.stdout)
+        self.assertIn("pair_review [seed:template]", result.stdout)
+        self.assertNotIn("[template] (wins)", result.stdout)
+        self.assertNotIn("[template] (shadowed)", result.stdout)
 
 
 if __name__ == "__main__":
