@@ -1,9 +1,11 @@
 # Changelog
 
 All notable changes to agent-fleet are recorded here. v0.1.0 is the first tagged
-release. Future changes accumulate under `## [Unreleased]` and then move under a
-tagged version when released. Older entries are grouped by development **Phase**
-(per `docs/design.md`).
+release. New PRs add one `changelog.d/<task-id>.md` fragment instead of editing
+`## [Unreleased]` directly; `./fleet changelog` assembles those fragments into
+this file and deletes them. Future changes accumulate under `## [Unreleased]`
+and then move under a tagged version when released. Older entries are grouped by
+development **Phase** (per `docs/design.md`).
 
 ## [Unreleased]
 
