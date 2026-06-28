@@ -233,7 +233,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--formation",
         default=None,
         help=(
-            "Formation name. Explicit names resolve project -> global -> template; "
+            "Formation name. Explicit names resolve project -> global; "
             "when omitted, only project formations are auto-picked."
         ),
     )

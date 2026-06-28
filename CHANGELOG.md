@@ -181,23 +181,23 @@ writes the summary to `outbox.md` (stating the path before `done`, mirroring the
 designer convention); `fact-checker` independently verifies each claim against
 its cited source and checks completeness/source quality, returning feedback
 through the existing peer_review mechanism. Both stages are `claude:opus` because
-the work needs web access. The formation ships as a template, so `--formation
-research` resolves through the cascade in every project with no per-project copy.
-No loading-machinery change — two role files plus one template.
+the work needs web access. The formation ships as a seed template for project or
+global formations. No loading-machinery change — two role files plus one
+template.
 
-### feat: resolve named formations through project, global, and template tiers
+### change: make global formations authoritative and templates seed-only
 
-Named formations now resolve by cascade: project overrides first, then
-`global/formations/`, then the shipped templates in `src/fleet/templates/`.
-Fresh projects no longer need copied template YAML just to start with
-`--formation pair_review`, while existing per-project copies remain the highest
-precedence override. The omitted-formation auto-pick remains project-only: zero
-project formations still falls back to `_leader_solo`, one is auto-adopted, and
-multiple remain ambiguous. `fleet init` now creates no formation copies by
-default; `fleet init --formation <name>` still seeds a project override, and
-`fleet formation init --from <name> --global` seeds the global tier. `fleet
-formation list` now shows reachable project/global/template entries with
-provenance and winner/shadowed status.
+Named formations now resolve by cascade through project overrides first, then
+`global/formations/`; shipped templates in `src/fleet/templates/` are seed
+sources only and no longer act as a runtime fallback. A missing explicit
+`--formation <name>` now errors when absent from both runtime tiers. Existing
+per-project copies remain the highest-precedence override, and global formations
+are the cross-project runtime source of truth. The omitted-formation auto-pick
+remains project-only: zero project formations still falls back to `_leader_solo`,
+one is auto-adopted, and multiple remain ambiguous, even when global formations
+exist. `fleet formation init` was removed; `fleet formation list` / `show` remain,
+with list output labeling shipped templates as seed sources instead of
+winner/shadowed runtime entries.
 
 ### docs: have the designer state its design output path before calling done
 

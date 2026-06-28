@@ -1,11 +1,10 @@
-"""Load and inspect team formation YAML files (design doc §6).
+"""Load and inspect team formation YAML files (design doc §7).
 
 A *formation template* (``src/fleet/templates/*.yaml``) is a fleet-shipped
-default. Explicitly named formations resolve to shipped templates when no
-project or global override exists.
+default seed source. Templates are not a runtime resolution tier.
 
 A *formation* can live in a project or global runtime tier. Project formations
-win over global formations, and global formations win over shipped templates.
+win over global formations.
 """
 from __future__ import annotations
 
@@ -87,14 +86,13 @@ def load_global(name: str) -> dict[str, Any]:
 
 
 def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
-    """Load a named formation via project → global → template cascade.
+    """Load a named formation via the project → global cascade.
 
-    Raises FileNotFoundError when the formation is absent from all tiers.
+    Raises FileNotFoundError when the formation is absent from both runtime tiers.
     """
     looked = [
         state_dir / CUSTOM_SUBDIR / f"{name}.yaml",
         state_mod.global_formations_dir() / f"{name}.yaml",
-        TEMPLATES_DIR / f"{name}.yaml",
     ]
     for path in looked:
         if path.is_file():
@@ -119,7 +117,7 @@ def resolve_formation(
     """Return ``(effective_name, formation_dict)`` for start.
 
     Rules:
-    - ``requested`` given: load project → global → template; missing → error.
+    - ``requested`` given: load project → global; missing → error.
     - ``requested`` is None + 0 customs: synthesise leader-solo from the owner
       session's agent (``global/sessions/<owner_session>/session.json``).
     - ``requested`` is None + 1 custom: use that one (unambiguous).

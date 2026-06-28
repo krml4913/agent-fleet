@@ -232,7 +232,7 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet dashboard [--no-open]` | Render & open the cross-project HTML dashboard (`fleet-state/global/dashboard.html`). |
 | `fleet scope [label] [--set/--add/--rm/--clear]` | View or edit the set of projects a leader session is responsible for. |
 | `fleet log [task_id] [-n N] [--type T]` | Tail `events.jsonl`, optionally filtered by task / type. |
-| `fleet formation list \| show <name> \| init --from <template>` | Inspect or create formations. |
+| `fleet formation list \| show <name>` | Inspect runtime formations and template seed sources. |
 | `fleet workspace list \| set <mode>` | Show or set the workspace mode (`worktree` / `none`). |
 | `fleet rm <name> [--yes]` | Unregister a project and delete its state. |
 
