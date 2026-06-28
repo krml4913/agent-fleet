@@ -28,6 +28,19 @@ formation may now set `peer_review.max_iterations` to a positive integer and the
 loop honors it; `formation.validate()` accepts and type-checks the optional field.
 The escalation message and surrounding comments no longer restate the constant.
 
+### feat: surface review-loop position (iteration n/max) in status and the dashboard
+
+An in-progress `peer_review` loop now reads as `review 2/3` instead of the bare
+`review ×2`, so a human can watch a review loop approach its iteration cap before
+it stalls at `awaiting_orders`. The `n/max` label is derived read-only at
+render/state-write time: `max` comes from the stage's `peer_review.max_iterations`
+field when present (see the refactor above), otherwise the literal `3` the
+orchestrator enforces. The single `status_data.peer_review_progress` source feeds
+all three read-only views — `fleet status`, the HTML dashboard's stage cell, and
+the `dashboard.md` task table (appended to the status cell). No new persisted
+state, no daemon, and the orchestrator's loop/escalation logic is unchanged
+(presentation only).
+
 ### feat: show recently-completed tasks on the dashboard with a time-window selector
 
 `fleet dashboard` now has a **Completed** section listing archived (terminal)

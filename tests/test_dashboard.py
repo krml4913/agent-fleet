@@ -51,6 +51,34 @@ class DashboardRenderTests(unittest.TestCase):
         text = dashboard.render(self.sd)
         self.assertIn("worktree", text)
 
+    def test_review_loop_position_in_status_cell(self) -> None:
+        state.save_task(self.sd, "1", {
+            "id": "1", "title": "T", "status": "running",
+            "formation": "pair_review", "current_stage": 0,
+            "stages": [{
+                "role": "driver", "agent": "codex:gpt-5.5", "status": "running",
+                "peer_review": {"phase": "reviewing", "iteration": 2},
+            }],
+        })
+        text = dashboard.render(self.sd)
+        # n/max position is surfaced (not the bare iteration count).
+        self.assertIn("review 2/3", text)
+        self.assertNotIn("review ×2", text)
+
+    def test_review_loop_position_honors_explicit_max(self) -> None:
+        state.save_task(self.sd, "1", {
+            "id": "1", "title": "T", "status": "running",
+            "formation": "pair_review", "current_stage": 0,
+            "stages": [{
+                "role": "driver", "agent": "codex:gpt-5.5", "status": "running",
+                "peer_review": {
+                    "phase": "reviewing", "iteration": 2, "max_iterations": 5,
+                },
+            }],
+        })
+        text = dashboard.render(self.sd)
+        self.assertIn("review 2/5", text)
+
     def test_recent_events_shown(self) -> None:
         append_event(self.sd / "events.jsonl", "milestone", task_id="1", note="x")
         text = dashboard.render(self.sd)

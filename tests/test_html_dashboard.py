@@ -175,6 +175,30 @@ class RenderTests(unittest.TestCase):
         html = html_dashboard.render(snap)
         self.assertIn('href="https://github.com/x/y/pull/1"', html)
 
+    def test_stage_cell_shows_review_position(self) -> None:
+        snap = _minimal_snapshot()
+        snap["projects"][0]["tasks"][0]["stage"] = {
+            "index": 0,
+            "count": 1,
+            "role": "driver",
+            "agent": "codex:gpt-5.5",
+            "review": "review 2/3",
+        }
+        html = html_dashboard.render(snap)
+        self.assertIn("review 2/3", html)
+
+    def test_stage_text_appends_review(self) -> None:
+        cell = html_dashboard._stage_text(
+            {
+                "index": 0,
+                "count": 1,
+                "role": "driver",
+                "agent": "codex:gpt-5.5",
+                "review": "review 2/3",
+            }
+        )
+        self.assertEqual(cell, "1/1 driver (codex:gpt-5.5) review 2/3")
+
     def test_awaiting_orders_banner(self) -> None:
         snap = _minimal_snapshot(task_status="awaiting_orders")
         snap["projects"][0]["awaiting"] = snap["projects"][0]["tasks"]
