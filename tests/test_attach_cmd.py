@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import tmux  # noqa: E402
 from fleet.commands.attach import run, _sweep_stale_view_sessions  # noqa: E402
-from tests._fleet_test_helpers import run_fleet, make_project  # noqa: E402
+from tests._fleet_test_helpers import run_fleet, make_project, requires_live_tmux  # noqa: E402
 
 
 class AttachCmdTests(unittest.TestCase):
@@ -47,14 +47,14 @@ class AttachCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("no registered project", r.stderr)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_session_not_running(self) -> None:
         r = run_fleet("attach", "--project", self.project_name,
                       fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 1)
         self.assertIn("session not running", r.stderr)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_unknown_window(self) -> None:
         tmux.new_session(self.session)
         try:
