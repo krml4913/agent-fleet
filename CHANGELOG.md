@@ -17,6 +17,16 @@ as the history. #166 is closed and shipped (`fleet-state/global/sessions/`,
 delete condition is met. Removed the doc and its now-stale pointer in
 `docs/backlog.md`. Doc-only, no code change. The earlier `[Unreleased]`-era
 CHANGELOG entries that reference the plan by name are left intact as history.
+### fix: let driver `done` proceed after a plain `ask`
+
+`fleet-agent ask` still records the driver's question as `awaiting_orders`, but
+the orchestrator now treats that as a real blocking gate only when the current
+stage is actually waiting for `user_approval` or a peer-review escalation relay.
+A driver's later `done` therefore reaches the peer-review handoff or raises the
+user-approval gate normally, while a raised gate remains protected from being
+self-settled by another driver `done`. The final `done` notification now follows
+that real next state instead of reporting "awaiting approval" for a bare ask.
+Closes #226.
 
 ### feat: read recorded usage back — `fleet cost` and token columns in status/dashboard
 

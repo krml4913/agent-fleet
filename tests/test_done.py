@@ -277,6 +277,36 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertNotIn("starting", message)
         self.assertEqual(self._last_level, "progress")
 
+    def test_notify_bare_ask_peer_review_handoff_not_awaiting_approval(self) -> None:
+        """A bare driver ask must not make the next done look like an approval gate."""
+        state.save_task(self.state_dir, "prask", {
+            "id": "prask", "title": "x", "status": "awaiting_orders",
+            "formation": "pair_review", "workspace": "none",
+            "current_stage": 0,
+            "stages": [
+                {
+                    "role": "implementer", "agent": "claude:sonnet", "status": "running",
+                    "peer_review": {"role": "code-reviewer"},
+                },
+            ],
+        })
+        task_dir = self.state_dir / "tasks" / "task-prask"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "driver-prompt.md").write_text("test prompt")
+        (task_dir / "inbox.md").write_text("")
+        (task_dir / "outbox.md").write_text("")
+
+        ret, title, message = self._run_done("prask")
+
+        self.assertEqual(ret, 0)
+        task = state.load_task(self.state_dir, "prask")
+        self.assertEqual(task["status"], "running")
+        self.assertEqual(task["stages"][0]["peer_review"]["phase"], "reviewing")
+        self.assertIn("code-reviewer", message)
+        self.assertNotIn("awaiting approval", title)
+        self.assertNotIn("awaiting approval", message)
+        self.assertEqual(self._last_level, "progress")
+
 
 if __name__ == "__main__":
     unittest.main()

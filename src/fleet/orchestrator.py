@@ -61,12 +61,14 @@ def advance(
                                         escalate to user if max iterations exceeded.
         (no peer_review on stage)     → record result, leave stage in place (legacy).
 
-    ``awaiting_orders`` invariant: once a task is parked in awaiting_orders — whether a
-    user_approval gate is raised or a peer_review escalation has exceeded the iteration
-    cap — only the explicit leader relay (approve_user_approval / reject_user_approval)
-    settles it. A driver's ``done`` (the sole caller of this function) is a no-op while
-    the task awaits a human decision; it can neither self-approve nor self-reject the
-    gate.
+    ``awaiting_orders`` invariant: once a real gate is raised — whether a
+    user_approval gate is asked or a peer_review escalation has exceeded the
+    iteration cap — only the explicit leader relay (approve_user_approval /
+    reject_user_approval) settles it. A driver's ``done`` (the sole caller of
+    this function) is a no-op while the task awaits a human decision; it can
+    neither self-approve nor self-reject the gate. A driver-side ``ask`` also
+    parks the task in awaiting_orders, but it is not a raised gate and must not
+    block the driver's later ``done``.
     """
     stages = task.get("stages") or []
 
@@ -86,16 +88,14 @@ def advance(
 
     stage = stages[current_idx]
 
-    # ── leader-gated pause: awaiting_orders is the human's turn ──────────
-    # Once a task is parked in ``awaiting_orders`` — a user_approval gate is
-    # raised, or a peer_review escalation exceeded the iteration cap — only the
-    # explicit leader relay (``fleet-agent approve``/``reject`` →
-    # ``approve_user_approval``/``reject_user_approval``) may settle it. A
-    # driver's ``done`` is the ONLY caller of ``advance`` and must never move the
-    # task past this point. Re-assert the pause and return (idempotent no-op;
-    # state is already persisted as awaiting_orders, so no save is needed).
+    # ── leader-gated pause: only a real gate is the human's turn ──────────
+    # ``fleet-agent ask`` also parks a task in ``awaiting_orders``, but that is
+    # only a transient driver question. Block here only when the same relay
+    # predicate used by approve/reject says a real user gate is raised.
     if task.get("status") == "awaiting_orders":
-        return
+        if _has_user_relay_target(task):
+            return
+        task["status"] = state_mod.derive_task_status(stages)
 
     # ── peer_review loop ──────────────────────────────────────────────────
     pr = stage.get("peer_review")
@@ -319,6 +319,14 @@ def _require_user_relay_target(
     if not (isinstance(ua, dict) and ua.get("required")):
         raise UserApprovalError("current stage does not require user approval")
     raise UserApprovalError("current stage is not waiting for user approval")
+
+
+def _has_user_relay_target(task: dict) -> bool:
+    try:
+        _require_user_relay_target(task)
+    except UserApprovalError:
+        return False
+    return True
 
 
 def _mark_stage_done_and_advance(
