@@ -174,6 +174,7 @@ def run(args: argparse.Namespace) -> int:
                     "task": t,
                     "status": str(t.get("status", "-")),
                     "stage": _stage_cell(t),
+                    "tokens": status_data_mod.task_usage_cell(t),
                     "seen": last_seen.get(tid, "—"),
                     "title": str(t.get("title") or "-"),
                     "formation": str(t.get("formation") or "-"),
@@ -185,6 +186,7 @@ def run(args: argparse.Namespace) -> int:
         status_width = max(len(r["status"]) for r in task_rows)
         formation_width = max(len(r["formation"]) for r in task_rows)
         stage_width = max(len(r["stage"]) for r in task_rows)
+        tokens_width = max(len(r["tokens"]) for r in task_rows)
         seen_width = max(len(r["seen"]) for r in task_rows)
         for row in task_rows:
             bullet = _style("●", _status_color(row["status"]), use_color)
@@ -199,7 +201,7 @@ def run(args: argparse.Namespace) -> int:
             print(
                 "{marker} {bullet} {id:<{id_width}}  {status}  "
                 "{formation:<{formation_width}}  {stage:<{stage_width}}  "
-                "{seen:<{seen_width}}  {title}".format(
+                "{tokens:<{tokens_width}}  {seen:<{seen_width}}  {title}".format(
                     marker=marker,
                     bullet=bullet,
                     id=row["id"],
@@ -209,6 +211,8 @@ def run(args: argparse.Namespace) -> int:
                     formation_width=formation_width,
                     stage=row["stage"],
                     stage_width=stage_width,
+                    tokens=row["tokens"],
+                    tokens_width=tokens_width,
                     seen=row["seen"],
                     seen_width=seen_width,
                     title=title,
@@ -306,6 +310,7 @@ def _task_json(state_dir: Path, task_id: str, task: dict) -> dict:
         "stages": stages,
         "current_stage": current_idx if current_idx >= 0 else None,
         "result": _gate_result(task),
+        "usage": status_data_mod.task_usage(task),
         "pr_url": leader_notifier.scan_pr_url(state_dir, task_id),
         "branch": task.get("branch"),
         "worktree": task.get("worktree"),

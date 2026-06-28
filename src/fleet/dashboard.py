@@ -84,18 +84,20 @@ def render(state_dir: Path) -> str:
     if not tasks:
         lines.append("_(no tasks yet)_")
     else:
-        lines.append("| ID | Title | Status | Agent | Workspace | Last seen |")
-        lines.append("|----|-------|--------|-------|-----------|-----------|")
+        lines.append("| ID | Title | Status | Agent | Workspace | Last seen | Tokens |")
+        lines.append("|----|-------|--------|-------|-----------|-----------|--------|")
         for t in tasks:
             tid = t.get("id", "?")
             lines.append(
-                "| {id} | {title} | {status} | {agent} | {workspace} | {seen} |".format(
+                "| {id} | {title} | {status} | {agent} | {workspace} | {seen} "
+                "| {tokens} |".format(
                     id=tid,
                     title=t.get("title", "-"),
                     status=_status_cell(t),
                     agent=_task_agent(t),
                     workspace=t.get("workspace", "-"),
                     seen=last_seen.get(tid, "—"),
+                    tokens=status_data_mod.task_usage_cell(t),
                 )
             )
     lines.append("")

@@ -7,6 +7,22 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### feat: read recorded usage back — `fleet cost` and token columns in status/dashboard
+
+The usage-recording change left a per-task `usage` block in `task.yaml`, but
+nothing read it back. This closes the loop. A new on-demand `fleet cost` (alias
+`fleet usage`) walks every project's live and archived `task.yaml` usage blocks
+and aggregates token usage (and approximate cost) grouped by session, project,
+vendor, and stage — read-only, no daemon, no polling, with `--json` for tooling.
+`fleet status` (table + `--json`), the per-project `dashboard.md`, and the global
+HTML dashboard (active task cards + the Completed table) each gain a read-only
+per-task tokens/approximate-cost column. All four surfaces derive the cell from
+one shared helper (`status_data.task_usage` / `format_usage_cell`); cost is shown
+approximate (`~$X.XX`) when a vendor exposed one and `—` when absent — tokens
+always render, no crash, no fabricated number. Usage is recorded at the terminal
+transition, so it populates on completed/archived tasks; in-flight tasks show `—`
+until they finish. docs/design.md §5.8 added. Closes #210.
+
 ### change: auto-resolve CHANGELOG.md merge conflicts with a union merge driver
 
 Parallel PRs all append an entry under `## [Unreleased]` at the same spot, so any

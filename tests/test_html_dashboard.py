@@ -187,6 +187,43 @@ class RenderTests(unittest.TestCase):
         html = html_dashboard.render(snap)
         self.assertIn("review 2/3", html)
 
+    def test_task_card_shows_tokens(self) -> None:
+        snap = _minimal_snapshot()
+        snap["projects"][0]["tasks"][0]["usage"] = {
+            "input_tokens": 1000, "output_tokens": 500,
+            "total_tokens": 1500, "cost": None,
+        }
+        html = html_dashboard.render(snap)
+        self.assertIn(">Tokens</span>", html)
+        self.assertIn("1.5k · —", html)
+
+    def test_task_card_tokens_dash_when_absent(self) -> None:
+        # No usage key on the task → the Tokens cell renders "—", no crash.
+        html = html_dashboard.render(_minimal_snapshot())
+        self.assertIn(">Tokens</span>", html)
+
+    def test_completed_table_has_tokens_column(self) -> None:
+        snap = _minimal_snapshot()
+        snap["completed"] = {
+            "within_days": 30,
+            "truncated": 0,
+            "tasks": [
+                {
+                    "project": "demo", "id": "9", "title": "shipped",
+                    "status": "completed", "formation": "solo",
+                    "completed_ts": "2026-06-19T00:00:00Z",
+                    "completed_epoch": 1_750_000_000,
+                    "usage": {
+                        "input_tokens": 2000, "output_tokens": 300,
+                        "total_tokens": 2300, "cost": 1.25,
+                    },
+                }
+            ],
+        }
+        html = html_dashboard.render(snap)
+        self.assertIn("<th>Tokens</th>", html)
+        self.assertIn("2.3k · ~$1.25", html)
+
     def test_stage_text_appends_review(self) -> None:
         cell = html_dashboard._stage_text(
             {
