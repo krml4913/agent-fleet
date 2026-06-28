@@ -53,6 +53,22 @@ the `dashboard.md` task table (appended to the status cell). No new persisted
 state, no daemon, and the orchestrator's loop/escalation logic is unchanged
 (presentation only).
 
+### feat: add a `scoping` formation — interactive requirements + devil's-advocate review, delivering a GitHub Issue
+
+A new shipped formation `scoping` offloads requirements-definition from the
+leader. The user attaches to a `scoper` driver pane and refines "what to build" in
+live dialogue (Pillar 1); the `scoper` grounds proposals in the repo, keeps the
+human as the decision-maker on design-root choices, and writes a house-style
+English GitHub Issue via `gh issue create`. A `devils-advocate` peer_review
+stress-tests the draft (unstated assumptions, missing edge cases, scope creep,
+pillar conflicts, simpler alternatives, "do we even need this?") and a
+`user_approval` gate confirms the Issue captures the agreed requirements. Mirrors
+the `research` formation's shape (#202): two new role prompts
+(`docs/prompts/roles/scoper.md`, `docs/prompts/roles/devils-advocate.md`) plus the
+shipped template (`src/fleet/templates/scoping.yaml`), resolving via the existing
+cascade. No machinery change; `gh` is the scoper agent's own shell action, not a
+fleet mechanism.
+
 ### feat: show recently-completed tasks on the dashboard with a time-window selector
 
 `fleet dashboard` now has a **Completed** section listing archived (terminal)

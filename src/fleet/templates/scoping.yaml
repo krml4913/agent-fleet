@@ -1,0 +1,10 @@
+# Scoping — define requirements interactively with the user, stress-test them with a devil's advocate, and deliver a GitHub Issue.
+name: scoping
+description: Define requirements interactively with the user, stress-test them with a devil's advocate, and deliver a GitHub Issue.
+stages:
+  - role: scoper
+    agent: claude:opus
+    peer_review:
+      role: devils-advocate
+      agent: claude:opus
+    user_approval: required
