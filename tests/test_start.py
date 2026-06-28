@@ -270,6 +270,29 @@ class StartTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized", result.stderr.lower())
 
+    def test_missing_later_stage_role_aborts_before_task_creation(self) -> None:
+        formation_path = self.state_dir / "formations" / "late-missing.yaml"
+        formation_path.write_text(
+            "name: late-missing\n"
+            "stages:\n"
+            "  - role: driver\n"
+            "    agent: claude:sonnet\n"
+            "  - role: no-such-role\n"
+            "    agent: claude:sonnet\n",
+            encoding="utf-8",
+        )
+
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "--formation", "late-missing",
+            "late-role", "Should fail before stage 0 starts",
+            fleet_home=self.fleet_home,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no role named 'no-such-role'", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-late-role").exists())
+
     def test_no_project_found(self) -> None:
         result = run_fleet_agent(
             "start", "--project", "nonexistent", "--dry-run",

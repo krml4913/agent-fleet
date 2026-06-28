@@ -1,6 +1,7 @@
 """Tests for ``fleet.driver_prompt.render``."""
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,9 +11,26 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from fleet import driver_prompt  # noqa: E402
+from tests._fleet_test_helpers import seed_global_roles  # noqa: E402
 
 
-class DriverPromptTests(unittest.TestCase):
+class RoleFixtureMixin:
+    def setUp(self) -> None:
+        self._role_tmp = TemporaryDirectory()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        self.fleet_home = Path(self._role_tmp.name) / "fleet-state"
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        seed_global_roles(self.fleet_home)
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._role_tmp.cleanup()
+
+
+class DriverPromptTests(RoleFixtureMixin, unittest.TestCase):
     def test_includes_required_fields(self) -> None:
         text = driver_prompt.render(
             task_id="42",
@@ -83,17 +101,51 @@ class DriverPromptTests(unittest.TestCase):
         self.assertIn("You are the implementer", text)
         self.assertIn("an approved design exists", text)
 
-    def test_skips_role_fragment_when_role_file_is_missing(self) -> None:
-        text = driver_prompt.render(
-            task_id="1",
-            description="x",
-            formation_name="solo",
-            role="unknown-role",
-            agent="claude:sonnet",
-        )
-        self.assertNotIn("You are the implementer", text)
-        self.assertNotIn("You are the reviewer", text)
-        self.assertNotIn("You are the designer", text)
+    def test_role_fragment_project_shadows_global(self) -> None:
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            (state_dir / "roles").mkdir(parents=True)
+            global_roles = self.fleet_home / "global" / "roles"
+            (global_roles / "custom.md").write_text(
+                "global role fragment\n", encoding="utf-8"
+            )
+            (state_dir / "roles" / "custom.md").write_text(
+                "project role fragment\n", encoding="utf-8"
+            )
+
+            text = driver_prompt.render(
+                task_id="1",
+                description="x",
+                formation_name="solo",
+                role="custom",
+                agent="claude:sonnet",
+                state_dir=state_dir,
+            )
+
+        self.assertIn("project role fragment", text)
+        self.assertNotIn("global role fragment", text)
+
+    def test_role_fragment_missing_is_error(self) -> None:
+        with self.assertRaises(driver_prompt.RoleResolutionError) as ctx:
+            driver_prompt.render(
+                task_id="1",
+                description="x",
+                formation_name="solo",
+                role="unknown-role",
+                agent="claude:sonnet",
+            )
+        self.assertIn("no role named 'unknown-role'", str(ctx.exception))
+
+    def test_role_fragment_malformed_name_is_error(self) -> None:
+        with self.assertRaises(driver_prompt.RoleResolutionError) as ctx:
+            driver_prompt.render(
+                task_id="1",
+                description="x",
+                formation_name="solo",
+                role="bad/name",
+                agent="claude:sonnet",
+            )
+        self.assertIn("malformed role name 'bad/name'", str(ctx.exception))
 
     def test_composes_base_role_then_description(self) -> None:
         text = driver_prompt.render(
@@ -110,16 +162,18 @@ class DriverPromptTests(unittest.TestCase):
         self.assertLess(role_idx, description_idx)
 
 
-class MemoryIndexInjectionTests(unittest.TestCase):
+class MemoryIndexInjectionTests(RoleFixtureMixin, unittest.TestCase):
     """Issue #114: the MEMORY.md index is injected so any vendor sees it at start."""
 
     def setUp(self) -> None:
+        super().setUp()
         self._tmp = TemporaryDirectory()
         self.state_dir = Path(self._tmp.name)
         (self.state_dir / "memory").mkdir()
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
+        super().tearDown()
 
     def _render(self, **over: object) -> str:
         kwargs = dict(
@@ -152,7 +206,7 @@ class MemoryIndexInjectionTests(unittest.TestCase):
         self.assertNotIn("## Project memory (index)", text)
 
 
-class FleetAgentPathInjectionTests(unittest.TestCase):
+class FleetAgentPathInjectionTests(RoleFixtureMixin, unittest.TestCase):
     """Issue #125: lifecycle commands must resolve without ``fleet-agent`` on PATH.
 
     Driver panes never get ``fleet-agent`` on PATH (macOS path_helper + shell rc

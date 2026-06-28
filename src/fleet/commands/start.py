@@ -429,7 +429,8 @@ def run(args: argparse.Namespace) -> int:
             owner_session=owner_session,
         )
         formation_mod.validate(formation_data)
-    except (formation_mod.ResolutionError, ValueError) as e:
+        dp.validate_formation_roles(formation_data, state_dir)
+    except (formation_mod.ResolutionError, dp.RoleResolutionError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

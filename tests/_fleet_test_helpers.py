@@ -6,6 +6,7 @@ tempdir so they don't interact with the live agent-fleet dogfooding state.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,17 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
+
+
+def seed_global_roles(fleet_home: Path, *names: str) -> Path:
+    """Populate a test-only global roles tier from shipped prompt files."""
+    roles_dir = fleet_home / "global" / "roles"
+    roles_dir.mkdir(parents=True, exist_ok=True)
+    source_dir = ROOT / "docs" / "prompts" / "roles"
+    selected = names or tuple(p.stem for p in sorted(source_dir.glob("*.md")))
+    for name in selected:
+        shutil.copyfile(source_dir / f"{name}.md", roles_dir / f"{name}.md")
+    return roles_dir
 
 
 def make_project(fleet_home: Path, name: str, repo: Path) -> Path:
@@ -33,6 +45,7 @@ def make_project(fleet_home: Path, name: str, repo: Path) -> Path:
         state_dir = state.project_state_dir(name)
         state.init_state(state_dir, name=name, repo=repo)
         state.register_project(name, repo)
+        seed_global_roles(fleet_home)
 
         formations_dir = state_dir / "formations"
         formations_dir.mkdir(exist_ok=True)

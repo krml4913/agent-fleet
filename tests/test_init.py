@@ -66,12 +66,13 @@ class InitCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("not a directory", result.stderr)
 
-    def test_creates_formations_dir(self) -> None:
+    def test_creates_formations_and_roles_dirs(self) -> None:
         result = run_fleet("init", "--name", "demo", "--no-formation", str(self.project),
                            fleet_home=self.fleet_home)
         self.assertEqual(result.returncode, 0, result.stderr)
         state_dir = self.fleet_home / "projects" / "demo"
         self.assertTrue((state_dir / "formations").is_dir())
+        self.assertTrue((state_dir / "roles").is_dir())
 
     def test_no_formation_flag_empty_formations(self) -> None:
         result = run_fleet("init", "--name", "demo", "--no-formation", str(self.project),

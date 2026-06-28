@@ -45,6 +45,7 @@ TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 LEADER_MEMORY_SUBDIR = "leader-memory"
 SESSIONS_SUBDIR = "sessions"
 FORMATIONS_SUBDIR = "formations"
+ROLES_SUBDIR = "roles"
 SESSION_RECORD_NAME = "session.json"
 SESSION_SCOPE_KEY = "scope"
 
@@ -130,6 +131,11 @@ def global_sessions_dir() -> Path:
 def global_formations_dir() -> Path:
     """Return ``global/formations/`` — reusable formations across projects."""
     return global_dir() / FORMATIONS_SUBDIR
+
+
+def global_roles_dir() -> Path:
+    """Return ``global/roles/`` — reusable role prompt fragments."""
+    return global_dir() / ROLES_SUBDIR
 
 
 def session_dir(label: str) -> Path:
@@ -442,6 +448,7 @@ def init_state(state_dir: Path, *, name: str, repo: Path | None = None) -> None:
     state_dir.mkdir(parents=True)
     (state_dir / "tasks").mkdir()
     (state_dir / "events.jsonl").touch()
+    (state_dir / ROLES_SUBDIR).mkdir()
 
     _init_memory(state_dir)
 

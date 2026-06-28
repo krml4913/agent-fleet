@@ -146,6 +146,9 @@ class AdvanceChangesRequestedTests(unittest.TestCase):
         self.project.mkdir()
         self.sd = self.project / ".fleet-state"
         state.init_state(self.sd, name="demo")
+        (self.sd / "roles" / "code-reviewer.md").write_text(
+            "project reviewer role\n", encoding="utf-8"
+        )
         (self.sd / "notify.yaml").write_text(
             "macos:\n  enabled: false\nslack:\n  enabled: false\n"
         )
@@ -190,6 +193,9 @@ class PeerReviewLoopTests(unittest.TestCase):
         self.project.mkdir()
         self.sd = self.project / ".fleet-state"
         state.init_state(self.sd, name="demo")
+        (self.sd / "roles" / "code-reviewer.md").write_text(
+            "project reviewer role\n", encoding="utf-8"
+        )
         (self.sd / "notify.yaml").write_text(
             "macos:\n  enabled: false\nslack:\n  enabled: false\n"
         )

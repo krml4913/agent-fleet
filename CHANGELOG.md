@@ -27,6 +27,18 @@ user-approval gate normally, while a raised gate remains protected from being
 self-settled by another driver `done`. The final `done` notification now follows
 that real next state instead of reporting "awaiting approval" for a bare ask.
 Closes #226.
+### change: resolve role prompts from project/global runtime tiers
+
+Role prompt fragments now resolve from `projects/<project>/roles/<role>.md` and
+then `global/roles/<role>.md`; shipped files under `docs/prompts/roles/` are a
+seed source only, not a runtime fallback. Project roles override global roles,
+matching the formation cascade. Missing roles and malformed role names now fail
+loudly, and `fleet-agent start` validates every stage and peer-review role before
+creating stage 0 so a later-stage typo cannot wedge a task during `done`.
+
+Migration for this local install is manual: after merging, copy the shipped role
+seeds with `mkdir -p fleet-state/global/roles && cp docs/prompts/roles/*.md fleet-state/global/roles/`
+before dispatching the next task. Closes #225.
 
 ### feat: read recorded usage back — `fleet cost` and token columns in status/dashboard
 
