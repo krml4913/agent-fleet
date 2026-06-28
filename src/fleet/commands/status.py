@@ -440,7 +440,7 @@ def _stage_cell(task: dict) -> str:
     """Compact current-stage descriptor: ``stage N/M (role, agent)``.
 
     Shown for every formation, solo included (``stage 1/1 (driver, claude:opus)``).
-    A peer-review phase in progress is appended (``… review ×1``).
+    A peer-review phase in progress is appended (``… review 1/3``).
     Returns ``-`` for tasks without a usable stage list.
     """
     idx = _current_stage_index(task)

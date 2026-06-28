@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import heartbeat
 from . import state as state_mod
+from . import status_data as status_data_mod
 from .events import read_events, utcnow_iso
 from .locking import atomic_write
 
@@ -27,6 +28,20 @@ def _task_agent(task: dict) -> str:
     if isinstance(current, int) and 0 <= current < len(stages):
         return str(stages[current].get("agent", "-"))
     return str(stages[0].get("agent", "-"))
+
+
+def _status_cell(task: dict) -> str:
+    """Status label with an in-progress review loop's ``n/max`` position appended.
+
+    Mirrors the ``review 2/3`` label surfaced in ``fleet status`` and the HTML
+    dashboard, derived read-only from the current stage's peer-review state.
+    """
+    status = str(task.get("status", "-"))
+    descriptor = status_data_mod.stage_descriptor(task)
+    review = descriptor.get("review") if descriptor else ""
+    if review:
+        return f"{status} ({review})"
+    return status
 
 
 def render(state_dir: Path) -> str:
@@ -77,7 +92,7 @@ def render(state_dir: Path) -> str:
                 "| {id} | {title} | {status} | {agent} | {workspace} | {seen} |".format(
                     id=tid,
                     title=t.get("title", "-"),
-                    status=t.get("status", "-"),
+                    status=_status_cell(t),
                     agent=_task_agent(t),
                     workspace=t.get("workspace", "-"),
                     seen=last_seen.get(tid, "—"),

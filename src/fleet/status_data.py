@@ -27,6 +27,12 @@ _TERMINAL_EVENT_TYPES = frozenset({"merge", "cleanup", "done"})
 # Hard cap on rendered completed rows (regardless of window) to bound HTML size.
 COMPLETED_ROW_CAP = 200
 
+# Fallback peer-review iteration cap for the surfaced ``n/max`` label, mirroring
+# ``orchestrator.DEFAULT_MAX_ITERATIONS``. The cap is read from a stage's
+# ``peer_review.max_iterations`` field (the same field the orchestrator enforces),
+# falling back to this literal when absent. Read-only: we never write it.
+DEFAULT_MAX_REVIEW_ITERATIONS = 3
+
 
 # ---------------------------------------------------------------------------
 # Task / stage derivation (moved verbatim from commands/status.py)
@@ -64,8 +70,24 @@ def gate_result(task: dict) -> str | None:
     return None
 
 
+def _review_cap(max_iterations: object) -> int:
+    """Coerce a ``max_iterations`` value to a positive int, else the default cap."""
+    try:
+        cap = int(max_iterations)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_REVIEW_ITERATIONS
+    return cap if cap > 0 else DEFAULT_MAX_REVIEW_ITERATIONS
+
+
 def peer_review_progress(peer_review: object) -> str:
-    """Return a short label like ``'review ×2'`` for an in-progress peer review."""
+    """Return a short label like ``'review 2/3'`` for an in-progress peer review.
+
+    The label surfaces the loop position as ``n/max`` so a human can watch a
+    review loop approach its cap. ``max`` is read from the peer-review dict's
+    ``max_iterations`` field (the same field the orchestrator enforces), falling
+    back to :data:`DEFAULT_MAX_REVIEW_ITERATIONS` when absent. Read-only —
+    derived at render time, never persisted.
+    """
     if not isinstance(peer_review, dict):
         return ""
     if peer_review.get("phase") not in {"implementing", "reviewing"}:
@@ -73,7 +95,7 @@ def peer_review_progress(peer_review: object) -> str:
     iteration = peer_review.get("iteration")
     if iteration is None or iteration == "":
         return "review"
-    return f"review ×{iteration}"
+    return f"review {iteration}/{_review_cap(peer_review.get('max_iterations'))}"
 
 
 def stage_descriptor(task: dict) -> dict | None:

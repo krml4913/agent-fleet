@@ -119,7 +119,7 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "● task-1  running  pair_review  stage 1/1 (driver, codex:gpt-5.5)  review ×1",
+            "● task-1  running  pair_review  stage 1/1 (driver, codex:gpt-5.5)  review 1/3",
             result.stdout,
         )
 

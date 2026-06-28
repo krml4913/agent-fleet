@@ -117,7 +117,64 @@ class StageDescriptorTests(unittest.TestCase):
         }
         d = status_data.stage_descriptor(task)
         assert d is not None
-        self.assertEqual(d["review"], "review ×2")
+        self.assertEqual(d["review"], "review 2/3")
+
+    def test_peer_review_label_explicit_max(self) -> None:
+        task = {
+            "current_stage": 0,
+            "stages": [
+                {
+                    "role": "implementer",
+                    "agent": "claude:sonnet",
+                    "peer_review": {
+                        "phase": "reviewing",
+                        "iteration": 2,
+                        "max_iterations": 5,
+                    },
+                }
+            ],
+        }
+        d = status_data.stage_descriptor(task)
+        assert d is not None
+        self.assertEqual(d["review"], "review 2/5")
+
+
+class PeerReviewProgressTests(unittest.TestCase):
+    def test_not_a_dict(self) -> None:
+        self.assertEqual(status_data.peer_review_progress(None), "")
+
+    def test_inactive_phase(self) -> None:
+        self.assertEqual(
+            status_data.peer_review_progress({"phase": "approved", "iteration": 2}),
+            "",
+        )
+
+    def test_default_cap(self) -> None:
+        self.assertEqual(
+            status_data.peer_review_progress({"phase": "reviewing", "iteration": 2}),
+            "review 2/3",
+        )
+
+    def test_max_from_peer_review_dict(self) -> None:
+        self.assertEqual(
+            status_data.peer_review_progress(
+                {"phase": "implementing", "iteration": 1, "max_iterations": 4}
+            ),
+            "review 1/4",
+        )
+
+    def test_bare_review_when_no_iteration(self) -> None:
+        self.assertEqual(
+            status_data.peer_review_progress({"phase": "reviewing"}), "review"
+        )
+
+    def test_invalid_max_falls_back(self) -> None:
+        self.assertEqual(
+            status_data.peer_review_progress(
+                {"phase": "reviewing", "iteration": 2, "max_iterations": "oops"}
+            ),
+            "review 2/3",
+        )
 
 
 class ScanInflightTasksTests(unittest.TestCase):
