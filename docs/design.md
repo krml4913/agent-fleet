@@ -629,6 +629,16 @@ stages:
       role: fact-checker
       agent: claude:opus
     user_approval: required
+
+# Formation E: scoping (interactive requirements + devil's-advocate review → a GitHub Issue)
+name: scoping
+stages:
+  - role: scoper
+    agent: claude:opus
+    peer_review:
+      role: devils-advocate
+      agent: claude:opus
+    user_approval: required
 ```
 
 The `research` formation targets investigation tasks whose deliverable is a
@@ -638,6 +648,21 @@ topic over web search/fetch and writes the summary to `outbox.md`; the
 source before the `user_approval` gate lets the leader deliver it. Both stages
 are `claude:opus` because the work needs web access. Roles are plain prompt files
 under `docs/prompts/roles/` (§10.2); the formation adds no machinery.
+
+The `scoping` formation moves requirements-definition off the leader: instead of
+the user front-loading "what to build" with the leader before a task is cut, they
+converse with a `scoper` driver (Pillar 1 — the human attaches to the pane and
+steers the dialogue directly), and the deliverable is a well-formed GitHub Issue,
+the work-unit that then becomes a task. The `scoper` elicits and sharpens
+requirements, grounds proposals in the repo, and — keeping the human as the
+decision-maker on design-root choices — writes a house-style Issue and creates it
+with `gh issue create`. The `devils-advocate` peer_review stress-tests the draft
+(unstated assumptions, missing edge cases, scope creep, pillar conflicts, simpler
+alternatives, "do we even need this?") before the `user_approval` gate confirms
+the Issue captures the agreed requirements. Both stages are `claude:opus` for
+interactive reasoning and repo grounding. Issue creation is the scoper agent's own
+`gh` action, not a fleet mechanism; like `research`, the formation adds no
+machinery beyond the two role files and the template.
 
 Execution order within each stage:
 ```
@@ -726,9 +751,9 @@ gate aborts the start rather than running ungated.
   cross-project formations. They define a formation once for every project, but
   remain shadowed by a project override with the same name.
 - **Formation templates** (`src/fleet/templates/<name>.yaml`): shipped defaults.
-  Four ship with fleet: `solo` / `pair_review` / `multi_stage` / `research`. They
-  are directly usable by explicit name when neither project nor global overrides
-  exist.
+  Five ship with fleet: `solo` / `pair_review` / `multi_stage` / `research` /
+  `scoping`. They are directly usable by explicit name when neither project nor
+  global overrides exist.
 - Copying a template via `fleet init --formation <name>` or `fleet formation init
   --from <name>` makes it a project formation, independent thereafter (no
   tracking of the template). `fleet formation init --from <name> --global`

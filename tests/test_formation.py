@@ -23,6 +23,7 @@ class FormationTemplateTests(unittest.TestCase):
         self.assertIn("pair_review", names)
         self.assertIn("multi_stage", names)
         self.assertIn("research", names)
+        self.assertIn("scoping", names)
         self.assertNotIn("race", names)
 
     # ---- loading + validating templates ----
@@ -84,6 +85,19 @@ class FormationTemplateTests(unittest.TestCase):
             self.assertEqual(data["name"], "research")
             self.assertEqual(data["stages"][0]["role"], "researcher")
             self.assertEqual(data["stages"][0]["peer_review"]["role"], "fact-checker")
+
+    def test_scoping_resolves_via_cascade_with_no_project_copy(self) -> None:
+        # `--formation scoping` must resolve from the shipped template alone,
+        # with no per-project copy in the cascade (Issue #212 dogfoods #198).
+        with TemporaryDirectory() as tmp:
+            state = Path(tmp) / ".fleet-state"
+            (state / "formations").mkdir(parents=True)
+            name, data = formation.resolve_formation(state, "scoping")
+            self.assertEqual(name, "scoping")
+            formation.validate(data)
+            self.assertEqual(data["name"], "scoping")
+            self.assertEqual(data["stages"][0]["role"], "scoper")
+            self.assertEqual(data["stages"][0]["peer_review"]["role"], "devils-advocate")
 
     def test_load_formation_global_shadows_template(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -319,6 +333,21 @@ class FormationTemplateTests(unittest.TestCase):
         self.assertEqual(researcher["peer_review"]["role"], "fact-checker")
         self.assertEqual(researcher["peer_review"]["agent"], "claude:opus")
         ua = researcher["user_approval"]
+        self.assertIsInstance(ua, dict)
+        self.assertTrue(ua["required"])
+        self.assertEqual(ua["status"], "pending")
+
+    def test_expand_stages_scoping(self) -> None:
+        data = formation.load_template("scoping")
+        stages = formation.expand_stages(data)
+        self.assertEqual(len(stages), 1)
+        scoper = stages[0]
+        self.assertEqual(scoper["role"], "scoper")
+        self.assertEqual(scoper["agent"], "claude:opus")
+        self.assertEqual(scoper["status"], "pending")
+        self.assertEqual(scoper["peer_review"]["role"], "devils-advocate")
+        self.assertEqual(scoper["peer_review"]["agent"], "claude:opus")
+        ua = scoper["user_approval"]
         self.assertIsInstance(ua, dict)
         self.assertTrue(ua["required"])
         self.assertEqual(ua["status"], "pending")
