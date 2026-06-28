@@ -7,6 +7,16 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### change: have implementer and reviewer declare verifiable acceptance criteria before done
+
+The `implementer` and `code-reviewer` role prompts now each instruct the agent to
+state the verifiable acceptance criteria before calling done — the implementer the
+criteria the work must meet, the reviewer the criteria it checked the work against.
+This gives free-form tasks a fixed target to be measured against (avoiding the
+"good-enough trap") and hands human / `in_review` review a concrete checklist.
+Prompt-only, mirroring #196's designer-output-path touch — no `task.yaml` schema
+field and no state-machine change.
+
 ### feat: show recently-completed tasks on the dashboard with a time-window selector
 
 `fleet dashboard` now has a **Completed** section listing archived (terminal)
