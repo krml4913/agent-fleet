@@ -37,15 +37,25 @@ agent-fleet uses **trunk-based development** with lightweight milestone tags:
   GitHub Release only at meaningful checkpoints — not on every merge — to give a
   pin-able reference point and a CHANGELOG boundary. The leader cuts the tag/Release
   after the merge; drivers do not tag.
+- **CHANGELOG fragments** are the normal path for new changes. Each PR adds one
+  `changelog.d/<task-id>.md` file containing its entry instead of editing
+  `CHANGELOG.md` `## [Unreleased]` directly. Use the task id for the filename so
+  parallel PRs create different files and GitHub can merge them without a
+  changelog conflict. A fragment is regular Markdown, typically:
+  `### feat|fix|change|chore|test: short summary`, followed by a short body.
+- **Assembling fragments** is on-demand, not a daemon. Run
+  `./fleet changelog` to concatenate `changelog.d/*.md` under
+  `## [Unreleased]` and delete the fragment files, or
+  `./fleet changelog --version X.Y.Z --date YYYY-MM-DD` to create a versioned
+  section at a milestone. Existing `[Unreleased]` entries from before the
+  fragment convention remain as history; do not convert them during ordinary PRs.
 - **CHANGELOG `## [Unreleased]`** means "merged to `main` but not yet folded into a
-  named milestone tag" (since `main` itself is already available). Add one entry per
-  change; when a milestone tag is cut, move the entries under `## [X.Y.Z] - <date>`.
-- **CHANGELOG conflicts are auto-resolved.** `CHANGELOG.md` is marked `merge=union`
-  in the repo `.gitattributes`, so when two parallel PRs both append an entry under
-  `## [Unreleased]`, git keeps **both** entries on merge/rebase instead of emitting
-  conflict markers. Keep writing `## [Unreleased]` entries exactly as before — the
-  union driver handles the overlap. Ordering of the two kept entries is not
-  guaranteed, which is fine for `[Unreleased]`.
+  named milestone tag" (since `main` itself is already available). New entries
+  reach it through `changelog.d/` fragments; when a milestone tag is cut, assemble
+  the remaining fragments and move entries under `## [X.Y.Z] - <date>`.
+- **CHANGELOG conflict fallback.** `CHANGELOG.md` remains marked `merge=union` in
+  `.gitattributes` as belt-and-suspenders for old branches or manual edits, but
+  drivers should not rely on direct `## [Unreleased]` edits for new work.
 
 ## memory (write project knowledge to fleet memory, not your vendor's own)
 
