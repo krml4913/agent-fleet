@@ -128,31 +128,34 @@ user_approval:
 Behavior:
 
 - When a stage with `required: true` finishes, the task transitions to `awaiting_orders`.
-- The user tells the leader whether to approve or reject, and the leader relays this via `fleet-agent approve <id>` / `fleet-agent reject <id>`.
+- The approver is the user by default, or a delegated leader when the project
+  policy grants that authority. The decision is relayed via `fleet-agent approve
+  <id>` / `fleet-agent reject <id>`.
 - On reject, the stage returns to implementation (if there is a `peer_review`, the implementer pane is woken).
 
-The approval call belongs to the user — **the leader does not self-approve**
-(see the `user-approval-gate` memory). A driver calling `fleet-agent done` at
-the gate does **not** settle it; the gate moves only on `fleet-agent
-approve`/`reject`.
+The approval call belongs to the approver — user by default, delegated leader
+only when project policy says so. A driver calling `fleet-agent done` at the gate
+does **not** settle it; the gate moves only on `fleet-agent approve`/`reject`.
 
 ---
 
 ## 3. Shipped templates
 
-### 3.1 `solo` — one driver, end to end
+### 3.1 `solo` — one driver, then sign-off
 
 ```yaml
 name: solo
-description: One driver works the task end-to-end.
+description: One driver works the task end-to-end, then waits for sign-off.
 stages:
   - role: driver
     agent: claude:sonnet
+    user_approval: required
 ```
 
-- One stage, one driver. No review, no approval gates.
-- Suitable for prototypes, lightweight tasks, or immediate delegations from the leader.
-- `fleet-agent done --result approved` completes the task.
+- One stage, one driver, followed by the standard sign-off gate.
+- Suitable for lightweight tasks or immediate delegations from the leader where a
+  human or delegated leader still reviews the result before retirement.
+- `fleet-agent done --result approved` parks the task at `awaiting_orders`; `fleet-agent approve <id>` completes it.
 
 ### 3.2 `pair_review` — implementer + AI review + user sign-off
 
@@ -225,9 +228,12 @@ stages:
     peer_review:
       role: code-reviewer
       agent: claude:opus
+    user_approval: required
 ```
 
-(Keep the same `name`, or save under a different file if you want a parallel formation.)
+(Keep the same `name`, or save under a different file if you want a parallel
+formation. Keep `user_approval` if the formation should still stop for sign-off
+after review.)
 
 ### 4.3 Drop or add a `user_approval` gate
 
@@ -293,16 +299,17 @@ the vendors should differ, set it explicitly.
 - Top level has `stages`, a list with at least one entry.
 - Each stage is a mapping and has a `role` field.
 
-Stricter checks — `peer_review` structure, `agent` parseability,
-`user_approval` shape — are deferred to **runtime in the orchestrator**
-(`design.md` §7.4). They are not done statically.
+Stricter gate checks — `peer_review` structure and `user_approval` shape — are
+also validated by `formation.validate()` so approval/review boundaries cannot
+silently disappear through a typo (`design.md` §7.4). Agent parseability is
+checked when the task starts.
 
 ### 5.3 Possible errors
 
 | situation | error / behavior |
 |---|---|
 | `<name>` missing from project and global formations | `fleet-agent start --formation <name>` raises `ResolutionError`. No template fallback. |
-| project `formations/` empty + no `--formation` | A synthetic `_leader_solo` 1-stage formation is built from the leader-session agent, even if global formations exist. |
+| project `formations/` empty + no `--formation` | A synthetic `_leader_solo` 1-stage formation is built from the leader-session agent, with `user_approval: required`, even if global formations exist. |
 | project `formations/` has 2+ entries + no `--formation` | Ambiguity error; tells you to pass `--formation <name>`. |
 | YAML parse failure | `formation file must be a YAML mapping: <path>` |
 | missing `name` | `formation missing required field: name` |

@@ -177,10 +177,18 @@ class FormationListCmdTests(unittest.TestCase):
         global_dir = self.fleet_home / "global" / "formations"
         global_dir.mkdir(parents=True)
         (global_dir / "solo.yaml").write_text(
-            "name: solo\nstages:\n  - role: driver\n    agent: claude:opus\n"
+            "name: solo\n"
+            "stages:\n"
+            "  - role: driver\n"
+            "    agent: claude:opus\n"
+            "    user_approval: required\n"
         )
         (self.state_dir / "formations" / "solo.yaml").write_text(
-            "name: solo\nstages:\n  - role: driver\n    agent: codex:gpt-5.5\n"
+            "name: solo\n"
+            "stages:\n"
+            "  - role: driver\n"
+            "    agent: codex:gpt-5.5\n"
+            "    user_approval: required\n"
         )
 
         result = run_fleet("formation", "list",

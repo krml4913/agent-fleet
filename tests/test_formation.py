@@ -143,6 +143,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "stages:\n"
                     "  - role: driver\n"
                     "    agent: claude:opus\n"
+                    "    user_approval: required\n"
                 )
                 (state / "formations" / "solo.yaml").write_text(
                     "name: solo\n"
@@ -150,6 +151,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "stages:\n"
                     "  - role: driver\n"
                     "    agent: codex:gpt-5.5\n"
+                    "    user_approval: required\n"
                 )
                 data = formation.load_formation("solo", state)
                 self.assertEqual(data["description"], "project")
@@ -171,7 +173,12 @@ class FormationTemplateTests(unittest.TestCase):
             state = Path(tmp) / ".fleet-state"
             (state / "formations").mkdir(parents=True)
             (state / "formations" / "solo.yaml").write_text(
-                "name: solo\ndescription: x\nstages:\n  - role: driver\n    agent: claude:sonnet\n"
+                "name: solo\n"
+                "description: x\n"
+                "stages:\n"
+                "  - role: driver\n"
+                "    agent: claude:sonnet\n"
+                "    user_approval: required\n"
             )
             name, data = formation.resolve_formation(state, "solo")
             self.assertEqual(name, "solo")
@@ -194,7 +201,12 @@ class FormationTemplateTests(unittest.TestCase):
             state = Path(tmp) / ".fleet-state"
             (state / "formations").mkdir(parents=True)
             (state / "formations" / "solo.yaml").write_text(
-                "name: solo\ndescription: x\nstages:\n  - role: driver\n    agent: claude:sonnet\n"
+                "name: solo\n"
+                "description: x\n"
+                "stages:\n"
+                "  - role: driver\n"
+                "    agent: claude:sonnet\n"
+                "    user_approval: required\n"
             )
             name, data = formation.resolve_formation(state, None)
             self.assertEqual(name, "solo")
@@ -233,6 +245,7 @@ class FormationTemplateTests(unittest.TestCase):
                     )
                 self.assertEqual(name, "_leader_solo")
                 self.assertEqual(data["stages"][0]["agent"], "claude:opus")
+                self.assertEqual(data["stages"][0]["user_approval"], "required")
             finally:
                 if old_home is None:
                     os.environ.pop("FLEET_HOME", None)
@@ -276,6 +289,7 @@ class FormationTemplateTests(unittest.TestCase):
                     )
                 self.assertEqual(name, "_leader_solo")
                 self.assertEqual(data["stages"][0]["agent"], "claude:opus")
+                self.assertEqual(data["stages"][0]["user_approval"], "required")
             finally:
                 if old_home is None:
                     os.environ.pop("FLEET_HOME", None)
@@ -306,6 +320,10 @@ class FormationTemplateTests(unittest.TestCase):
         self.assertEqual(stages[0]["role"], "driver")
         self.assertEqual(stages[0]["agent"], "claude:sonnet")
         self.assertEqual(stages[0]["status"], "pending")
+        self.assertEqual(
+            stages[0]["user_approval"],
+            {"required": True, "status": "pending"},
+        )
 
     def test_expand_stages_pair_review(self) -> None:
         data = formation.load_template("pair_review")
