@@ -3,10 +3,11 @@
 Called by done.py after the current stage driver completes. This module
 owns all stage-transition logic; done.py stays thin.
 
-Stage 5 adds the peer_review loop (max 3 iterations) and user_approval gate.
-The processing order within a stage is:
+Stage 5 adds the peer_review loop and user_approval gate. The iteration cap
+comes from the stage's ``peer_review.max_iterations`` field (default 3). The
+processing order within a stage is:
 
-    implement → peer_review loop (max 3) → user_approval gate → stage done
+    implement → peer_review loop → user_approval gate → stage done
 """
 from __future__ import annotations
 
@@ -14,6 +15,22 @@ from pathlib import Path
 
 from . import state as state_mod
 from .events import append_event, truncate_text, utcnow_iso
+
+# Default peer_review iteration cap when a stage omits peer_review.max_iterations.
+DEFAULT_MAX_ITERATIONS = 3
+
+
+def _peer_review_max_iterations(pr: dict) -> int:
+    """Return the peer_review iteration cap for a stage's ``peer_review`` block.
+
+    Reads ``peer_review.max_iterations``, falling back to
+    ``DEFAULT_MAX_ITERATIONS`` when the field is absent or unusable so that
+    formations without the field behave identically to the old hardcoded cap.
+    """
+    try:
+        return int(pr.get("max_iterations", DEFAULT_MAX_ITERATIONS))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_ITERATIONS
 
 
 class UserApprovalError(ValueError):
@@ -116,7 +133,7 @@ def advance(
         if phase == "reviewing":
             if result == "changes-requested":
                 iteration = pr.get("iteration", 1)
-                if iteration >= 3:
+                if iteration >= _peer_review_max_iterations(pr):
                     # Max iterations exceeded; escalate to user.
                     task["stages"] = stages
                     task["status"] = "awaiting_orders"
@@ -294,7 +311,7 @@ def _require_user_relay_target(
         task.get("status") == "awaiting_orders"
         and isinstance(pr, dict)
         and pr.get("phase") == "reviewing"
-        and int(pr.get("iteration", 1) or 1) >= 3
+        and int(pr.get("iteration", 1) or 1) >= _peer_review_max_iterations(pr)
     )
     if is_escalation:
         return stages, current_idx, stage, ua if isinstance(ua, dict) else None, True
@@ -509,9 +526,16 @@ def _notify_escalation(
     from . import notify
 
     role = stage.get("role", "?")
+    pr = stage.get("peer_review")
+    max_iterations = (
+        _peer_review_max_iterations(pr)
+        if isinstance(pr, dict)
+        else DEFAULT_MAX_ITERATIONS
+    )
     question = (
-        f"peer_review for stage '{role}' exceeded the maximum 3 iterations. "
-        "Please review manually and tell the leader whether to approve or reject."
+        f"peer_review for stage '{role}' exceeded the maximum {max_iterations} "
+        "iterations. Please review manually and tell the leader whether to "
+        "approve or reject."
     )
     _write_question(state_dir, task_id, question)
     events_mod.append_event(

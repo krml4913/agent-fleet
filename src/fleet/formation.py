@@ -323,6 +323,16 @@ def _validate_stage_gates(idx: int, stage: dict[str, Any]) -> None:
             raise ValueError(
                 f"formation stages[{idx}] peer_review must carry a 'role' field"
             )
+        max_iterations = pr.get("max_iterations")
+        if max_iterations is not None and (
+            isinstance(max_iterations, bool)
+            or not isinstance(max_iterations, int)
+            or max_iterations < 1
+        ):
+            raise ValueError(
+                f"formation stages[{idx}] peer_review.max_iterations must be a "
+                f"positive integer, got {max_iterations!r}"
+            )
 
 
 def _near_miss_gate_key(key: str) -> str | None:
