@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state, tmux  # noqa: E402
-from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
+from tests._fleet_test_helpers import run_fleet_agent, make_project, requires_live_tmux  # noqa: E402
 
 
 class SendPromptTests(unittest.TestCase):
@@ -45,14 +45,14 @@ class SendPromptTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("no registered project", r.stderr)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_no_prompt_file(self) -> None:
         r = run_fleet_agent("send-prompt", "999", "--project", self.project_name,
                             fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 1)
         self.assertIn("no driver-prompt.md", r.stderr)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_no_session(self) -> None:
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)

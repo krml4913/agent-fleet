@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +17,15 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
+
+# Opt-in gate for tests that create REAL tmux sessions (and, for the leader
+# launch tests, a real claude-code CLI session). These are skipped by default so
+# a plain `python -m unittest` run leaks zero sessions onto the developer's
+# machine. Set FLEET_LIVE_TMUX=1 (and have tmux installed) to run them.
+requires_live_tmux = unittest.skipUnless(
+    os.environ.get("FLEET_LIVE_TMUX") and shutil.which("tmux"),
+    "live-tmux test: set FLEET_LIVE_TMUX=1 (and have tmux) to run",
+)
 
 
 def seed_global_roles(fleet_home: Path, *names: str) -> Path:

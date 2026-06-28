@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import prompt_pointer, state, tmux  # noqa: E402
-from tests._fleet_test_helpers import run_fleet  # noqa: E402
+from tests._fleet_test_helpers import run_fleet, requires_live_tmux  # noqa: E402
 
 
 class LeaderCmdTests(unittest.TestCase):
@@ -50,7 +50,7 @@ class LeaderCmdTests(unittest.TestCase):
 
         self.assertEqual(leader.DEFAULT_SESSION_LABEL, "main")
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_launch_creates_session_and_emits_event(self) -> None:
         r = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -60,7 +60,7 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertTrue(any(e["type"] == "leader_start" for e in events))
         self.assertTrue(any(e.get("label") == self.label for e in events))
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_launch_writes_session_record(self) -> None:
         r = run_fleet("leader", "--name", self.label, "--agent", "claude:opus",
                       fleet_home=self.fleet_home)
@@ -75,7 +75,7 @@ class LeaderCmdTests(unittest.TestCase):
         # Relocated: nothing left under a per-project leader-session.json.
         self.assertFalse((self.fleet_home / "projects").exists())
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_existing_session_is_idempotent(self) -> None:
         r1 = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r1.returncode, 0, r1.stderr)
@@ -83,7 +83,7 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(r2.returncode, 0, r2.stderr)
         self.assertIn("already exists", r2.stdout)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_launch_writes_leader_prompt(self) -> None:
         r = run_fleet("leader", "--name", self.label, "--prompt-delay", "0",
                       fleet_home=self.fleet_home)
@@ -93,7 +93,7 @@ class LeaderCmdTests(unittest.TestCase):
         content = prompt_path.read_text()
         self.assertIn("You are a fleet leader session", content)
 
-    @unittest.skipIf(shutil.which("tmux") is None, "tmux not available")
+    @requires_live_tmux
     def test_custom_label_session(self) -> None:
         label = "test-" + os.urandom(3).hex()
         session = f"fleet-{label}"

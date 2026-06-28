@@ -17,12 +17,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from fleet import tmux  # noqa: E402
+from tests._fleet_test_helpers import requires_live_tmux  # noqa: E402
 
 
 SESSION = "fleet-test-" + os.urandom(3).hex()
 
 
-@unittest.skipIf(not tmux.available(), "tmux not available")
+@requires_live_tmux
 class TmuxTests(unittest.TestCase):
     def setUp(self) -> None:
         if tmux.session_exists(SESSION):

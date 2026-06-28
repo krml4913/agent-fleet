@@ -7,6 +7,18 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### test: make live tmux/leader tests opt-in via `FLEET_LIVE_TMUX`
+
+The live-tmux tests (`tests/test_tmux.py`, `tests/test_attach_cmd.py`,
+`tests/test_send_prompt_cmd.py`, `tests/test_leader_cmd.py`) were gated only on
+"tmux available", so they ran on any developer machine with tmux — creating real
+tmux sessions, and in the leader-launch case spawning a real `claude:opus` CLI
+session. Those sessions leaked onto the machine. The gate is now a shared
+`requires_live_tmux` decorator in `tests/_fleet_test_helpers.py` that skips unless
+`FLEET_LIVE_TMUX=1` is set (and tmux is present). A default `python -m unittest`
+run now creates zero real sessions; run `FLEET_LIVE_TMUX=1 python -m unittest` to
+exercise the live tests. Gating change only — test bodies and cleanup are unchanged.
+
 ### chore: remove the shipped #166 implementation-plan doc
 
 `docs/leader-decouple-plan.md` was the phased migration plan for Issue #166
