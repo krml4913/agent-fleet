@@ -221,6 +221,29 @@ class PeerReviewLoopTests(unittest.TestCase):
         self.assertEqual(updated["stages"][0]["status"], "running")
         self.assertNotEqual(updated["status"], "completed")
 
+    def test_bare_ask_awaiting_orders_does_not_block_review_handoff(self) -> None:
+        task = _make_task(self.sd, "20a", self._make_pr_stage())
+        task["status"] = "awaiting_orders"
+        state.save_task(self.sd, "20a", task)
+
+        with (
+            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            unittest.mock.patch(
+                "fleet.tmux.task_window_names",
+                return_value=["20a·implementer"],
+            ),
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
+        ):
+            orchestrator.advance(self.sd, "20a", task, result="approved")
+
+        updated = state.load_task(self.sd, "20a")
+        pr = updated["stages"][0]["peer_review"]
+        self.assertEqual(updated["status"], "running")
+        self.assertEqual(pr["phase"], "reviewing")
+        self.assertEqual(pr["iteration"], 1)
+        mock_launch.assert_called_once()
+        self.assertEqual(mock_launch.call_args.kwargs["stage"]["role"], "code-reviewer")
+
     # ── reviewer approved → peer_review passed ────────────────────────────
 
     def test_reviewer_approved_marks_peer_review_approved(self) -> None:
@@ -474,6 +497,26 @@ class UserApprovalGateTests(unittest.TestCase):
         self.assertEqual(ua["status"], "asked")
         self.assertEqual(updated["status"], "awaiting_orders")
         # Stage should NOT be done yet
+        self.assertNotEqual(updated["stages"][0]["status"], "done")
+
+    def test_bare_ask_awaiting_orders_allows_user_approval_gate_to_raise(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "30a", stages, formation="solo")
+        task["status"] = "awaiting_orders"
+        state.save_task(self.sd, "30a", task)
+
+        orchestrator.advance(self.sd, "30a", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "30a")
+        self.assertEqual(updated["status"], "awaiting_orders")
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "asked")
         self.assertNotEqual(updated["stages"][0]["status"], "done")
 
     def test_driver_done_cannot_self_approve_asked_gate(self) -> None:
