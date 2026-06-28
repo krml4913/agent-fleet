@@ -40,6 +40,12 @@ agent-fleet uses **trunk-based development** with lightweight milestone tags:
 - **CHANGELOG `## [Unreleased]`** means "merged to `main` but not yet folded into a
   named milestone tag" (since `main` itself is already available). Add one entry per
   change; when a milestone tag is cut, move the entries under `## [X.Y.Z] - <date>`.
+- **CHANGELOG conflicts are auto-resolved.** `CHANGELOG.md` is marked `merge=union`
+  in the repo `.gitattributes`, so when two parallel PRs both append an entry under
+  `## [Unreleased]`, git keeps **both** entries on merge/rebase instead of emitting
+  conflict markers. Keep writing `## [Unreleased]` entries exactly as before — the
+  union driver handles the overlap. Ordering of the two kept entries is not
+  guaranteed, which is fine for `[Unreleased]`.
 
 ## memory (write project knowledge to fleet memory, not your vendor's own)
 

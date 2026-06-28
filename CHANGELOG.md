@@ -7,6 +7,18 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### change: auto-resolve CHANGELOG.md merge conflicts with a union merge driver
+
+Parallel PRs all append an entry under `## [Unreleased]` at the same spot, so any
+two in-flight PRs conflicted there on rebase/merge — pure friction, since the
+entries never actually disagree. A repo-root `.gitattributes` now marks
+`CHANGELOG.md merge=union`, git's built-in union merge driver that keeps **both**
+sides' lines on a 3-way merge instead of emitting conflict markers. Independent
+`[Unreleased]` additions are now preserved automatically with no manual
+resolution and no workflow change — drivers keep writing CHANGELOG entries exactly
+as before. Ordering of the two kept entries is not guaranteed, which is acceptable
+for `[Unreleased]`.
+
 ### change: have implementer and reviewer declare verifiable acceptance criteria before done
 
 The `implementer` and `code-reviewer` role prompts now each instruct the agent to
