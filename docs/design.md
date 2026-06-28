@@ -529,8 +529,38 @@ is captured somewhere. fleet records it **per task**, into the task's own
   **Missing or unparseable usage degrades to an absent `usage` block** rather than
   erroring — a terminal transition never fails on accounting.
 
-The `fleet cost` report command, cost-based routing, budget gates, and live
-aggregation build on this and are out of scope here.
+Cost-based routing, budget gates, and live aggregation build on this and are out
+of scope here. Reading the recorded block back is §5.8.
+
+### 5.8 Reading Recorded Usage Back (Issue #210)
+
+Recording (§5.7) is write-only on its own — the `usage` block sits in `task.yaml`
+until something reads it. This closes the loop: the recorded usage becomes
+**readable on demand** and surfaces as a **read-only column** in the existing
+status / dashboard renders. No new write path, no daemon, no polling (P6/P7) —
+aggregation runs only when `fleet cost` is invoked or when a render already
+happens.
+
+- **Single source of truth = `status_data`.** `status_data.task_usage(task)`
+  normalizes the block to `{input_tokens, output_tokens, total_tokens, cost}`
+  (`cost` is `float` or `None`), and `format_usage_cell` / `task_usage_cell`
+  render the compact `12.3k · ~$0.05` cell — `12.3k · —` when the vendor exposed
+  no cost, `—` when there is no block at all. Every reader goes through these, so
+  the four surfaces stay consistent and never fabricate a cost.
+- **`fleet cost` (alias `fleet usage`).** One on-demand subcommand
+  (`src/fleet/commands/cost.py`) walks every registered project's live **and**
+  archived `task.yaml` usage blocks and aggregates them, grouped by
+  **session / project / vendor / stage** — the vendor and stage are resolved
+  from the terminal stage's agent spec (the same stage §5.7 attributes the
+  recording to). `--json` emits the aggregation for tooling. A task with no
+  usable block contributes nothing; an unreadable project is skipped rather than
+  aborting the report.
+- **Read-only render columns.** `fleet status` (table + `--json`), the per-project
+  `dashboard.md`, and the global HTML dashboard (active task cards + the
+  Completed table) each gain a per-task tokens/approximate-cost column. Because
+  the block is written at the terminal transition, it is populated on completed /
+  archived tasks; in-flight tasks render `—` until they finish. The columns are
+  presentation only — they change no task state and add no write path.
 
 ---
 

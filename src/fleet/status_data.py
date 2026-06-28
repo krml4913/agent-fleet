@@ -137,6 +137,105 @@ def status_severity(status: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Usage / cost derivation (reads the read-only `usage` block Issue #209 records)
+# ---------------------------------------------------------------------------
+
+
+def _as_int(value: object) -> int:
+    """Return ``value`` as a non-negative int, or ``0`` when not a usable int."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    return 0
+
+
+def _as_cost(value: object) -> float | None:
+    """Return ``value`` as a non-negative float cost, or ``None`` when absent.
+
+    Cost is approximate-or-absent: a vendor that did not expose one leaves the
+    field unset, so anything not a usable number degrades to ``None`` — never a
+    fabricated ``0``.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value >= 0 else None
+    return None
+
+
+def task_usage(task: dict) -> dict | None:
+    """Return a task's recorded token usage, normalized, or ``None``.
+
+    Reads the read-only ``usage`` block the recording path (Issue #209) folds
+    into ``task.yaml`` at a terminal transition: ``input_tokens`` /
+    ``output_tokens`` (RAW), plus an optional approximate ``cost``. Returns
+    ``{"input_tokens", "output_tokens", "total_tokens", "cost"}`` where
+    ``cost`` is a ``float`` or ``None`` (the vendor exposed none), or ``None``
+    when there is no usable usage block. Never raises; never fabricates a cost.
+    """
+    usage = task.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    inp = _as_int(usage.get("input_tokens"))
+    out = _as_int(usage.get("output_tokens"))
+    if inp == 0 and out == 0:
+        return None
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": inp + out,
+        "cost": _as_cost(usage.get("cost")),
+    }
+
+
+def humanize_tokens(n: int) -> str:
+    """Compact token count for a narrow column: ``999`` / ``12.3k`` / ``1.20M``."""
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}k"
+    return f"{n / 1_000_000:.2f}M"
+
+
+def format_cost(cost: float | None) -> str:
+    """Approximate-cost label: ``~$0.05`` when present, ``—`` when absent."""
+    if cost is None:
+        return "—"
+    return f"~${cost:.2f}"
+
+
+def format_usage_cell(usage: dict | None) -> str:
+    """Render a normalized usage dict as a compact ``tokens · cost`` cell.
+
+    ``12.3k · ~$0.05`` when cost is present, ``12.3k · —`` when tokens only,
+    ``—`` when there is no usage block. The cost being absent is shown
+    explicitly (``—``) rather than fabricated.
+    """
+    if not usage:
+        return "—"
+    return f"{humanize_tokens(usage['total_tokens'])} · {format_cost(usage.get('cost'))}"
+
+
+def task_usage_cell(task: dict) -> str:
+    """Compact per-task tokens (+ approximate cost) cell, read straight from a task."""
+    return format_usage_cell(task_usage(task))
+
+
+def usage_tooltip(usage: dict | None) -> str:
+    """Exact-breakdown tooltip for a normalized usage dict, or ``""`` when absent."""
+    if not usage:
+        return ""
+    parts = [
+        f"input {usage['input_tokens']:,}",
+        f"output {usage['output_tokens']:,}",
+    ]
+    cost = usage.get("cost")
+    parts.append(f"cost ~${cost:.2f}" if cost is not None else "cost not reported")
+    return " · ".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Session derivation (moved verbatim from commands/sessions.py)
 # ---------------------------------------------------------------------------
 
@@ -257,6 +356,7 @@ def collect_projects() -> list[dict]:
                 "stage": stage_descriptor(t),
                 "last_seen": last_seen.get(tid, "—"),
                 "pr_url": pr_url,
+                "usage": task_usage(t),
             }
             task_views.append(view)
             if s == "awaiting_orders":
@@ -412,6 +512,7 @@ def collect_completed(
                     "formation": str(t.get("formation") or "-"),
                     "completed_ts": completed_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "completed_epoch": int(completed_dt.timestamp()),
+                    "usage": task_usage(t),
                 }
             )
     rows.sort(key=lambda r: r["completed_ts"], reverse=True)

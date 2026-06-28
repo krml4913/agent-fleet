@@ -62,10 +62,55 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("TASKS  1", result.stdout)
+        # Columns: status · formation · stage · tokens · last-seen · title.
+        # No recorded usage → the tokens cell is "—" (the first of the two).
         self.assertIn(
-            "● task-1  pending  -  stage 1/1 (driver, claude:sonnet)  —  do thing",
+            "● task-1  pending  -  stage 1/1 (driver, claude:sonnet)  —  —  do thing",
             result.stdout,
         )
+
+    def test_status_shows_recorded_tokens(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "done thing", "status": "completed",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "done"}],
+            "usage": {"input_tokens": 1000, "output_tokens": 500},
+        })
+        result = run_fleet("status", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Tokens render in the row; cost is absent so it shows "—".
+        self.assertIn("1.5k · —", result.stdout)
+
+    def test_status_json_includes_usage(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "done thing", "status": "completed", "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "done"}],
+            "usage": {"input_tokens": 100, "output_tokens": 20},
+        })
+        result = run_fleet("status", "1", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)
+        self.assertEqual(
+            obj["usage"],
+            {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "cost": None},
+        )
+
+    def test_status_json_usage_null_when_absent(self) -> None:
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "bare", "status": "running", "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        result = run_fleet("status", "1", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)["usage"])
 
     def test_status_task_without_stages_falls_back_to_dash_stage(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
@@ -73,7 +118,7 @@ class StatusCommandTests(unittest.TestCase):
         result = run_fleet("status", "demo",
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("● task-1  pending  -  -  —  legacy thing", result.stdout)
+        self.assertIn("● task-1  pending  -  -  —  —  legacy thing", result.stdout)
 
     def test_status_shows_formation_and_stage_progress(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
@@ -93,7 +138,7 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "● task-1  running  multi_stage  stage 2/3 (driver, codex:gpt-5.5)  —  multi thing",
+            "● task-1  running  multi_stage  stage 2/3 (driver, codex:gpt-5.5)  —  —  multi thing",
             result.stdout,
         )
 
@@ -136,7 +181,7 @@ class StatusCommandTests(unittest.TestCase):
                            fleet_home=self.fleet_home, cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "● task-1  running  solo  stage 1/1 (driver, claude:opus)  —  solo thing",
+            "● task-1  running  solo  stage 1/1 (driver, claude:opus)  —  —  solo thing",
             result.stdout,
         )
 

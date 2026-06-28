@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet.cli import build_parser_agent, build_parser_user  # noqa: E402
 
-USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "sessions", "dashboard", "scope", "log", "formation", "workspace", "rm"}
+USER_COMMANDS = {"init", "preflight", "leader", "attach", "status", "sessions", "cost", "usage", "dashboard", "scope", "log", "formation", "workspace", "rm"}
 AGENT_COMMANDS = {
     "start", "inbox", "inbox-read", "send-prompt", "cleanup", "merge", "ask",
     "event", "approve", "reject", "done", "memory",
@@ -33,9 +33,11 @@ class TestBuildParserUser(unittest.TestCase):
     def test_prog_name(self) -> None:
         self.assertEqual(self.parser.prog, "fleet")
 
-    def test_exposes_exactly_11_commands(self) -> None:
+    def test_exposes_exactly_14_commands(self) -> None:
+        # 12 base commands + the `cost` command's `usage` alias (counted via
+        # the parser's name→subparser map, which lists aliases) = 14.
         names = _subcommand_names(self.parser)
-        self.assertEqual(len(names), 12, f"expected 12 user commands, got {sorted(names)}")
+        self.assertEqual(len(names), 14, f"expected 14 user commands, got {sorted(names)}")
 
     def test_exposes_all_user_commands(self) -> None:
         names = _subcommand_names(self.parser)

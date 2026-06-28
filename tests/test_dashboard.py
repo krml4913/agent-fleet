@@ -51,6 +51,24 @@ class DashboardRenderTests(unittest.TestCase):
         text = dashboard.render(self.sd)
         self.assertIn("worktree", text)
 
+    def test_tokens_column_present(self) -> None:
+        state.save_task(self.sd, "1", {
+            "id": "1", "title": "T", "status": "completed",
+            "agent": "claude:opus",
+            "usage": {"input_tokens": 1000, "output_tokens": 500},
+        })
+        text = dashboard.render(self.sd)
+        self.assertIn("| Tokens |", text)
+        self.assertIn("1.5k · —", text)
+
+    def test_tokens_column_dash_when_absent(self) -> None:
+        state.save_task(self.sd, "1", {
+            "id": "1", "title": "T", "status": "running", "agent": "claude:opus",
+        })
+        text = dashboard.render(self.sd)
+        # Header always present; the cell is "—" with no recorded usage.
+        self.assertIn("| Tokens |", text)
+
     def test_review_loop_position_in_status_cell(self) -> None:
         state.save_task(self.sd, "1", {
             "id": "1", "title": "T", "status": "running",

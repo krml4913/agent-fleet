@@ -488,6 +488,14 @@ def _task_card(
     parts.append(f'<span class="card-label">Formation</span><span class="card-value">{_e(task["formation"])}</span>\n')
     parts.append(f'<span class="card-label">Stage</span><span class="card-value">{_e(_stage_text(task.get("stage")))}</span>\n')
     parts.append(f'<span class="card-label">Last seen</span><span class="card-value">{_e(task["last_seen"])}</span>\n')
+    usage = task.get("usage")
+    usage_cell = status_data.format_usage_cell(usage)
+    usage_tip = status_data.usage_tooltip(usage)
+    usage_attr = f' title="{_attr(usage_tip)}"' if usage_tip else ""
+    parts.append(
+        f'<span class="card-label">Tokens</span>'
+        f'<span class="card-value"{usage_attr}>{_e(usage_cell)}</span>\n'
+    )
     parts.append(f'<span class="card-label">PR</span><span class="card-value">{pr_cell}</span>\n')
     parts.append("</div>\n")
     parts.append("</article>\n")
@@ -593,19 +601,24 @@ def _render_completed(parts: list[str], completed: dict, generated_at: str) -> N
     parts.append("<table class=\"completed-table\">\n")
     parts.append(
         "<tr><th>Completed</th><th>Project</th><th>Status</th>"
-        "<th>Formation</th><th>Title</th></tr>\n"
+        "<th>Formation</th><th>Tokens</th><th>Title</th></tr>\n"
     )
     for r in rows:
         sev = status_data.status_severity(str(r.get("status") or "?"))
         rel, abs_ts = _relative_time(str(r.get("completed_ts") or ""), generated_at)
         disp, full = _clean_title(str(r.get("title") or "-"))
         title_attr = f' title="{_attr(full)}"' if full else ""
+        usage = r.get("usage")
+        usage_cell = status_data.format_usage_cell(usage)
+        usage_tip = status_data.usage_tooltip(usage)
+        usage_attr = f' title="{_attr(usage_tip)}"' if usage_tip else ""
         parts.append(
             f'<tr data-completed-ts="{_attr(r.get("completed_epoch", 0))}">'
             f'<td class="completed-time" title="{_attr(abs_ts)}">{_e(rel)}</td>'
             f'<td>{_e(r.get("project", "?"))}</td>'
             f"<td><span class='{_attr(sev)}'>{_e(r.get('status', '?'))}</span></td>"
             f'<td>{_e(r.get("formation", "-"))}</td>'
+            f'<td{usage_attr}>{_e(usage_cell)}</td>'
             f"<td><span{title_attr}>{_e(disp)}</span></td>"
             f"</tr>\n"
         )
