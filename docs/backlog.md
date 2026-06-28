@@ -5,10 +5,7 @@ Delete items once done (git log and CHANGELOG.md are enough for history).
 
 ## priority
 
-- **Decouple leader from project (Issue #166)** — phased implementation plan in
-  [`leader-decouple-plan.md`](leader-decouple-plan.md). Highest-risk surfaces:
-  notifier routing refactor + leader-prompt assembly change. Delete this item and
-  the plan doc once shipped.
+(empty)
 
 ## someday
 
