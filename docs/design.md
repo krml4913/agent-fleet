@@ -722,7 +722,11 @@ topic over web search/fetch and writes the summary to `outbox.md`; the
 `fact-checker` peer_review independently verifies each claim against its cited
 source before the `user_approval` gate lets the leader deliver it. Both stages
 are `claude:opus` because the work needs web access. Roles are plain prompt files
-under `docs/prompts/roles/` (§10.2); the formation adds no machinery.
+resolved at runtime from `projects/<project>/roles/<role>.md` and then
+`global/roles/<role>.md`; the shipped files under `docs/prompts/roles/` are only
+a seed source for the global tier, not a runtime fallback. A project role
+overrides the global role with the same name, matching the project-over-global
+formation cascade. The formation adds no machinery.
 
 The `scoping` formation moves requirements-definition off the leader: instead of
 the user front-loading "what to build" with the leader before a task is cut, they
@@ -737,7 +741,7 @@ alternatives, "do we even need this?") before the `user_approval` gate confirms
 the Issue captures the agreed requirements. Both stages are `claude:opus` for
 interactive reasoning and repo grounding. Issue creation is the scoper agent's own
 `gh` action, not a fleet mechanism; like `research`, the formation adds no
-machinery beyond the two role files and the template.
+machinery beyond the role files and the template.
 
 Execution order within each stage:
 ```
@@ -815,7 +819,11 @@ cannot silently vanish into a bare solo:
 This lint is scoped to the two gate keys *only*: every other key stays
 unvalidated, so the open schema (no schema language; custom keys allowed) above
 is preserved. `validate()` runs once at `fleet-agent start` (P4), so a botched
-gate aborts the start rather than running ungated.
+gate aborts the start rather than running ungated. Immediately after formation
+schema validation, `fleet-agent start` also resolves every referenced driver and
+peer-review role through the project → global roles cascade. A missing or
+malformed role aborts before stage 0 is created or launched, rather than failing
+later inside `fleet-agent done` when a later stage or reviewer is advanced.
 
 ### 7.5 Formation Resolution
 
