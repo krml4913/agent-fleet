@@ -9,6 +9,7 @@ scattered across ``agents.py`` / ``prompt_deliverer.py`` / the launchers.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 
 class VendorAdapter:
@@ -75,3 +76,23 @@ class VendorAdapter:
         :meth:`session_name_launch_args`).
         """
         return []
+
+    @classmethod
+    def usage_from_session(
+        cls, *, cwd: str | Path, home: Path | None = None
+    ) -> dict | None:
+        """Return RAW token usage for the agent that ran in ``cwd``, or ``None``.
+
+        Read-side only: the adapter parses this vendor's OWN already-written
+        session/usage log at the terminal transition — there is no live stream
+        and no polling. ``cwd`` is the directory the agent ran in (a task's
+        worktree, unique per task); ``home`` overrides the home directory for
+        tests (``None`` means :meth:`Path.home`).
+
+        Returns ``{"input_tokens": int, "output_tokens": int}`` (an optional
+        approximate ``"cost"`` may be added by a vendor that can compute one).
+        The base default returns ``None`` — a vendor that cannot report usage
+        simply contributes nothing rather than erroring, and a missing or
+        unparseable log degrades to ``None`` rather than raising.
+        """
+        return None

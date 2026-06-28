@@ -18,6 +18,25 @@ sides' lines on a 3-way merge instead of emitting conflict markers. Independent
 resolution and no workflow change — drivers keep writing CHANGELOG entries exactly
 as before. Ordering of the two kept entries is not guaranteed, which is acceptable
 for `[Unreleased]`.
+### feat: record per-task token usage via a `VendorAdapter.usage_from_session` seam
+
+Paid drivers (`claude` / `codex`) now leave a token-usage record behind. A new
+`VendorAdapter.usage_from_session(*, cwd, home=None)` classmethod — alongside the
+existing vendor seams — reads each vendor's OWN already-written session log after
+the task finishes (read-side only, no daemon, no polling): claude sums the
+`message.usage` fields across `~/.claude/projects/<escaped-cwd>/*.jsonl` (RAW
+input includes the cache-creation/read tokens claude reports separately); codex
+takes the last cumulative `token_count` total from the matching
+`~/.codex/sessions/**/rollout-*.jsonl`. The base classmethod defaults to `None`,
+so a vendor that cannot report usage simply records nothing rather than erroring.
+
+At the existing terminal transition (orchestrator completion and the
+prompt-deliverer failure path), `state.record_task_usage` resolves the vendor from
+the stage's agent spec and folds a `usage:` block (`input_tokens` /
+`output_tokens`; cost approximate-or-absent) into the task's `task.yaml` via the
+existing `save_task`. Missing or unparseable usage degrades to an absent block —
+a terminal transition never fails on accounting. Tracking only: no cost-based
+routing, budget gates, or live aggregation (those build on this). Closes #209.
 
 ### change: have implementer and reviewer declare verifiable acceptance criteria before done
 

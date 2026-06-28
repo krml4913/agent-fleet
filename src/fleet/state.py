@@ -627,6 +627,42 @@ def save_task(state_dir: Path, task_id: str, data: dict) -> None:
     _maybe_rebuild_dashboard(state_dir)
 
 
+def record_task_usage(
+    task: dict, *, state_dir: Path, task_id: str, home: Path | None = None
+) -> None:
+    """Best-effort: set ``task['usage']`` from the terminal stage's vendor adapter.
+
+    Called by the terminal-transition writers (orchestrator completion and the
+    prompt-deliverer failure path) just before :func:`save_task`, so the RAW
+    token usage lands in the same write. Resolves the vendor from the stage
+    that just ran and asks that adapter to read its OWN already-written session
+    log for the task's working dir (the worktree, unique per task; falling back
+    to the task's state dir when there is no worktree). ``home`` overrides the
+    home directory for tests (``None`` means the adapter uses ``Path.home``).
+
+    Any problem — unknown/unparseable agent spec, no adapter usage, missing or
+    malformed log — leaves ``task['usage']`` unset. A terminal transition must
+    never error on accounting (Issue #209): usage degrades to absent.
+    """
+    try:
+        from . import agents  # local import: keeps state free of the adapter graph
+
+        stages = task.get("stages") or []
+        idx = task.get("current_stage", 0)
+        if not isinstance(idx, int) or not (0 <= idx < len(stages)):
+            return
+        spec = stages[idx].get("agent")
+        if not spec:
+            return
+        cwd = task.get("worktree") or str(task_dir(state_dir, task_id))
+        usage = agents.usage_from_session(spec, cwd=cwd, home=home)
+        if usage:
+            task["usage"] = usage
+    except Exception:
+        # Accounting is best-effort; never let it break a terminal transition.
+        return
+
+
 # ---------------------------------------------------------------------------
 # Stage helpers
 # ---------------------------------------------------------------------------

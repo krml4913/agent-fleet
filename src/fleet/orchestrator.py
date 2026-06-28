@@ -352,6 +352,8 @@ def _mark_stage_done_and_advance(
         task["stages"] = stages
         task["current_stage"] = state_mod.get_current_stage_index(stages)
         task["status"] = "completed"
+        # Terminal transition: record per-task token usage before persisting.
+        state_mod.record_task_usage(task, state_dir=state_dir, task_id=task_id)
         state_mod.save_task(state_dir, task_id, task)
 
 

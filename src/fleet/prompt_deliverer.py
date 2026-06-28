@@ -233,6 +233,8 @@ def _fail(state_dir: Path, task_id: str, message: str, window: str) -> None:
     try:
         task = state_mod.load_task(state_dir, task_id)
         task["status"] = "failed"
+        # Terminal transition: record per-task token usage before persisting.
+        state_mod.record_task_usage(task, state_dir=state_dir, task_id=task_id)
         state_mod.save_task(state_dir, task_id, task)
     except FileNotFoundError:
         pass
