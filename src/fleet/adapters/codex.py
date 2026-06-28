@@ -1,7 +1,9 @@
 """Adapter for OpenAI's ``codex`` CLI."""
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 from .base import VendorAdapter
 
@@ -64,3 +66,85 @@ class CodexAdapter(VendorAdapter):
             (name, False),       # type the new name
             ("", True),          # Enter confirms
         ]
+
+    @classmethod
+    def usage_from_session(
+        cls, *, cwd: str | Path, home: Path | None = None
+    ) -> dict | None:
+        """Sum token usage from codex's rollout logs for ``cwd``.
+
+        codex writes a rollout JSONL per session under
+        ``~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl``. The first line
+        (``session_meta``) records the session's ``cwd``; ``token_count``
+        events carry ``payload.info.total_token_usage`` — a running cumulative
+        total, so the *last* one in a file is that session's grand total
+        (``input_tokens`` already includes its cached subset).
+
+        Rollouts are not grouped by directory, so this scans them and keeps
+        only the ones whose ``cwd`` matches (unique per task), summing each
+        matched file's final total. Returns ``None`` when no matching usage is
+        found; never raises.
+        """
+        base = (home or Path.home()) / ".codex" / "sessions"
+        if not base.is_dir():
+            return None
+        target = str(cwd)
+        input_tokens = 0
+        output_tokens = 0
+        found = False
+        try:
+            rollouts = sorted(base.rglob("rollout-*.jsonl"))
+        except OSError:
+            return None
+        for rollout in rollouts:
+            try:
+                text = rollout.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            file_cwd: str | None = None
+            last_total: dict | None = None
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                payload = record.get("payload") if isinstance(record, dict) else None
+                if not isinstance(payload, dict):
+                    continue
+                if record.get("type") == "session_meta":
+                    file_cwd = payload.get("cwd")
+                elif (
+                    record.get("type") == "event_msg"
+                    and payload.get("type") == "token_count"
+                ):
+                    info = payload.get("info")
+                    total = (
+                        info.get("total_token_usage")
+                        if isinstance(info, dict)
+                        else None
+                    )
+                    if isinstance(total, dict):
+                        last_total = total
+            if file_cwd != target or last_total is None:
+                continue
+            inp = _as_int(last_total.get("input_tokens"))
+            out = _as_int(last_total.get("output_tokens"))
+            if inp or out:
+                found = True
+            input_tokens += inp
+            output_tokens += out
+        if not found:
+            return None
+        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+
+
+def _as_int(value: object) -> int:
+    """Return ``value`` as a non-negative int, or ``0`` when not a usable int."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    return 0

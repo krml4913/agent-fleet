@@ -487,6 +487,51 @@ a dial, the user picks"). It binds to the session rather than a project because
 the session is the context-scope unit, and one project may be served by several
 sessions.
 
+### 5.7 Per-Task Token Usage Recording (Issue #209)
+
+Paid drivers (claude / codex) run with no spend visibility unless their token use
+is captured somewhere. fleet records it **per task**, into the task's own
+`task.yaml`, at the terminal transition — recording only, no daemon, no polling
+(tracking, never routing: no cost-based model selection or budget gates).
+
+- **Seam = the vendor adapter.** Token accounting is vendor-specific in exactly
+  the same way the launch command is, so it lives where the other vendor seams do:
+  a `VendorAdapter.usage_from_session(*, cwd, home=None)` classmethod (§ adapter
+  registry, `src/fleet/adapters/`). It **defaults to `None`** — a vendor that
+  cannot report usage contributes nothing rather than erroring — and `claude` /
+  `codex` override it. Adding a vendor stays "one file plus one registry line".
+- **Read-side only, after the task finishes.** Each adapter parses its OWN
+  already-written session log (no live stream): claude sums the `message.usage`
+  token fields across its session JSONL under
+  `~/.claude/projects/<escaped-cwd>/*.jsonl` (RAW input = `input_tokens` +
+  cache-creation + cache-read, since claude reports input excluding cache); codex
+  takes the last cumulative `token_count` total from each
+  `~/.codex/sessions/**/rollout-*.jsonl` whose recorded `cwd` matches. The working
+  dir (the task's worktree, unique per task) is the attribution key. Reading
+  home-dir vendor logs mirrors fleet's existing posture (e.g. reading
+  `~/.codex/config.toml`); fleet never writes its state into the home dir — usage
+  lands in `task.yaml` only.
+- **Recorded at the existing terminal transition.** `state.record_task_usage`
+  resolves the vendor from the terminal stage's agent spec and folds the result
+  into `task.yaml` via the existing `save_task`, called by the two terminal
+  writers — orchestrator completion (`_mark_stage_done_and_advance`) and the
+  prompt-deliverer failure path. The block is:
+
+  ```yaml
+  usage:
+    input_tokens: <int>
+    output_tokens: <int>
+    cost: <float?>   # optional, approximate-or-absent
+  ```
+
+  RAW tokens are always recorded when available; cost is approximate-or-absent
+  (fleet computes none here, avoiding a per-model pricing/allowlist treadmill).
+  **Missing or unparseable usage degrades to an absent `usage` block** rather than
+  erroring — a terminal transition never fails on accounting.
+
+The `fleet cost` report command, cost-based routing, budget gates, and live
+aggregation build on this and are out of scope here.
+
 ---
 
 ## 6. Fleet Memory

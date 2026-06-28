@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from .adapters import REGISTRY
 
@@ -66,6 +67,19 @@ def session_rename_keys(spec: str, name: str) -> list[tuple[str, bool]]:
     """
     vendor, _model = parse_spec(spec)
     return REGISTRY[vendor].session_rename_keys(name)
+
+
+def usage_from_session(
+    spec: str, *, cwd, home: Path | None = None
+) -> dict[str, Any] | None:
+    """RAW token usage for the agent ``spec`` that ran in ``cwd``, or ``None``.
+
+    Bridges to the vendor adapter (parallel to :func:`cli_command`). The
+    adapter reads its own already-written session log; ``None`` means the
+    vendor reported nothing (no implementation, or a missing/unparseable log).
+    """
+    vendor, _model = parse_spec(spec)
+    return REGISTRY[vendor].usage_from_session(cwd=cwd, home=home)
 
 
 def codex_repo_trusted(repo_root, *, config_path=None) -> bool:
