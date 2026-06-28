@@ -7,6 +7,17 @@ tagged version when released. Older entries are grouped by development **Phase**
 
 ## [Unreleased]
 
+### chore: remove the shipped #166 implementation-plan doc
+
+`docs/leader-decouple-plan.md` was the phased migration plan for Issue #166
+(decouple leader from project — session as the context-scope unit). Its own header
+said to delete the file once the work shipped, leaving `git log` / `CHANGELOG.md`
+as the history. #166 is closed and shipped (`fleet-state/global/sessions/`,
+`owner_session` on tasks, and the `fleet sessions` command all exist), so the
+delete condition is met. Removed the doc and its now-stale pointer in
+`docs/backlog.md`. Doc-only, no code change. The earlier `[Unreleased]`-era
+CHANGELOG entries that reference the plan by name are left intact as history.
+
 ### feat: read recorded usage back — `fleet cost` and token columns in status/dashboard
 
 The usage-recording change left a per-task `usage` block in `task.yaml`, but
