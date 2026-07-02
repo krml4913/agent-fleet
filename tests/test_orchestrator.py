@@ -1,6 +1,8 @@
 """Tests for :mod:`fleet.orchestrator`."""
 from __future__ import annotations
 
+import shlex
+import subprocess
 import sys
 import unittest
 import unittest.mock
@@ -745,6 +747,254 @@ class UserApprovalGateTests(unittest.TestCase):
         orchestrator.approve_user_approval(self.sd, "34", task, dry_run=True)
         task = state.load_task(self.sd, "34")
         self.assertEqual(task["stages"][0]["user_approval"]["status"], "approved")
+
+
+class VerifyGateTests(unittest.TestCase):
+    """Tests for the verify gate that runs before downstream stage gates."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.project = Path(self._tmp.name) / "proj"
+        self.project.mkdir()
+        self.sd = self.project / ".fleet-state"
+        state.init_state(self.sd, name="demo", repo=self.project)
+        (self.sd / "roles" / "code-reviewer.md").write_text(
+            "project reviewer role\n", encoding="utf-8"
+        )
+        (self.sd / "notify.yaml").write_text(
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+        )
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _python(self, code: str) -> str:
+        return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+    def test_verify_pass_advances_to_user_approval(self) -> None:
+        command = self._python("from pathlib import Path; Path('verified.txt').write_text('ok')")
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "v1", stages, formation="solo")
+
+        orchestrator.advance(self.sd, "v1", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "v1")
+        self.assertTrue((self.project / "verified.txt").exists())
+        self.assertTrue(updated["stages"][0]["verify"]["passed"])
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "asked")
+        self.assertEqual(updated["status"], "awaiting_orders")
+
+    def test_verify_failure_bounces_with_head_tail_output(self) -> None:
+        command = self._python(
+            "import sys; print('HEAD'); print('x' * 13000); print('TAIL'); sys.exit(7)"
+        )
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command, "max_iterations": 3},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "v2", stages, formation="solo")
+
+        orchestrator.advance(self.sd, "v2", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "v2")
+        self.assertEqual(updated["status"], "running")
+        self.assertEqual(updated["stages"][0]["verify"]["iteration"], 2)
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "pending")
+        inbox = (state.task_dir(self.sd, "v2") / "inbox.md").read_text(encoding="utf-8")
+        self.assertIn("HEAD", inbox)
+        self.assertIn("TAIL", inbox)
+        self.assertIn("exited 7", inbox)
+        self.assertIn("truncated", inbox)
+
+    def test_peer_review_launches_only_after_verify_passes(self) -> None:
+        marker = self.project / "allow"
+        command = self._python(
+            "from pathlib import Path; import sys; "
+            "sys.exit(0 if Path('allow').exists() else 9)"
+        )
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+                "peer_review": {"role": "code-reviewer"},
+            }
+        ]
+        task = _make_task(self.sd, "v3", stages)
+
+        orchestrator.advance(self.sd, "v3", task, result="approved", dry_run=True)
+        failed = state.load_task(self.sd, "v3")
+        self.assertNotIn("phase", failed["stages"][0]["peer_review"])
+
+        marker.write_text("ok", encoding="utf-8")
+        orchestrator.advance(self.sd, "v3", failed, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "v3")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "reviewing")
+        self.assertTrue(updated["stages"][0]["verify"]["passed"])
+
+    def test_peer_review_rework_reruns_verify(self) -> None:
+        command = self._python(
+            "from pathlib import Path; "
+            "p=Path('verify-count.txt'); "
+            "n=int(p.read_text() or '0') if p.exists() else 0; "
+            "p.write_text(str(n+1))"
+        )
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+                "peer_review": {"role": "code-reviewer"},
+            }
+        ]
+        task = _make_task(self.sd, "v4", stages)
+
+        orchestrator.advance(self.sd, "v4", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "v4")
+        orchestrator.advance(self.sd, "v4", task, result="changes-requested", dry_run=True)
+        task = state.load_task(self.sd, "v4")
+        self.assertFalse(task["stages"][0]["verify"]["passed"])
+        orchestrator.advance(self.sd, "v4", task, result="approved", dry_run=True)
+
+        self.assertEqual((self.project / "verify-count.txt").read_text(), "2")
+        updated = state.load_task(self.sd, "v4")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "reviewing")
+
+    def test_user_rejection_reruns_verify_before_next_review(self) -> None:
+        command = self._python(
+            "from pathlib import Path; "
+            "p=Path('approval-count.txt'); "
+            "n=int(p.read_text() or '0') if p.exists() else 0; "
+            "p.write_text(str(n+1))"
+        )
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+                "peer_review": {"role": "code-reviewer"},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "v5", stages)
+
+        orchestrator.advance(self.sd, "v5", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "v5")
+        orchestrator.advance(self.sd, "v5", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "v5")
+        self.assertEqual(task["status"], "awaiting_orders")
+
+        orchestrator.reject_user_approval(self.sd, "v5", task, dry_run=True)
+        task = state.load_task(self.sd, "v5")
+        self.assertFalse(task["stages"][0]["verify"]["passed"])
+        orchestrator.advance(self.sd, "v5", task, result="approved", dry_run=True)
+
+        self.assertEqual((self.project / "approval-count.txt").read_text(), "2")
+        updated = state.load_task(self.sd, "v5")
+        self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "reviewing")
+
+    def test_verify_timeout_uses_default_and_bounces(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": "slow-check"},
+            }
+        ]
+        task = _make_task(self.sd, "v6", stages, formation="solo")
+
+        with unittest.mock.patch(
+            "fleet.orchestrator.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("slow-check", 600, output="partial"),
+        ) as mock_run:
+            orchestrator.advance(self.sd, "v6", task, result="approved", dry_run=True)
+
+        self.assertEqual(mock_run.call_args.kwargs["timeout"], 600)
+        updated = state.load_task(self.sd, "v6")
+        self.assertEqual(updated["status"], "running")
+        self.assertEqual(updated["stages"][0]["verify"]["iteration"], 2)
+        inbox = (state.task_dir(self.sd, "v6") / "inbox.md").read_text(encoding="utf-8")
+        self.assertIn("timed out", inbox)
+        self.assertIn("partial", inbox)
+
+    def test_verify_max_iterations_escalates(self) -> None:
+        command = self._python("import sys; print('nope'); sys.exit(1)")
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command, "max_iterations": 2},
+            }
+        ]
+        task = _make_task(self.sd, "v7", stages, formation="solo")
+
+        orchestrator.advance(self.sd, "v7", task, result="approved", dry_run=True)
+        task = state.load_task(self.sd, "v7")
+        orchestrator.advance(self.sd, "v7", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "v7")
+        self.assertEqual(updated["status"], "awaiting_orders")
+        self.assertTrue(updated["stages"][0]["verify"]["escalated"])
+        qpath = state.task_dir(self.sd, "v7") / "questions.md"
+        self.assertIn("verify", qpath.read_text())
+        self.assertIn("maximum 2 iterations", qpath.read_text())
+
+    def test_workspace_none_runs_verify_in_project_root(self) -> None:
+        command = self._python("from pathlib import Path; Path('root-cwd.txt').write_text('root')")
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+            }
+        ]
+        task = _make_task(self.sd, "v8", stages, formation="solo")
+
+        orchestrator.advance(self.sd, "v8", task, result="approved", dry_run=True)
+
+        self.assertTrue((self.project / "root-cwd.txt").exists())
+
+    def test_workspace_worktree_runs_verify_in_worktree(self) -> None:
+        worktree = Path(self._tmp.name) / "task-worktree"
+        worktree.mkdir()
+        command = self._python("from pathlib import Path; Path('worktree-cwd.txt').write_text('wt')")
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command},
+            }
+        ]
+        task = _make_task(self.sd, "v9", stages, formation="solo")
+        task["workspace"] = "worktree"
+        task["worktree"] = str(worktree)
+        state.save_task(self.sd, "v9", task)
+
+        orchestrator.advance(self.sd, "v9", task, result="approved", dry_run=True)
+
+        self.assertTrue((worktree / "worktree-cwd.txt").exists())
+        self.assertFalse((self.project / "worktree-cwd.txt").exists())
 
 
 class WindowCwdTests(unittest.TestCase):

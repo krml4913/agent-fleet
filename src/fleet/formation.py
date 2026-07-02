@@ -236,7 +236,7 @@ def expand_stages(formation_data: dict[str, Any]) -> list[dict[str, Any]]:
 # Safety-boundary gate keys (design P8). These are the only keys whose silent
 # loss is dangerous, so they are the only keys ``validate`` lints for typos —
 # keeping the schema open (§7.4: custom keys are still allowed everywhere else).
-_GATE_KEYS = ("user_approval", "peer_review")
+_GATE_KEYS = ("user_approval", "peer_review", "verify")
 
 
 def validate(data: dict[str, Any]) -> None:
@@ -252,8 +252,9 @@ def validate(data: dict[str, Any]) -> None:
       * a present ``user_approval`` must be the string ``"required"`` /
         ``"optional"`` or an object carrying a bool ``required``;
       * a present ``peer_review`` must be an object carrying ``role``;
+      * a present ``verify`` must be an object carrying ``command``;
       * a stage key that is a near-miss misspelling of a gate key
-        (``user_approval`` / ``peer_review``) is rejected — a typo would
+        (``user_approval`` / ``peer_review`` / ``verify``) is rejected — a typo would
         otherwise drop the gate without a word.
     """
     if not isinstance(data, dict):
@@ -335,6 +336,29 @@ def _validate_stage_gates(idx: int, stage: dict[str, Any]) -> None:
                 f"positive integer, got {max_iterations!r}"
             )
 
+    verify = stage.get("verify")
+    if verify is not None:
+        if not isinstance(verify, dict):
+            raise ValueError(
+                f"formation stages[{idx}] verify must be an object with "
+                f"'command', got {type(verify).__name__}"
+            )
+        command = verify.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError(
+                f"formation stages[{idx}] verify must carry a non-empty "
+                f"'command' string"
+            )
+        for field in ("timeout", "max_iterations"):
+            value = verify.get(field)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ValueError(
+                    f"formation stages[{idx}] verify.{field} must be a "
+                    f"positive integer, got {value!r}"
+                )
+
 
 def _near_miss_gate_key(key: str) -> str | None:
     """Return the gate key ``key`` looks like a typo of, or ``None``.
@@ -342,8 +366,8 @@ def _near_miss_gate_key(key: str) -> str | None:
     Fires only for a key that is *not* an exact gate key but is a close
     misspelling — a case-only difference or an edit distance of at most 2 from
     a gate key. Scoped to ``_GATE_KEYS`` so the open schema (§7.4) holds for
-    every other key. The gate keys are 11+ characters, so an unrelated custom
-    key practically never lands within 2 edits.
+    every other key. Short gate keys use a tighter distance so unrelated custom
+    keys such as ``very`` do not false-flag against ``verify``.
     """
     if not isinstance(key, str) or key in _GATE_KEYS:
         return None
@@ -351,6 +375,10 @@ def _near_miss_gate_key(key: str) -> str | None:
     for gate in _GATE_KEYS:
         if lowered == gate:
             return gate  # case-only difference, e.g. ``User_Approval``
+        if len(gate) < 8:
+            if _edit_distance(lowered, gate) <= 1:
+                return gate
+            continue
         if _edit_distance(lowered, gate) <= 2:
             return gate
     return None
