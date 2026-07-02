@@ -24,6 +24,7 @@ from .commands import cleanup as cleanup_cmd
 from .commands import cost as cost_cmd
 from .commands import dashboard as dashboard_cmd
 from .commands import done as done_cmd
+from .commands import edit as edit_cmd
 from .commands import event as event_cmd
 from .commands import inbox as inbox_cmd
 from .commands import inbox_read as inbox_read_cmd
@@ -62,6 +63,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     sessions_cmd.add_parser(sub)
     cost_cmd.add_parser(sub)
     dashboard_cmd.add_parser(sub)
+    edit_cmd.add_parser(sub)
     scope_cmd.add_parser(sub)
     log_cmd.add_parser(sub)
     changelog_cmd.add_parser(sub)

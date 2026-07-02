@@ -253,12 +253,15 @@ def validate(data: dict[str, Any]) -> None:
         ``"optional"`` or an object carrying a bool ``required``;
       * a present ``peer_review`` must be an object carrying ``role``;
       * a present ``verify`` must be an object carrying ``command``;
+      * top-level gate keys and near-miss misspellings are rejected, because
+        gates only take effect inside stages;
       * a stage key that is a near-miss misspelling of a gate key
         (``user_approval`` / ``peer_review`` / ``verify``) is rejected — a typo would
         otherwise drop the gate without a word.
     """
     if not isinstance(data, dict):
         raise ValueError("formation must be a YAML mapping at the top level")
+    _validate_top_level_gates(data)
     if "name" not in data or not data["name"]:
         raise ValueError("formation missing required field: name")
     if "stages" not in data:
@@ -274,6 +277,24 @@ def validate(data: dict[str, Any]) -> None:
         if "role" not in stage:
             raise ValueError(f"formation stages[{i}] missing required field: role")
         _validate_stage_gates(i, stage)
+
+
+def _validate_top_level_gates(data: dict[str, Any]) -> None:
+    """Reject misplaced or misspelled safety gates at formation top level."""
+    for key in data:
+        if key in _GATE_KEYS:
+            raise ValueError(
+                f"formation top-level key {key!r} is a safety gate, but gates "
+                f"only take effect inside stages; move it under a stage or "
+                f"remove it."
+            )
+        gate = _near_miss_gate_key(key)
+        if gate is not None:
+            raise ValueError(
+                f"formation top-level key {key!r} looks like a misspelling of "
+                f"the {gate!r} gate, but gates only take effect inside stages; "
+                f"move it under a stage as {gate!r} or remove it."
+            )
 
 
 def _validate_stage_gates(idx: int, stage: dict[str, Any]) -> None:

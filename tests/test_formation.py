@@ -461,6 +461,26 @@ class FormationTemplateTests(unittest.TestCase):
                 "stages": [{"role": "driver", "User_Approval": "required"}],
             })
 
+    def test_validate_rejects_top_level_gate_key(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            formation.validate({
+                "name": "x",
+                "user_approval": "required",
+                "stages": [{"role": "driver"}],
+            })
+        self.assertIn("top-level", str(ctx.exception))
+        self.assertIn("user_approval", str(ctx.exception))
+
+    def test_validate_rejects_top_level_gate_near_miss(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            formation.validate({
+                "name": "x",
+                "peer_reveiw": {"role": "reviewer"},
+                "stages": [{"role": "driver"}],
+            })
+        self.assertIn("top-level", str(ctx.exception))
+        self.assertIn("peer_review", str(ctx.exception))
+
     def test_validate_rejects_user_approval_wrong_string(self) -> None:
         with self.assertRaises(ValueError):
             formation.validate({

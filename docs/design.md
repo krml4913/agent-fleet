@@ -263,6 +263,8 @@ fleet leader                             # one project-agnostic session, tmux fl
 fleet leader --name migration            # a second session for a workstream
 fleet sessions                           # live leader sessions + their in-flight tasks
 fleet status --all                       # cross-project task summary
+fleet edit --project image-gallery       # transient localhost config editor
+fleet edit --project image-gallery --no-browser  # print URL only
 # inside a leader session, every dispatch names its project:
 #   fleet-agent start <id> --project image-gallery --formation <name>
 ```
@@ -423,6 +425,35 @@ interval.
   is the cross-project GUI view.
 - `global/dashboard.html` is in `fleet-state/` which is already `.gitignore`d —
   never committed.
+
+**Config editor** (`fleet edit`) — accepted boundary exception (Issue #242):
+- `fleet edit [--project <name>] [--no-browser]` starts an explicit,
+  foreground-only, transient HTTP server bound to `127.0.0.1:<ephemeral>` and
+  exits on Ctrl-C or the UI's Done button. This is a deliberate, user-approved
+  departure from the strict static-HTML / zero-server rule used by the
+  dashboard: write-back from a cross-browser UI needs a request receiver, but
+  the process is never a daemon and files remain authoritative.
+- Every request is gated by a per-run token and exact `Host` match. The printed
+  URL bootstraps the browser with `?token=...`; the vanilla JS client sends
+  `X-Fleet-Token` for API requests. Responses are `Cache-Control: no-store` and
+  `Referrer-Policy: no-referrer`, and the server sends no CORS headers.
+- The editor covers runtime formations and roles only. It displays the
+  project/global cascade plus shipped seeds, marks the winning and shadowed
+  runtime tiers, shows per-file validation state, and flags global files that
+  differ byte-wise from their shipped seed.
+- Formation saves validate by parsing the posted YAML and calling the same
+  shared runtime checks (`formation.validate`, gate near-miss lint, and
+  role-resolution validation). Validation gates writes but never gates loading,
+  so broken files can still be opened and repaired. Missing role prompt files
+  are warnings in the editor and remain hard failures at start time.
+- Saves write the posted text, not a re-serialized YAML object, so comments and
+  custom keys are preserved. Browser textareas normalize line endings, so CRLF
+  files are rewritten as LF on first save. Stale buffers are rejected by content
+  hash, and successful writes use a temp file plus `os.replace`.
+- Create supports new blank files, seed-from-shipped, and copy-down from global
+  to project. Names must match `[A-Za-z0-9_-]+`; formation filenames derive
+  from the `name` field and saves reject `name` values that differ from the
+  filename stem. Delete remains manual and out of scope.
 
 ### 5.6 Session = Context-Scope Unit
 

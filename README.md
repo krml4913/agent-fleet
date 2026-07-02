@@ -230,6 +230,7 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet status [name] [--all] [--unscoped] [--events N]` | Print project info, task list, recent events. With `--all`, filters to the session's scope by default; `--unscoped` shows all projects. |
 | `fleet sessions` | List leader sessions and their in-flight tasks across all projects. |
 | `fleet dashboard [--no-open]` | Render & open the cross-project HTML dashboard (`fleet-state/global/dashboard.html`). |
+| `fleet edit [--project P] [--no-browser]` | Open a transient localhost editor for runtime formations and roles. |
 | `fleet scope [label] [--set/--add/--rm/--clear]` | View or edit the set of projects a leader session is responsible for. |
 | `fleet log [task_id] [-n N] [--type T]` | Tail `events.jsonl`, optionally filtered by task / type. |
 | `fleet formation list \| show <name>` | Inspect runtime formations and template seed sources. |

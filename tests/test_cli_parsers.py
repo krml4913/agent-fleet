@@ -13,7 +13,7 @@ from fleet.cli import build_parser_agent, build_parser_user  # noqa: E402
 
 USER_COMMANDS = {
     "init", "preflight", "leader", "attach", "status", "sessions", "cost",
-    "usage", "dashboard", "scope", "log", "changelog", "formation",
+    "usage", "dashboard", "edit", "scope", "log", "changelog", "formation",
     "workspace", "rm",
 }
 AGENT_COMMANDS = {
@@ -37,11 +37,11 @@ class TestBuildParserUser(unittest.TestCase):
     def test_prog_name(self) -> None:
         self.assertEqual(self.parser.prog, "fleet")
 
-    def test_exposes_exactly_15_commands(self) -> None:
-        # 14 base commands + the `cost` command's `usage` alias (counted via
-        # the parser's name->subparser map, which lists aliases) = 15.
+    def test_exposes_exactly_16_commands(self) -> None:
+        # 15 base commands + the `cost` command's `usage` alias (counted via
+        # the parser's name->subparser map, which lists aliases) = 16.
         names = _subcommand_names(self.parser)
-        self.assertEqual(len(names), 15, f"expected 15 user commands, got {sorted(names)}")
+        self.assertEqual(len(names), 16, f"expected 16 user commands, got {sorted(names)}")
 
     def test_exposes_all_user_commands(self) -> None:
         names = _subcommand_names(self.parser)
