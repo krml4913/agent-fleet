@@ -51,8 +51,9 @@ the same file.
 |---|---|---|---|
 | `role` | yes | string | The driver's role name (e.g. `driver`, `implementer`, `designer`, `code-reviewer`). |
 | `agent` | optional | string | Agent to launch (e.g. `claude:sonnet`). Falls back to the value passed via `--agent`. |
-| `peer_review` | optional | mapping | Nested AI review block (§2.5). |
-| `user_approval` | optional | string \| mapping | Human approval gate (§2.6). |
+| `verify` | optional | mapping | Project-declared command gate (§2.5). |
+| `peer_review` | optional | mapping | Nested AI review block (§2.6). |
+| `user_approval` | optional | string \| mapping | Human approval gate (§2.7). |
 
 ### 2.3 `role` values
 
@@ -86,10 +87,41 @@ Resolution order (`fleet-agent start`):
 2. Otherwise use the value from `--agent`.
 3. Otherwise error: `no agent for role <role>; pass --agent or set one in the formation`.
 
-`peer_review.agent` follows a different fallback chain (§2.5):
+`peer_review.agent` follows a different fallback chain (§2.6):
 **`peer_review.agent` → the stage's `agent` → `claude:sonnet`**.
 
-### 2.5 `peer_review` (nested AI review)
+### 2.5 `verify` (mechanical check gate)
+
+```yaml
+verify:
+  command: "ruff check && python -m unittest discover tests"  # required
+  timeout: 900          # optional, seconds; default 600
+  max_iterations: 3     # optional; default 3
+```
+
+Execution order inside a stage:
+
+```
+implement → verify → peer_review loop → user_approval gate → stage done
+```
+
+- `verify` is opt-in by presence of the block. Fleet never invents a default command.
+- The command is one shell string. Compose multiple checks with normal shell
+  operators such as `&&`; there is no list syntax.
+- On the implementer's `fleet-agent done --result approved`, fleet runs the
+  command synchronously before launching a reviewer or raising user approval.
+- Exit 0 marks verify passed for that implementation turn and advances to the
+  next gate. Non-zero exit or timeout returns to the implementer with
+  stdout+stderr captured in `inbox.md` using head+tail truncation.
+- The passed marker resets when the stage returns to implementation, including
+  peer-review rework and user-approval rejection.
+- Exceeding `max_iterations` moves the task to `awaiting_orders` and notifies
+  the user.
+- Fleet only gates on the exit code; it does not parse or interpret output.
+- With `workspace: worktree`, the command runs in the task worktree. With
+  `workspace: none`, it runs in the project root.
+
+### 2.6 `peer_review` (nested AI review)
 
 ```yaml
 peer_review:
@@ -112,7 +144,7 @@ Within a stage, both the implementer and reviewer agent panes are **kept
 alive** across iterations (`design.md` §7). This preserves the agent's
 context between rounds.
 
-### 2.6 `user_approval` (human approval gate)
+### 2.7 `user_approval` (human approval gate)
 
 Two equivalent forms:
 
@@ -284,6 +316,25 @@ If `peer_review.agent` is omitted, it falls back to the stage's `agent`, then
 to `claude:sonnet` — which may not match the vendor you want for review. When
 the vendors should differ, set it explicitly.
 
+### 4.6 Add or change a `verify` command
+
+```yaml
+- role: implementer
+  agent: codex:gpt-5.5
+  verify:
+    command: "ruff check && python -m unittest discover tests"
+    timeout: 900
+    max_iterations: 3
+  peer_review:
+    role: code-reviewer
+    agent: claude:opus
+  user_approval: required
+```
+
+Use the command your project already trusts locally. Keep it as one shell string
+and let the shell compose multiple tools. Do not put `verify` in `project.yaml`;
+it is a per-stage formation block.
+
 ---
 
 ## 5. Validation and behavior
@@ -299,10 +350,10 @@ the vendors should differ, set it explicitly.
 - Top level has `stages`, a list with at least one entry.
 - Each stage is a mapping and has a `role` field.
 
-Stricter gate checks — `peer_review` structure and `user_approval` shape — are
-also validated by `formation.validate()` so approval/review boundaries cannot
-silently disappear through a typo (`design.md` §7.4). Agent parseability is
-checked when the task starts.
+Stricter gate checks — `verify` structure, `peer_review` structure, and
+`user_approval` shape — are also validated by `formation.validate()` so
+approval/review/check boundaries cannot silently disappear through a typo
+(`design.md` §7.4). Agent parseability is checked when the task starts.
 
 ### 5.3 Possible errors
 
@@ -315,6 +366,7 @@ checked when the task starts.
 | missing `name` | `formation missing required field: name` |
 | missing / empty `stages` | `formation 'stages' must be a non-empty list` |
 | stage missing `role` | `formation stages[i] missing required field: role` |
+| malformed `verify` | `formation stages[i] verify must carry a non-empty 'command' string`, or a positive-integer error for `timeout` / `max_iterations` |
 | bad `agent` spec | At runtime: `unsupported vendor` or `agent spec must be 'vendor:model'`. |
 | unsupported vendor (e.g. `openai:gpt-4`) | `unsupported vendor 'openai'; supported: ['claude', 'codex']` |
 

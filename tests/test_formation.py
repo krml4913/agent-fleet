@@ -445,6 +445,15 @@ class FormationTemplateTests(unittest.TestCase):
             })
         self.assertIn("peer_review", str(ctx.exception))
 
+    def test_validate_rejects_verify_typo(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "verfy": {"command": "python -m unittest"}}],
+            })
+        self.assertIn("verify", str(ctx.exception))
+
     def test_validate_rejects_gate_key_case_typo(self) -> None:
         with self.assertRaises(ValueError):
             formation.validate({
@@ -529,6 +538,29 @@ class FormationTemplateTests(unittest.TestCase):
                             "peer_review": {"role": "r", "max_iterations": True}}],
             })
 
+    def test_validate_rejects_verify_missing_command(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer", "verify": {"timeout": 30}}],
+            })
+
+    def test_validate_rejects_verify_bad_timeout(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "verify": {"command": "pytest", "timeout": 0}}],
+            })
+
+    def test_validate_rejects_verify_bad_max_iterations(self) -> None:
+        with self.assertRaises(ValueError):
+            formation.validate({
+                "name": "x",
+                "stages": [{"role": "implementer",
+                            "verify": {"command": "pytest", "max_iterations": True}}],
+            })
+
     def test_validate_accepts_valid_gates(self) -> None:
         # String shorthand, object form, and a valid peer_review all pass.
         formation.validate({
@@ -537,7 +569,9 @@ class FormationTemplateTests(unittest.TestCase):
                 {"role": "designer", "user_approval": "required"},
                 {"role": "implementer",
                  "user_approval": {"required": True},
-                 "peer_review": {"role": "code-reviewer", "agent": "claude:opus"}},
+                 "peer_review": {"role": "code-reviewer", "agent": "claude:opus"},
+                 "verify": {"command": "python -m unittest", "timeout": 900,
+                            "max_iterations": 5}},
             ],
         })
 
@@ -545,7 +579,8 @@ class FormationTemplateTests(unittest.TestCase):
         # Open schema (§7.4): custom keys far from the gate keys are untouched.
         formation.validate({
             "name": "x",
-            "stages": [{"role": "driver", "priority": "high", "review": "later"}],
+            "stages": [{"role": "driver", "priority": "high", "review": "later",
+                        "very": "custom"}],
         })
 
 

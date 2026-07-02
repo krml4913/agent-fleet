@@ -662,6 +662,8 @@ procedure / staleness countermeasures) live in the memory directory's
 - **No count** (the leader decides on dynamic parallel launch as needed)
 - Can express **user_approval** (human approval points made explicit via a
   stage attribute)
+- Can express **verify** (a project-declared command whose exit code gates the
+  implementer's `done`)
 
 ### 7.2 Formation Examples
 
@@ -678,6 +680,10 @@ name: pair_review
 stages:
   - role: implementer
     agent: codex:gpt-5.5
+    verify:
+      command: "python -m unittest discover tests"
+      timeout: 600
+      max_iterations: 3
     peer_review:
       role: code-reviewer
       agent: claude:opus
@@ -746,8 +752,18 @@ machinery beyond the role files and the template.
 
 Execution order within each stage:
 ```
-implement → peer_review (AI review loop, max 3 times) → user_approval → stage complete
+implement → verify (if present) → peer_review (AI review loop, max 3 times) → user_approval → stage complete
 ```
+
+`verify` is optional and declared per stage. When present, the implementer's
+`fleet-agent done --result approved` runs the command synchronously in the task
+work tree (`workspace: worktree`) or project root (`workspace: none`) before any
+reviewer or approval gate is reached. Exit code 0 marks the verify gate passed
+for the current implementation turn. A non-zero exit or timeout bounces the
+stage back to the implementer with captured stdout+stderr in the inbox; output is
+truncated head+tail and never parsed. The passed marker resets whenever work
+returns to the implementer, including peer-review rework and user rejection.
+Exceeding `verify.max_iterations` parks the task at `awaiting_orders`.
 
 In a stage with peer_review, the implementer's and reviewer's agent CLIs are
 kept running for the duration of the stage. Only the first reviewer is launched
@@ -761,15 +777,23 @@ cross-stage advance launches the next stage's driver fresh.
 
 - When `fleet-agent done --result approved|changes-requested` is called,
   `orchestrator.advance()` decides what comes next.
-- approved: on the driver / reviewer's completion, it decides the next state
-  for peer_review / user_approval. A peer_review handoff wakes a live pane via
-  an inbox notification if present, otherwise launches that role for the first
-  time. If there is no user_approval, it marks the current stage done and
-  launches the next stage (task completed if there is no next stage).
+- approved: on the implementer's completion, a stage-level `verify` block runs
+  first if present and not already passed for this implementation turn. Exit 0
+  falls through; non-zero or timeout returns to the implementer. After verify
+  passes, the orchestrator decides the next state for peer_review /
+  user_approval. A peer_review handoff wakes a live pane via an inbox
+  notification if present, otherwise launches that role for the first time. If
+  there is no user_approval, it marks the current stage done and launches the
+  next stage (task completed if there is no next stage).
 - changes-requested: loops according to the peer_review phase. When sending
   back to the implementer, it injects an inbox notification into the existing
-  implementer pane rather than relaunching.
+  implementer pane rather than relaunching. The verify-passed marker resets, so
+  the next implementer `done` re-runs the command before another review.
+- When user approval is rejected, the stage returns to implementation and the
+  verify-passed marker resets before the next review or approval attempt.
 - When the peer_review cap (3) is exceeded, task.status changes to
+  `awaiting_orders` and the user is notified.
+- When the verify cap (default 3) is exceeded, task.status changes to
   `awaiting_orders` and the user is notified.
 - A `user_approval.status == asked` gate is settled by an explicit
   `fleet-agent approve <id>` / `fleet-agent reject <id>` decision relay. The
@@ -806,22 +830,27 @@ schema language (JSON Schema etc.) is used (§1.3 principle 1).
 |---|---|---|
 | `role` | required | the role the driver plays (e.g. `driver`, `implementer`, `designer`) |
 | `agent` | optional | the agent to use (e.g. `claude:sonnet`). If omitted, the `--agent` argument value is used |
+| `verify` | optional | mechanical check gate. Subfields: `command` (required string), `timeout` (optional positive integer seconds, default 600), `max_iterations` (optional positive integer, default 3) |
 | `peer_review` | optional | specified when inserting AI review. Subfields: `role` (reviewer's role, required), `agent` (reviewer's agent, optional). If `agent` is omitted, it falls back in order to the stage's `agent` → `claude:sonnet` |
 | `user_approval` | optional | human approval point. The string `"required"` / `"optional"`, or an object form |
 
 `validate()` performs the top-level `name` / `stages` required checks and the
 per-stage `role` required check. It additionally fails **loud** on a malformed or
-misspelled *safety gate*, so a `user_approval` / `peer_review` boundary (P8)
-cannot silently vanish into a bare solo:
+misspelled *safety gate*, so a `user_approval` / `peer_review` / `verify`
+boundary (P8) cannot silently vanish into a bare solo:
 
 - a present `user_approval` must be the string `"required"` / `"optional"` or an
   object carrying a bool `required`;
 - a present `peer_review` must be an object carrying `role`;
+- a present `verify` must be an object carrying a non-empty `command` string;
+  optional `timeout` and `max_iterations` must be positive integers;
 - a stage key that is a **near-miss misspelling** of a gate key — a case-only
-  difference or an edit distance ≤ 2 from `user_approval` / `peer_review`
-  (e.g. `user_aproval`, `peer_reveiw`) — is rejected.
+  difference or an edit distance threshold from `user_approval` / `peer_review`
+  / `verify` (e.g. `user_aproval`, `peer_reveiw`, `verfy`) — is rejected. The
+  short `verify` key uses a tighter distance so unrelated short custom keys such
+  as `very` do not false-flag.
 
-This lint is scoped to the two gate keys *only*: every other key stays
+This lint is scoped to the gate keys *only*: every other key stays
 unvalidated, so the open schema (no schema language; custom keys allowed) above
 is preserved. `validate()` runs once at `fleet-agent start` (P4), so a botched
 gate aborts the start rather than running ungated. Immediately after formation
@@ -937,7 +966,25 @@ Mechanical leaderless auto-merge has no approver and is deferred until a
 concrete bottleneck requires it; no `finalize:` key or extra task status is part
 of the design.
 
-### 8.5 Placement
+### 8.5 Project-Declared Subprocess Boundary
+
+`verify` adds a separate boundary from the git table above: fleet's Python may
+execute a project-declared command in the task work tree and read its exit code
+to gate a stage. Fleet makes no judgment about the result and never parses the
+output. It only captures stdout+stderr for the implementer's inbox on failure.
+
+This command runs with the user's privileges and is not guaranteed to be
+side-effect-free. Real checks commonly write caches, build directories, and
+coverage files. With `workspace: worktree`, those side effects land in the task
+work tree; with `workspace: none`, they land in the project root. OS containment
+is a separate sandbox concern and is not part of this boundary.
+
+The mutating work that fleet directs remains outside fleet core: edit, commit,
+push, PR creation, conflict resolution, and merge decisions still belong to the
+driver under project discipline. `verify` only mechanizes one project-declared
+fact: the command exited zero or it did not.
+
+### 8.6 Placement
 
 | Feature | Placement |
 |---|---|
@@ -949,6 +996,7 @@ of the design.
 | dashboard generation | core |
 | `on_pre_start` / `on_cleanup` hook (built into workspace) | core |
 | worktree creation / removal | core (only when workspace=worktree) |
+| project-declared `verify` command execution | core runs the command; the project owns the command |
 | commit / push / PR / changelog / review-request | **up to the project (driver)** |
 | a vendor-neutral "discipline file" seam | **not held** (the project owner provides `CLAUDE.md` / `AGENTS.md` individually) |
 
