@@ -771,17 +771,21 @@ cross-stage advance launches the next stage's driver fresh.
   implementer pane rather than relaunching.
 - When the peer_review cap (3) is exceeded, task.status changes to
   `awaiting_orders` and the user is notified.
-- A `user_approval.status == asked` gate is relayed by the leader, who takes
-  the user's decision via `fleet-agent approve <id>` / `fleet-agent reject
-  <id>`.
+- A `user_approval.status == asked` gate is settled by an explicit
+  `fleet-agent approve <id>` / `fleet-agent reject <id>` decision relay. The
+  normal relay is the leader, who takes the user's decision or follows
+  delegated project policy. If the user is dialoguing in the driver's pane and
+  gives explicit approval of that finished deliverable in the pane, the driver
+  may relay that user decision with `fleet-agent approve`; this is not driver
+  self-approval.
   - approve: sets `user_approval.status` to `approved` and proceeds to
     stage-completion handling.
   - reject: returns `user_approval.status` to `pending` and sends the stage
     back to implementation. In a peer_review stage, it wakes the existing
     implementer pane.
-- `awaiting_orders` is a leader-gated pause: only `fleet-agent approve`/`reject`
-  settle it; a driver's `done` is a no-op while a task awaits a human decision
-  (it cannot self-clear a `user_approval` gate or a peer_review escalation).
+- `awaiting_orders` is a human-decision pause: only `fleet-agent approve`/`reject`
+  settle it; a driver's `done` is a no-op while a task awaits that decision (it
+  cannot self-clear a `user_approval` gate or a peer_review escalation).
 
 ### 7.4 Formation YAML Schema
 
@@ -922,13 +926,16 @@ This means:
 - A `user_approval` gate is the fleet's generic place to host a development-flow
   sign-off checkpoint. For coding projects, that checkpoint often corresponds to
   review/merge authority, but the decision remains outside fleet core. Three
-  authority modes exist:
+  settle actors exist:
   1. The user reviews/merges and settles the gate.
   2. A project delegates that authority to the leader; the leader settles the
      same gate as project policy.
-  3. Mechanical leaderless auto-merge has no approver and is deferred until a
-     concrete bottleneck requires it; no `finalize:` key or extra task status is
-     part of the design.
+  3. An in-pane driver may relay the user's explicit approval of the finished
+     deliverable when the user gives that approval in the driver pane.
+
+Mechanical leaderless auto-merge has no approver and is deferred until a
+concrete bottleneck requires it; no `finalize:` key or extra task status is part
+of the design.
 
 ### 8.5 Placement
 
