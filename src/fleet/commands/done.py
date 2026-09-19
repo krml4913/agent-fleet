@@ -17,7 +17,7 @@ from .. import notify
 from .. import orchestrator as orch
 from .. import state as state_mod
 from .. import task_context
-from .. import tmux
+from .. import mux
 from ..events import append_event
 
 
@@ -192,10 +192,11 @@ def _maybe_notify_leader(
     # Spawn the detached notifier only when the leader pane is resolvable.
     # Otherwise the record stays queued for the next done / re-attach.
     try:
-        if not tmux.available():
+        m = mux.get()
+        if not m.available():
             return
         session = f"fleet-{label}"
-        if not tmux.session_exists(session):
+        if not m.session_exists(session):
             return
         leader_session = formation.read_leader_session(label)
         if not leader_session or not leader_session.get("agent"):

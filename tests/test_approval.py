@@ -55,7 +55,7 @@ class ApprovalCommandTests(unittest.TestCase):
         # ``reject`` relaunches the stage driver, which would otherwise spawn a
         # real ``fleet-demo`` tmux session that no test ever tears down (#130).
         # This test only asserts state transitions, so keep tmux out of it.
-        env["FLEET_NO_TMUX"] = "1"
+        env["FLEET_NO_MUX"] = "1"
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
             capture_output=True,

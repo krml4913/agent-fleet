@@ -64,7 +64,7 @@ class SessionsCmdTests(unittest.TestCase):
             "sessions",
             fleet_home=self.fleet_home,
             cwd=self.repo,
-            env_extra={"FLEET_NO_TMUX": "1", "NO_COLOR": "1"},
+            env_extra={"FLEET_NO_MUX": "1", "NO_COLOR": "1"},
         )
 
     def test_empty(self) -> None:

@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agents, notify, prompt_pointer, state as state_mod, tmux
+from . import agents, mux, notify, prompt_pointer, state as state_mod
 from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 from .proc import spawn_detached
@@ -36,7 +36,6 @@ def start_detached(
     session: str,
     window: str,
     prompt_path: Path,
-    buffer_name: str,
     agent_spec: str,
     session_name: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
@@ -68,8 +67,6 @@ def start_detached(
         window,
         "--prompt-path",
         str(prompt_path),
-        "--buffer-name",
-        buffer_name,
         "--agent",
         agent_spec,
         "--timeout",
@@ -100,7 +97,6 @@ def deliver(
     session: str,
     window: str,
     prompt_path: Path,
-    buffer_name: str,
     agent_spec: str,
     session_name: str | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
@@ -115,10 +111,11 @@ def deliver(
     if initial_delay > 0:
         time.sleep(initial_delay)
 
+    backend = mux.get()
     while time.monotonic() <= deadline:
         try:
-            pane = tmux.capture_pane(session, window)
-        except tmux.TmuxError as e:
+            pane = backend.capture(session, window)
+        except mux.MuxError as e:
             _fail(state_dir, task_id, f"prompt deliverer cannot capture pane: {e}", window)
             return 1
 
@@ -129,15 +126,16 @@ def deliver(
                 # popup, and codex blocks some ops once a task is running.
                 # claude named itself at launch → session_rename_keys is [] → no-op.
                 if session_name:
-                    for text, enter in adapter.session_rename_keys(session_name):
-                        tmux.send_keys(session, window, text, enter=enter)
+                    for step, enter in adapter.session_rename_keys(session_name):
+                        mux.send_step(session, window, step, enter=enter, backend=backend)
                         time.sleep(RENAME_SETTLE_SECONDS)
                 # Paste a short pointer to the prompt file, not the prompt
                 # body — pasting the full body trips agent-CLI input quirks
                 # (mixed-character corruption, see Issue #90).
                 checkpoint = _event_checkpoint(state_dir / "events.jsonl", task_id)
-                prompt_pointer.load_pointer_buffer(tmux, buffer_name, prompt_path)
-                tmux.paste_buffer(session, window, buffer_name)
+                prompt_pointer.paste_pointer(
+                    backend, session=session, window=window, prompt_path=prompt_path
+                )
                 acknowledged = _submit_and_wait_for_inbox_seen(
                     state_dir=state_dir,
                     task_id=task_id,
@@ -148,7 +146,7 @@ def deliver(
                     poll_interval=poll_interval,
                     adapter=adapter,
                 )
-            except tmux.TmuxError as e:
+            except mux.MuxError as e:
                 _fail(state_dir, task_id, f"prompt deliverer cannot paste prompt: {e}", window)
                 return 1
             if not acknowledged:
@@ -268,8 +266,9 @@ def _submit_and_wait_for_inbox_seen(
     prompt has already submitted, so it never double-submits. claude sets
     ``submit_retries=0`` and keeps the single-Enter behaviour.
     """
+    backend = mux.get()
     time.sleep(PASTE_SETTLE_SECONDS)
-    tmux.send_keys(session, window, "", enter=True)
+    backend.send_key(session, window, "Enter")
 
     events_path = state_dir / "events.jsonl"
     offset = checkpoint.offset
@@ -280,7 +279,7 @@ def _submit_and_wait_for_inbox_seen(
         if matched:
             return True
         if retries_left > 0 and time.monotonic() >= next_retry_at:
-            tmux.send_keys(session, window, "", enter=True)
+            backend.send_key(session, window, "Enter")
             retries_left -= 1
             next_retry_at = time.monotonic() + adapter.submit_retry_interval_seconds
         time.sleep(max(0.1, poll_interval))
@@ -353,7 +352,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--session", required=True)
     p.add_argument("--window", required=True)
     p.add_argument("--prompt-path", required=True, type=Path)
-    p.add_argument("--buffer-name", required=True)
     p.add_argument("--agent", required=True)
     p.add_argument("--session-name", default=None)
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
@@ -370,7 +368,6 @@ def main(argv: list[str] | None = None) -> int:
         session=args.session,
         window=args.window,
         prompt_path=args.prompt_path,
-        buffer_name=args.buffer_name,
         agent_spec=args.agent,
         session_name=args.session_name,
         timeout=args.timeout,

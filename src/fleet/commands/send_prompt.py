@@ -12,7 +12,7 @@ import sys
 from .. import prompt_deliverer
 from .. import state as state_mod
 from .. import task_context
-from .. import tmux as tmux_mod
+from .. import mux
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -21,7 +21,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Deliver a driver-prompt.md pointer into the task pane",
         description=(
             "Starts a detached deliverer that pastes a small pointer to "
-            "<state>/tasks/task-<id>/driver-prompt.md into the task's tmux "
+            "<state>/tasks/task-<id>/driver-prompt.md into the task's "
             "window once the agent CLI is ready."
         ),
     )
@@ -52,8 +52,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    if not tmux_mod.available():
-        print("error: tmux not on PATH", file=sys.stderr)
+    m = mux.get()
+    if not m.available():
+        print(f"error: {m.name} not on PATH", file=sys.stderr)
         return 1
 
     prompt_path = state_mod.task_dir(state_dir, args.task_id) / "driver-prompt.md"
@@ -70,9 +71,8 @@ def run(args: argparse.Namespace) -> int:
     # The driver window lives in the task's owner session (Issue #166 §5.2).
     label = state_mod.task_owner_session(task)
     session = f"fleet-{label}"
-    buffer_name = f"fleet-task-{args.task_id}"
 
-    if not tmux_mod.session_exists(session):
+    if not m.session_exists(session):
         print(
             f"error: session not running: {session}\n"
             f"  start it:  fleet leader --name {label}",
@@ -80,8 +80,8 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
     try:
-        matches = tmux_mod.task_window_names(session, args.task_id)
-    except tmux_mod.TmuxError as e:
+        matches = mux.task_window_names(session, args.task_id, backend=m)
+    except mux.MuxError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if len(matches) != 1:
@@ -109,11 +109,10 @@ def run(args: argparse.Namespace) -> int:
             session=session,
             window=window,
             prompt_path=prompt_path,
-            buffer_name=buffer_name,
             agent_spec=agent_spec,
             timeout=args.prompt_timeout,
         )
-    except tmux_mod.TmuxError as e:
+    except mux.MuxError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

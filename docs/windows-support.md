@@ -516,6 +516,12 @@ Screens captured for `src/fleet/adapters/claude.py` (from `dump-screen`,
 
 ### PR2 — multiplexer abstraction, tmux only (`mux-abstraction`)
 
+> Implemented. `fleet.mux` exposes the §6.1 interface plus two optional
+> methods: `preload_paste(name, text)` / `drop_paste(name)` (tmux: the named
+> per-task buffer for `--no-auto-paste`'s `C-b ]`; no-op elsewhere) and
+> `kill_session_hint(session)`. Explicit keys are `fleet.mux.Key("Ctrl-u")`,
+> re-exported from `fleet.adapters`.
+
 - Add `fleet/mux/{__init__,base,tmux}.py` (§6.1) and move all 13 importers
   plus `prompt_pointer.py` onto it.
 - Buffer → `paste`; explicit key steps in the adapters; argv-based

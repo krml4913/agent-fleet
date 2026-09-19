@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import orchestrator, state  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 def _make_task(
@@ -235,11 +236,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         state.save_task(self.sd, "20a", task)
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch(
-                "fleet.tmux.task_window_names",
-                return_value=["20a·implementer"],
-            ),
+            use_fake_mux(sessions={"fleet-main": ["leader", "20a·implementer"]}),
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator.advance(self.sd, "20a", task, result="approved")
@@ -434,11 +431,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         task = _make_task(self.sd, "29", self._make_pr_stage())
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch(
-                "fleet.tmux.task_window_names",
-                return_value=["29·implementer"],
-            ),
+            use_fake_mux(sessions={"fleet-main": ["leader", "29·implementer"]}),
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator.advance(self.sd, "29", task, result="approved")
@@ -454,19 +447,15 @@ class PeerReviewLoopTests(unittest.TestCase):
         task = _make_task(self.sd, "2a", stages)
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch(
-                "fleet.tmux.task_window_names",
-                return_value=["2a·implementer", "2a·code-reviewer"],
-            ),
-            unittest.mock.patch("fleet.tmux.send_keys") as mock_send,
+            use_fake_mux(sessions={"fleet-main": ["leader", "2a·implementer", "2a·code-reviewer"]}) as fake,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator.advance(self.sd, "2a", task, result="changes-requested")
 
         mock_launch.assert_not_called()
-        mock_send.assert_called_once()
-        self.assertEqual(mock_send.call_args.args[1], "2a·implementer")
+        sends = fake.calls_named("send_text")
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0][0][1], "2a·implementer")
         inbox = state.task_dir(self.sd, "2a") / "inbox.md"
         self.assertIn("role=implementer", inbox.read_text(encoding="utf-8"))
 
@@ -711,19 +700,15 @@ class UserApprovalGateTests(unittest.TestCase):
         task = _make_task(self.sd, "35a", stages)
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
-            unittest.mock.patch(
-                "fleet.tmux.task_window_names",
-                return_value=["35a·implementer", "35a·code-reviewer"],
-            ),
-            unittest.mock.patch("fleet.tmux.send_keys") as mock_send,
+            use_fake_mux(sessions={"fleet-main": ["leader", "35a·implementer", "35a·code-reviewer"]}) as fake,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator.reject_user_approval(self.sd, "35a", task)
 
         mock_launch.assert_not_called()
-        mock_send.assert_called_once()
-        self.assertEqual(mock_send.call_args.args[1], "35a·implementer")
+        sends = fake.calls_named("send_text")
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0][0][1], "35a·implementer")
         inbox = state.task_dir(self.sd, "35a") / "inbox.md"
         self.assertIn("role=implementer", inbox.read_text(encoding="utf-8"))
 
@@ -1038,7 +1023,7 @@ class WindowCwdTests(unittest.TestCase):
         stage = task["stages"][0]
         project = state.load_project(self.sd)
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            use_fake_mux(),
             unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt") as mock_render,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
@@ -1054,7 +1039,7 @@ class WindowCwdTests(unittest.TestCase):
         stage = task["stages"][0]
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=True),
+            use_fake_mux(),
             unittest.mock.patch("fleet.driver_prompt.render", return_value="mocked prompt") as mock_render,
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
@@ -1070,7 +1055,7 @@ class WindowCwdTests(unittest.TestCase):
         stage = task["stages"][0]
 
         with (
-            unittest.mock.patch("fleet.tmux.available", return_value=False),
+            use_fake_mux(available=False),
             unittest.mock.patch("fleet.commands.start.launch_stage_driver") as mock_launch,
         ):
             orchestrator._launch_driver_for_stage(self.sd, "wt3", task, 0, stage)

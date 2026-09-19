@@ -36,7 +36,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import agents, state as state_mod, tmux
+from . import agents, mux, state as state_mod
 from .adapters import REGISTRY
 from .events import append_event, utcnow_iso
 from .locking import atomic_update, lock_file, unlock_file
@@ -317,7 +317,7 @@ def notify(
     """Poll the leader pane; inject the coalesced queue on the next idle boundary.
 
     Returns 0 on a clean exit (flushed, queue empty, or leader absent). Never
-    raises on tmux trouble; a missing pane just leaves records queued. If the
+    raises on multiplexer trouble; a missing pane just leaves records queued. If the
     leader stays busy through our whole lifetime but the session is still alive
     and records remain, we *re-arm* a successor notifier (after releasing the
     lock) so a busy leader can never strand the queue.
@@ -372,7 +372,7 @@ def _poll_until_idle(
     Returns ``True`` iff the deadline expired with records still pending and the
     leader session still alive — i.e. the leader was busy the whole time and the
     caller should re-arm a successor. Returns ``False`` on every other terminal:
-    queue drained, leader detached, window gone, or a flush that failed on tmux
+    queue drained, leader detached, window gone, or a flush that failed on the mux
     (left queued for the next ``done`` to re-spawn). Holds no lock itself; the
     caller owns the session lock for our lifetime.
     """
@@ -383,24 +383,24 @@ def _poll_until_idle(
     while time.monotonic() <= deadline:
         if not read_queue(session_dir):
             return False  # nothing pending → done
-        if not tmux.session_exists(session):
+        if not mux.get().session_exists(session):
             return False  # leader detached → leave queued, re-spawn later
         try:
-            pane = tmux.capture_pane(session, window)
-        except tmux.TmuxError:
+            pane = mux.get().capture(session, window)
+        except mux.MuxError:
             return False  # window gone → leave queued
 
         if adapter.is_ready(pane):
             if _flush_once(session_dir, session, window):
                 # Loop again: a record may have been enqueued mid-flush.
                 continue
-            return False  # flush failed (tmux) → leave queued
+            return False  # flush failed (mux) → leave queued
         time.sleep(max(0.1, poll_interval))
 
     # Deadline hit while still busy. Re-arm only if there is pending work AND the
     # leader session is still alive: a dead session needs no successor (the next
     # done / re-attach re-spawns) and an empty queue is already delivered.
-    return bool(read_queue(session_dir)) and tmux.session_exists(session)
+    return bool(read_queue(session_dir)) and mux.get().session_exists(session)
 
 
 def _refill_pr_urls(records: list[dict]) -> None:
@@ -433,7 +433,7 @@ def _refill_pr_urls(records: list[dict]) -> None:
 def _flush_once(session_dir: Path, session: str, window: str) -> bool:
     """Inject the current queue once and clear exactly what was flushed.
 
-    Returns True on a successful injection (or empty queue), False if tmux
+    Returns True on a successful injection (or empty queue), False if the mux
     failed before submit — in which case records are left untouched/queued.
     """
     records = read_queue(session_dir)
@@ -443,8 +443,8 @@ def _flush_once(session_dir: Path, session: str, window: str) -> bool:
     text = render_block(records)
     try:
         time.sleep(INJECT_SETTLE_SECONDS)
-        tmux.send_keys(session, window, text, enter=True)
-    except tmux.TmuxError:
+        mux.get().send_text(session, window, text, enter=True)
+    except mux.MuxError:
         return False
     nonces = {r.get("nonce") for r in records if r.get("nonce")}
     clear_records(session_dir, nonces)

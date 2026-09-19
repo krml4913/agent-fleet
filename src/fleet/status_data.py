@@ -14,7 +14,7 @@ from pathlib import Path
 from . import heartbeat
 from . import leader_notifier
 from . import state as state_mod
-from . import tmux as tmux_mod
+from . import mux
 from .events import read_events, utcnow_iso
 from . import __version__
 
@@ -287,11 +287,11 @@ def load_session_records() -> dict[str, dict]:
     return out
 
 
-def session_liveness(label: str, tmux_ok: bool) -> bool | None:
-    """Return True (live), False (stale), or None (tmux unavailable)."""
-    if not tmux_ok:
+def session_liveness(label: str, mux_ok: bool) -> bool | None:
+    """Return True (live), False (stale), or None (multiplexer unavailable)."""
+    if not mux_ok:
         return None
-    return tmux_mod.session_exists(f"fleet-{label}")
+    return mux.get().session_exists(f"fleet-{label}")
 
 
 # ---------------------------------------------------------------------------
@@ -381,13 +381,13 @@ def collect_sessions() -> list[dict]:
     records = load_session_records()
     tasks_by_label = scan_inflight_tasks()
     labels = sorted(set(records) | set(tasks_by_label))
-    tmux_ok = tmux_mod.available()
+    mux_ok = mux.get().available()
 
     out: list[dict] = []
     for label in labels:
         record = records.get(label) or {}
         tasks = tasks_by_label.get(label, [])
-        live = session_liveness(label, tmux_ok)
+        live = session_liveness(label, mux_ok)
         scope = state_mod.session_scope(label)
         task_views: list[dict] = []
         for t in tasks:

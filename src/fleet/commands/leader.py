@@ -1,6 +1,6 @@
 """``fleet leader`` — launch a project-agnostic leader session.
 
-Creates a detached tmux session named ``fleet-<label>`` (default label
+Creates a detached multiplexer session named ``fleet-<label>`` (default label
 ``main``), opens a single ``leader`` window in the **agent-fleet clone root**,
 and starts the chosen agent CLI inside. If the session already exists, prints
 the attach command and exits (one session per label).
@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shlex
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,7 +24,7 @@ from .. import agents as agents_mod
 from .. import leader_prompt as lp
 from .. import prompt_pointer
 from .. import state as state_mod
-from .. import tmux as tmux_mod
+from .. import mux
 from ..events import append_event
 
 
@@ -42,7 +40,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "leader",
         help="Launch a project-agnostic leader session",
         description=(
-            "Create a tmux session 'fleet-<label>' (default label 'main') with a "
+            "Create a multiplexer session 'fleet-<label>' (default label 'main') with a "
             "single leader window running the chosen agent CLI in the agent-fleet "
             "clone root. One session per label: if it already exists, prints the "
             "attach command and exits. The session is project-agnostic — it serves "
@@ -53,7 +51,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--name",
         default=DEFAULT_SESSION_LABEL,
         metavar="LABEL",
-        help=f"Session label → tmux fleet-<label> (default: {DEFAULT_SESSION_LABEL})",
+        help=f"Session label → session fleet-<label> (default: {DEFAULT_SESSION_LABEL})",
     )
     p.add_argument(
         "--agent",
@@ -63,7 +61,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--attach",
         action="store_true",
-        help="After starting, exec `tmux attach -t <session>` (foreground).",
+        help="After starting, attach to the session (foreground).",
     )
     p.add_argument(
         "--no-auto-paste",
@@ -94,15 +92,16 @@ def run(args: argparse.Namespace) -> int:
     label = getattr(args, "name", None) or DEFAULT_SESSION_LABEL
     session = f"fleet-{label}"
 
-    if not tmux_mod.available():
-        print("error: tmux not on PATH", file=sys.stderr)
+    m = mux.get()
+    if not m.available():
+        print(f"error: {m.name} not on PATH", file=sys.stderr)
         return 1
 
-    if tmux_mod.session_exists(session):
+    if m.session_exists(session):
         print(f"leader session already exists: {session}")
-        print(f"  attach: tmux attach -t {session}")
+        print(f"  attach: {m.attach_hint(session)}")
         if args.attach:
-            os.execvp("tmux", ["tmux", "attach", "-t", session])
+            return _attach(m, session)
         return 0
 
     try:
@@ -111,7 +110,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    # Validate --scope against the registry *before* any tmux session or
+    # Validate --scope against the registry *before* any mux session or
     # session.json is created. An invalid project name must fail early — not
     # after the leader pane and record already exist with an unpasted prompt.
     scope_arg = getattr(args, "scope", None)
@@ -132,21 +131,20 @@ def run(args: argparse.Namespace) -> int:
 
     cli = agents_mod.cli_command(args.agent)
     cli = cli + agents_mod.session_name_launch_args(args.agent, session_name)
-    cli_quoted = " ".join(shlex.quote(p) for p in cli)
 
     try:
-        tmux_mod.new_session(
+        m.new_session(
             session,
-            window_name="leader",
+            window="leader",
+            argv=cli,
             cwd=str(_CLONE_ROOT),
             env={
                 "FLEET_SESSION": label,
                 "FLEET_STATE_DIR": str(session_dir),
             },
         )
-        tmux_mod.send_keys(session, "leader", cli_quoted)
-    except tmux_mod.TmuxError as e:
-        print(f"error: tmux setup failed: {e}", file=sys.stderr)
+    except mux.MuxError as e:
+        print(f"error: {m.name} setup failed: {e}", file=sys.stderr)
         return 1
 
     record: dict = {
@@ -170,20 +168,20 @@ def run(args: argparse.Namespace) -> int:
         prompt_text = lp.render(session_label=label)
         prompt_path = session_dir / "leader-prompt.md"
         prompt_path.write_text(prompt_text, encoding="utf-8")
-        buffer_name = f"fleet-leader-{label}"
         try:
-            prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
             time.sleep(max(0.0, args.prompt_delay))
             # Name the session BEFORE pasting: vendors with no launch-time flag
             # (codex) rename via post-ready keystrokes; claude is already named
             # at launch → session_rename_keys is [] → no-op.
-            for text, enter in agents_mod.session_rename_keys(args.agent, session_name):
-                tmux_mod.send_keys(session, "leader", text, enter=enter)
+            for step, enter in agents_mod.session_rename_keys(args.agent, session_name):
+                mux.send_step(session, "leader", step, enter=enter, backend=m)
                 time.sleep(0.6)
-            tmux_mod.paste_buffer(session, "leader", buffer_name)
+            prompt_pointer.paste_pointer(
+                m, session=session, window="leader", prompt_path=prompt_path
+            )
             time.sleep(0.8)
-            tmux_mod.send_keys(session, "leader", "", enter=True)
-        except tmux_mod.TmuxError as e:
+            m.send_key(session, "leader", "Enter")
+        except mux.MuxError as e:
             print(f"warn: leader prompt paste failed: {e}", file=sys.stderr)
 
     append_event(
@@ -195,8 +193,16 @@ def run(args: argparse.Namespace) -> int:
     )
 
     print(f"leader started: session={session}, agent={args.agent}")
-    print(f"  attach: tmux attach -t {session}")
+    print(f"  attach: {m.attach_hint(session)}")
 
     if args.attach:
-        os.execvp("tmux", ["tmux", "attach", "-t", session])
+        return _attach(m, session)
     return 0
+
+
+def _attach(m: mux.Mux, session: str) -> int:
+    try:
+        return m.attach(session)
+    except mux.MuxError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1

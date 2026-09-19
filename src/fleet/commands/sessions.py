@@ -1,7 +1,7 @@
 """``fleet sessions`` — read-only view of leader sessions and their work.
 
 Lists every known leader session (``global/sessions/<label>/session.json``,
-Issue #166 §5.6) cross-referenced with tmux for liveness, and — per session —
+Issue #166 §5.6) cross-referenced with the multiplexer for liveness, and — per session —
 its **in-flight tasks**: a scan of ``task.yaml`` across all registered projects
 for ``owner_session == label`` with a non-terminal status.
 
@@ -17,7 +17,7 @@ import sys
 
 from .. import state as state_mod
 from .. import status_data as status_data_mod
-from .. import tmux as tmux_mod
+from .. import mux
 
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
@@ -31,7 +31,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "sessions",
         help="List leader sessions and their in-flight tasks",
         description=(
-            "Show every known leader session (label → tmux pane + agent) with a "
+            "Show every known leader session (label → pane + agent) with a "
             "live/stale marker, and each session's in-flight tasks scanned across "
             "all projects by owner_session. Read-only; never writes state."
         ),
@@ -54,11 +54,11 @@ def run(args: argparse.Namespace) -> int:
         print("  (no leader sessions)")
         return 0
 
-    tmux_ok = tmux_mod.available()
+    mux_ok = mux.get().available()
     for label in labels:
         record = records.get(label)
         tasks = tasks_by_label.get(label, [])
-        live = _liveness(label, tmux_ok)
+        live = _liveness(label, mux_ok)
 
         print()
         bullet = _style("●", _GREEN if live is True else _DIM, use_color)

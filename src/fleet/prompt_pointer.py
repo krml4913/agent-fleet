@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .mux import Mux
 
 
 def pointer_text(prompt_path: Path) -> str:
-    """Return the small tmux-pasted instruction for a full prompt file."""
+    """Return the small pasted instruction for a full prompt file."""
     resolved = prompt_path.resolve()
     return (
         "Read the prompt file at this path before doing anything else, "
@@ -26,22 +29,26 @@ def write_pointer_file(prompt_path: Path) -> Path:
     return path
 
 
-def load_pointer_buffer(tmux_mod: Any, buffer_name: str, prompt_path: Path) -> Path:
-    """Load a prompt pointer, not the prompt body, into a tmux buffer."""
+def preload_pointer(backend: Mux, name: str, prompt_path: Path) -> str | None:
+    """Stage the prompt pointer (not the body) for a manual paste by a human.
+
+    Writes the pointer sidecar file, then asks the backend to stage the pointer
+    text under ``name`` (tmux: the named buffer ``name`` for ``C-b ]``).
+    Returns the backend's manual-paste instruction, or ``None`` when the
+    backend has no such concept.
+    """
     path = write_pointer_file(prompt_path)
-    tmux_mod.load_buffer(buffer_name, str(path))
-    return path
+    return backend.preload_paste(name, path.read_text(encoding="utf-8"))
 
 
-def paste_pointer_buffer(
-    tmux_mod: Any,
+def paste_pointer(
+    backend: Mux,
     *,
     session: str,
     window: str,
-    buffer_name: str,
     prompt_path: Path,
 ) -> Path:
-    """Load and paste a prompt pointer into a tmux pane."""
-    path = load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
-    tmux_mod.paste_buffer(session, window, buffer_name)
+    """Write the pointer sidecar file and paste its text into a pane."""
+    path = write_pointer_file(prompt_path)
+    backend.paste(session, window, path.read_text(encoding="utf-8"))
     return path

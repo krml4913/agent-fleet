@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from .adapters import REGISTRY
+from .adapters import REGISTRY, KeystrokeStep
 
 
 def __getattr__(name: str):
@@ -40,7 +40,7 @@ def parse_spec(spec: str) -> tuple[str, str]:
 
 
 def cli_command(spec: str) -> list[str]:
-    """Return the shell argv used to launch this agent inside a tmux pane.
+    """Return the shell argv used to launch this agent inside a multiplexer pane.
 
     The argv comes from the vendor's adapter. Higher layers can append
     further flags (mode toggles, prompt paths) on top.
@@ -59,7 +59,7 @@ def session_name_launch_args(spec: str, name: str) -> list[str]:
     return REGISTRY[vendor].session_name_launch_args(name)
 
 
-def session_rename_keys(spec: str, name: str) -> list[tuple[str, bool]]:
+def session_rename_keys(spec: str, name: str) -> list[KeystrokeStep]:
     """Post-ready keystroke steps that rename this agent's session.
 
     ``[]`` for vendors that name the session at launch (see

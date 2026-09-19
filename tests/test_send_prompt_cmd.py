@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import state, tmux  # noqa: E402
+from fleet import state  # noqa: E402
+from fleet.mux.tmux import TmuxMux  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project, requires_live_tmux  # noqa: E402
 
 
@@ -31,6 +33,7 @@ class SendPromptTests(unittest.TestCase):
         self.session = f"fleet-{self.project_name}"
 
     def tearDown(self) -> None:
+        tmux = TmuxMux()
         if shutil.which("tmux") and tmux.session_exists(self.session):
             tmux.kill_session(self.session)
         if self._old_fleet_home is None:
@@ -68,9 +71,8 @@ class SendPromptTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("session not running", r.stderr)
 
-    @patch("fleet.commands.send_prompt.tmux_mod")
     @patch("fleet.commands.send_prompt.state_mod.resolve_state_dir")
-    def test_uses_task_window_lookup(self, mock_resolve, mock_tmux: MagicMock) -> None:
+    def test_uses_task_window_lookup(self, mock_resolve) -> None:
         from fleet.commands.send_prompt import run
 
         td = state.task_dir(self.state_dir, "1")
@@ -88,53 +90,44 @@ class SendPromptTests(unittest.TestCase):
             },
         )
         mock_resolve.return_value = self.state_dir
-        mock_tmux.available.return_value = True
-        mock_tmux.session_exists.return_value = True
-        mock_tmux.task_window_names.return_value = ["1·implementer"]
-        mock_tmux.TmuxError = Exception
         args = MagicMock()
         args.task_id = "1"
         args.project = self.project_name
         args.prompt_timeout = 600.0
 
-        with patch(
-            "fleet.commands.send_prompt.prompt_deliverer.start_detached",
-            return_value=td / "prompt-deliverer.log",
-        ) as mock_deliverer:
+        with (
+            use_fake_mux(
+                sessions={self.session: ["leader", "1·implementer", "10·driver"]}
+            ) as fake,
+            patch(
+                "fleet.commands.send_prompt.prompt_deliverer.start_detached",
+                return_value=td / "prompt-deliverer.log",
+            ) as mock_deliverer,
+        ):
             result = run(args)
 
         self.assertEqual(result, 0)
-        mock_tmux.task_window_names.assert_called_once_with(
-            f"fleet-{self.project_name}",
-            "1",
-        )
+        self.assertEqual(fake.calls_named("list_windows"), [((self.session,), {})])
         mock_deliverer.assert_called_once()
+        self.assertNotIn("buffer_name", mock_deliverer.call_args.kwargs)
         self.assertEqual(mock_deliverer.call_args.kwargs["window"], "1·implementer")
         self.assertEqual(mock_deliverer.call_args.kwargs["agent_spec"], "claude:sonnet")
 
-    @patch("fleet.commands.send_prompt.tmux_mod")
     @patch("fleet.commands.send_prompt.state_mod.resolve_state_dir")
-    def test_missing_task_yaml_errors_after_window_lookup(
-        self,
-        mock_resolve,
-        mock_tmux: MagicMock,
-    ) -> None:
+    def test_missing_task_yaml_errors_after_window_lookup(self, mock_resolve) -> None:
         from fleet.commands.send_prompt import run
 
         td = state.task_dir(self.state_dir, "missing-yaml")
         td.mkdir(parents=True)
         (td / "driver-prompt.md").write_text("hello\n", encoding="utf-8")
         mock_resolve.return_value = self.state_dir
-        mock_tmux.available.return_value = True
-        mock_tmux.session_exists.return_value = True
-        mock_tmux.task_window_names.return_value = ["missing-yaml·driver"]
-        mock_tmux.TmuxError = Exception
         args = MagicMock()
         args.task_id = "missing-yaml"
         args.project = self.project_name
         args.prompt_timeout = 600.0
 
-        result = run(args)
+        with use_fake_mux(sessions={self.session: ["leader", "missing-yaml·driver"]}):
+            result = run(args)
 
         self.assertEqual(result, 1)
 

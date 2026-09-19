@@ -77,7 +77,7 @@ class LeaderProjectResolutionTests(unittest.TestCase):
             cwd=self.repo,
             env_extra={
                 "FLEET_STATE_DIR": str(self.session_dir),
-                "FLEET_NO_TMUX": "1",
+                "FLEET_NO_MUX": "1",
             },
         )
 

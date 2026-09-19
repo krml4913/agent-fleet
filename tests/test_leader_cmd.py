@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import prompt_pointer, state, tmux  # noqa: E402
+from fleet import prompt_pointer, state  # noqa: E402
+from fleet.mux.base import Key  # noqa: E402
+from fleet.mux.tmux import TmuxMux  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet, requires_live_tmux  # noqa: E402
 
 
@@ -32,10 +35,11 @@ class LeaderCmdTests(unittest.TestCase):
         # is verified separately in test_default_session_label_is_main).
         self.label = "test-" + os.urandom(3).hex()
         self.session = f"fleet-{self.label}"
+        self.tmux = TmuxMux()
 
     def tearDown(self) -> None:
-        if shutil.which("tmux") and tmux.session_exists(self.session):
-            tmux.kill_session(self.session)
+        if shutil.which("tmux") and self.tmux.session_exists(self.session):
+            self.tmux.kill_session(self.session)
         if self._old_fleet_home is None:
             os.environ.pop("FLEET_HOME", None)
         else:
@@ -54,7 +58,7 @@ class LeaderCmdTests(unittest.TestCase):
     def test_launch_creates_session_and_emits_event(self) -> None:
         r = run_fleet("leader", "--name", self.label, fleet_home=self.fleet_home)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertTrue(tmux.session_exists(self.session))
+        self.assertTrue(self.tmux.session_exists(self.session))
         events_path = state.session_dir(self.label) / "events.jsonl"
         events = [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l]
         self.assertTrue(any(e["type"] == "leader_start" for e in events))
@@ -100,11 +104,11 @@ class LeaderCmdTests(unittest.TestCase):
         try:
             r = run_fleet("leader", "--name", label, fleet_home=self.fleet_home)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertTrue(tmux.session_exists(session))
+            self.assertTrue(self.tmux.session_exists(session))
             self.assertTrue(state.session_record_path(label).exists())
         finally:
-            if tmux.session_exists(session):
-                tmux.kill_session(session)
+            if self.tmux.session_exists(session):
+                self.tmux.kill_session(session)
 
     def test_no_auto_paste_skips_prompt_file(self) -> None:
         run_fleet("leader", "--name", self.label, "--no-auto-paste",
@@ -122,19 +126,59 @@ class LeaderCmdTests(unittest.TestCase):
         args.auto_paste = True
         args.prompt_delay = 0.0
 
-        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = False
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux() as fake:
             result = leader.run(args)
 
         self.assertEqual(result, 0)
         prompt_path = state.session_dir(self.label) / "leader-prompt.md"
-        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
-        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
-        pointer = loaded_path.read_text(encoding="utf-8")
+        pastes = fake.calls_named("paste")
+        self.assertEqual(len(pastes), 1)
+        (session, window, pointer), _kw = pastes[0]
+        self.assertEqual((session, window), (self.session, "leader"))
+        loaded_path = prompt_pointer.pointer_path(prompt_path)
+        self.assertEqual(loaded_path.read_text(encoding="utf-8"), pointer)
         self.assertIn(str(prompt_path.resolve()), pointer)
         self.assertNotIn("You are a fleet leader session", pointer)
+        # paste, then the submit Enter (claude: no rename keystrokes).
+        self.assertEqual(
+            fake.sent(),
+            [("paste", "leader", pointer), ("key", "leader", "Enter")],
+        )
+
+    def test_codex_leader_renames_with_explicit_ctrl_u_key(self) -> None:
+        from fleet.commands import leader
+
+        args = unittest.mock.MagicMock()
+        args.name = self.label
+        args.agent = "codex:gpt-5.5"
+        args.attach = False
+        args.auto_paste = True
+        args.prompt_delay = 0.0
+        args.scope = None
+
+        with (
+            use_fake_mux() as fake,
+            unittest.mock.patch("fleet.commands.leader.time.sleep"),
+        ):
+            result = leader.run(args)
+
+        self.assertEqual(result, 0)
+        sent = [(kind, payload) for kind, _w, payload in fake.sent()]
+        self.assertEqual(
+            sent[:5],
+            [
+                ("text", "/rename"),
+                ("key", "Enter"),
+                ("key", "Ctrl-u"),
+                ("text", f"{self.label}-leader"),
+                ("key", "Enter"),
+            ],
+        )
+        self.assertEqual([k for k, _p in sent[5:]], ["paste", "key"])
+        # Ctrl-u is sent as a Key, never typed as text.
+        keys = [a[2] for a, _k in fake.calls_named("send_key")]
+        self.assertIn(Key("Ctrl-u"), keys)
+        self.assertNotIn("C-u", [a[2] for a, _k in fake.calls_named("send_text")])
 
     def test_claude_leader_sets_session_name(self) -> None:
         from fleet.commands import leader
@@ -146,15 +190,15 @@ class LeaderCmdTests(unittest.TestCase):
         args.auto_paste = False
         args.prompt_delay = 0.0
 
-        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = False
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux() as fake:
             result = leader.run(args)
 
         self.assertEqual(result, 0)
-        cli_sent = mock_tmux.send_keys.call_args_list[0].args[2]
-        self.assertIn(f"--name {self.label}-leader", cli_sent)
+        (session,), kwargs = fake.calls_named("new_session")[0]
+        self.assertEqual(session, self.session)
+        self.assertEqual(kwargs["window"], "leader")
+        # argv goes to the backend unquoted; the tmux backend types it.
+        self.assertEqual(kwargs["argv"][-2:], ["--name", f"{self.label}-leader"])
 
     def test_invalid_scope_fails_before_session_creation(self) -> None:
         """An unknown --scope project errors before any tmux/session.json side effect."""
@@ -168,15 +212,12 @@ class LeaderCmdTests(unittest.TestCase):
         args.prompt_delay = 0.0
         args.scope = "no-such-project"
 
-        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = False
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux() as fake:
             result = leader.run(args)
 
         self.assertEqual(result, 1)
-        # Nothing was created: no tmux session, no session.json record.
-        mock_tmux.new_session.assert_not_called()
+        # Nothing was created: no mux session, no session.json record.
+        self.assertEqual(fake.calls_named("new_session"), [])
         self.assertFalse(state.session_record_path(self.label).exists())
 
     def test_valid_scope_is_applied_to_session_record(self) -> None:
@@ -196,13 +237,11 @@ class LeaderCmdTests(unittest.TestCase):
         args.prompt_delay = 0.0
         args.scope = "alpha"
 
-        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = False
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux() as fake:
             result = leader.run(args)
 
         self.assertEqual(result, 0)
+        self.assertEqual(len(fake.calls_named("new_session")), 1)
         self.assertEqual(state.session_scope(self.label), ["alpha"])
 
     def test_injects_fleet_session_env(self) -> None:
@@ -215,15 +254,64 @@ class LeaderCmdTests(unittest.TestCase):
         args.auto_paste = False
         args.prompt_delay = 0.0
 
-        with unittest.mock.patch("fleet.commands.leader.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = False
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux() as fake:
             leader.run(args)
 
-        env = mock_tmux.new_session.call_args.kwargs["env"]
+        env = fake.calls_named("new_session")[0][1]["env"]
         self.assertEqual(env["FLEET_SESSION"], self.label)
         self.assertEqual(env["FLEET_STATE_DIR"], str(state.session_dir(self.label)))
+
+
+    def _args(self, **over):
+        args = unittest.mock.MagicMock()
+        args.name = self.label
+        args.agent = "claude:opus"
+        args.attach = False
+        args.auto_paste = False
+        args.prompt_delay = 0.0
+        args.scope = None
+        for k, v in over.items():
+            setattr(args, k, v)
+        return args
+
+    def test_existing_session_prints_backend_attach_hint(self) -> None:
+        import contextlib
+        import io
+
+        from fleet.commands import leader
+
+        out = io.StringIO()
+        with (
+            use_fake_mux(sessions={self.session: ["leader"]}) as fake,
+            contextlib.redirect_stdout(out),
+        ):
+            result = leader.run(self._args())
+        self.assertEqual(result, 0)
+        self.assertIn(f"attach: tmux attach -t {self.session}", out.getvalue())
+        self.assertEqual(fake.calls_named("new_session"), [])
+        self.assertEqual(fake.calls_named("attach"), [])
+
+    def test_attach_flag_hands_off_to_backend_attach(self) -> None:
+        from fleet.commands import leader
+
+        with use_fake_mux(attach_rc=0) as fake:
+            result = leader.run(self._args(attach=True))
+        self.assertEqual(result, 0)
+        self.assertEqual(fake.calls_named("attach"), [((self.session, None), {})])
+
+    def test_mux_error_on_session_creation_fails(self) -> None:
+        import contextlib
+        import io
+
+        from fleet.commands import leader
+        from fleet.mux import MuxError
+
+        err = io.StringIO()
+        with use_fake_mux() as fake, contextlib.redirect_stderr(err):
+            fake.fail["new_session"] = MuxError("boom")
+            result = leader.run(self._args())
+        self.assertEqual(result, 1)
+        self.assertIn("tmux setup failed: boom", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +20,7 @@ from .. import prompt_pointer
 from .. import state as state_mod
 from .. import task_context
 from .. import formation as formation_mod
-from .. import tmux as tmux_mod
+from .. import mux
 from ..events import append_event, truncate_text
 
 
@@ -122,12 +121,12 @@ def launch_stage_driver(
     window_cwd: Path | None = None,
     replace_task_windows: bool = True,
 ) -> int:
-    """Open a tmux window for a specific stage driver.
+    """Open a multiplexer window for a specific stage driver.
 
     Shared between ``start`` (first stage) and the orchestrator (later stages).
     Expects the task directory and driver-prompt.md to already exist.
 
-    The driver window opens in the **owner session's** tmux (``fleet-<owner_session>``,
+    The driver window opens in the **owner session** (``fleet-<owner_session>``,
     Issue #166 §5.2) — the session that spawned the task holds both the leader
     window and its drivers' windows. ``project_name`` is used only for the session
     *display* name so resumable panes are distinguishable in the picker.
@@ -139,8 +138,9 @@ def launch_stage_driver(
     buffer_name = f"fleet-task-{task_id}"
 
     session = f"fleet-{owner_session}"
-    if not tmux_mod.session_exists(session):
-        tmux_mod.new_session(session)
+    m = mux.get()
+    if not m.session_exists(session):
+        m.new_session(session, window="leader")
     window = f"{task_id}·{role_name}"
     effective_cwd = window_cwd or task_dir
 
@@ -151,11 +151,6 @@ def launch_stage_driver(
             "FLEET_STATE_DIR": str(state_dir),
             "PATH": f"{repo_root}{os.pathsep}{os.environ.get('PATH', '')}",
         }
-        if replace_task_windows:
-            tmux_mod.kill_task_windows(session, task_id)
-        tmux_mod.new_window(session, window, cwd=str(effective_cwd), env=driver_env)
-        prompt_pointer.load_pointer_buffer(tmux_mod, buffer_name, prompt_path)
-
         # Session display name so the user can tell resumable sessions apart
         # in the picker: <project>-<task_id>-<role> (role disambiguates
         # pair_review / multi_stage panes on the same task).
@@ -163,8 +158,15 @@ def launch_stage_driver(
 
         cli = agents_mod.cli_command(agent_spec)
         cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
-        cli_quoted = " ".join(shlex.quote(p) for p in cli)
-        tmux_mod.send_keys(session, window, cli_quoted)
+
+        if replace_task_windows:
+            mux.kill_task_windows(session, task_id, backend=m)
+        m.new_window(
+            session, window, argv=cli, cwd=str(effective_cwd), env=driver_env
+        )
+        # Stage the pointer for a manual paste (tmux: named buffer, C-b ]) —
+        # the --no-auto-paste path; cleanup drops it.
+        manual_paste_hint = prompt_pointer.preload_pointer(m, buffer_name, prompt_path)
 
         if auto_paste:
             log_path = prompt_deliverer.start_detached(
@@ -173,23 +175,25 @@ def launch_stage_driver(
                 session=session,
                 window=window,
                 prompt_path=prompt_path,
-                buffer_name=buffer_name,
                 agent_spec=agent_spec,
                 session_name=session_name,
                 timeout=prompt_timeout,
                 initial_delay=max(0.0, prompt_delay),
             )
-    except tmux_mod.TmuxError as e:
-        print(f"warn: tmux setup partially failed: {e}", file=sys.stderr)
+    except mux.MuxError as e:
+        print(f"warn: {m.name} setup partially failed: {e}", file=sys.stderr)
         return 0
 
-    print(f"tmux: session={session} window={window}")
-    print(f"attach:        tmux attach -t {session}:{window}")
+    print(f"{m.name}: session={session} window={window}")
+    print(f"attach:        {m.attach_hint(session, window)}")
     if auto_paste:
         print(f"prompt:        deliverer detached (log: {log_path})")
     if not auto_paste:
-        print("paste pointer: inside the pane press C-b ], then Enter")
-        print(f"           or: fleet-agent send-prompt {task_id}")
+        if manual_paste_hint:
+            print(f"paste pointer: {manual_paste_hint}")
+            print(f"           or: fleet-agent send-prompt {task_id}")
+        else:
+            print(f"paste pointer: fleet-agent send-prompt {task_id}")
     return 0
 
 
@@ -199,8 +203,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Start a new task",
         description=(
             "Create the task's state, render driver-prompt.md, and open a "
-            "tmux window running the first stage's agent. With --dry-run the "
-            "tmux step is skipped (state is still written)."
+            "multiplexer window running the first stage's agent. With --dry-run the "
+            "multiplexer step is skipped (state is still written)."
         ),
     )
     p.add_argument("task_id", help="Unique task id within the project")
@@ -252,7 +256,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Write state but don't touch tmux. Useful in CI / tests.",
+        help="Write state but don't touch the multiplexer (tmux). Useful in CI / tests.",
     )
     p.add_argument(
         "--no-auto-paste",
@@ -260,8 +264,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         dest="auto_paste",
         help=(
             "Disable the default auto-paste of the driver-prompt pointer into the pane. "
-            "The pointer is still preloaded into a tmux buffer for manual paste "
-            "(C-b ] then Enter, or fleet-agent send-prompt)."
+            "On tmux the pointer is still preloaded into a named buffer for manual "
+            "paste (C-b ] then Enter); or run fleet-agent send-prompt."
         ),
     )
     p.set_defaults(auto_paste=True)
@@ -591,10 +595,11 @@ def run(args: argparse.Namespace) -> int:
         print("dry-run: tmux step skipped.")
         return 0
 
-    if not tmux_mod.available():
+    m = mux.get()
+    if not m.available():
         print(
-            "warn: tmux not on PATH; skipping window creation. "
-            "Re-run with tmux installed, or use --dry-run.",
+            f"warn: {m.name} not on PATH; skipping window creation. "
+            f"Re-run with {m.name} installed, or use --dry-run.",
             file=sys.stderr,
         )
         return 0

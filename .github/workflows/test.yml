@@ -25,6 +25,12 @@ jobs:
         run: ./fleet preflight || true   # claude/codex are optional; ignore exit code
       - name: Run unittest
         run: python -m unittest discover tests
+      - name: Run live tmux backend tests
+        # Exercises fleet.mux.tmux against a real tmux server (isolated,
+        # randomized session name; torn down by the tests).
+        env:
+          FLEET_LIVE_TMUX: "1"
+        run: python -m unittest tests.test_mux_tmux -v
 
   unittest-windows:
     # Windows-compatible core (docs/windows-support.md §7 PR1). No tmux here:
