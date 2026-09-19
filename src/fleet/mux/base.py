@@ -110,6 +110,15 @@ class Mux:
     #: Backend name, e.g. ``"tmux"`` / ``"zellij"``.
     name: str = "?"
 
+    #: Whether :meth:`kill_window` also ends a ``fleet-agent`` process that
+    #: was started from *inside* that window (e.g. a driver's ``done``).
+    #: When true, a cross-stage advance run from a task pane is deferred to a
+    #: detached helper (:mod:`fleet.deferred_launch`) so the caller is not
+    #: killed before the next stage's window exists. False for tmux (the
+    #: existing behavior is kept); true for zellij on Windows, where closing a
+    #: tab ends every process attached to its console.
+    window_close_kills_caller: bool = False
+
     # -- lifecycle -----------------------------------------------------------
 
     def available(self) -> bool:

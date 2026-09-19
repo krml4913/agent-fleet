@@ -11,7 +11,9 @@ processing order within a stage is:
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from . import state as state_mod
@@ -530,9 +532,6 @@ def _run_verify_command(state_dir: Path, task: dict, verify: dict) -> _VerifyRes
             cwd=str(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as e:
@@ -560,8 +559,50 @@ def _coerce_output(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
+        # Same newline handling as the former text-mode capture.
+        return _decode_output(value).replace("\r\n", "\n").replace("\r", "\n")
     return str(value)
+
+
+def _legacy_console_encoding() -> str | None:
+    """Windows: the OEM code page cmd.exe built-ins write when piped (e.g. cp932)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        return f"cp{ctypes.windll.kernel32.GetOEMCP()}"
+    except (AttributeError, OSError):
+        return None
+
+
+def _decode_output(data: bytes) -> str:
+    """Decode verify output: UTF-8, else (Windows) the console code page per line.
+
+    Verify runs under ``cmd.exe`` on Windows, whose built-ins (``type``,
+    ``dir``, …) print localized messages in the OEM code page — e.g. cp932
+    ``指定されたファイルが見つかりません。`` — which decoded as UTF-8 turned
+    into U+FFFD noise in the driver's inbox. Tools such as Python (with
+    ``PYTHONUTF8``) print UTF-8, so the two can be mixed: each line that is
+    not valid UTF-8 is decoded with the legacy code page instead.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    legacy = _legacy_console_encoding()
+    if not legacy:
+        return data.decode("utf-8", errors="replace")
+    out: list[str] = []
+    for line in data.splitlines(keepends=True):
+        try:
+            out.append(line.decode("utf-8"))
+        except UnicodeDecodeError:
+            try:
+                out.append(line.decode(legacy))
+            except (UnicodeDecodeError, LookupError):
+                out.append(line.decode("utf-8", errors="replace"))
+    return "".join(out)
 
 
 def _head_tail(text: str, limit: int = VERIFY_OUTPUT_LIMIT) -> str:
@@ -646,13 +687,37 @@ def _launch_driver_for_stage(
     stage: dict,
     *,
     replace_task_windows: bool = True,
+    defer_if_in_pane: bool = True,
 ) -> None:
-    """Render driver-prompt.md for a stage and open its multiplexer window."""
+    """Render driver-prompt.md for a stage and open its multiplexer window.
+
+    With ``replace_task_windows`` the task's existing windows are killed
+    first. When that would kill the calling process itself (the caller runs
+    in one of the task's panes and the backend's window close ends it, see
+    :attr:`fleet.mux.Mux.window_close_kills_caller`), the launch is handed to
+    :mod:`fleet.deferred_launch`, which runs it after the caller has exited.
+    """
+    from . import deferred_launch
     from . import driver_prompt as dp
     from . import mux
     from .commands.start import launch_stage_driver
 
-    if not mux.get().available():
+    m = mux.get()
+    if not m.available():
+        return
+
+    if (
+        defer_if_in_pane
+        and replace_task_windows
+        and getattr(m, "window_close_kills_caller", False)
+        and deferred_launch.running_in_task_pane(task_id)
+    ):
+        deferred_launch.start_detached(
+            state_dir=state_dir,
+            task_id=task_id,
+            stage_idx=stage_idx,
+            wait_pid=os.getpid(),
+        )
         return
 
     task_dir_path = state_mod.task_dir(state_dir, task_id)

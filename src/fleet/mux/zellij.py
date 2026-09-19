@@ -169,6 +169,20 @@ def terminal_panes(panes: list[dict[str, Any]], tab_name: str) -> list[dict[str,
     ]
 
 
+#: Variables zellij sets inside its panes. A ``zellij attach S`` that sees
+#: ``ZELLIJ_SESSION_NAME=S`` panics ("You are trying to attach to the current
+#: session … This is not supported", exit 101), so a fleet command run from a
+#: pane of ``S`` (the leader's ``start``, a driver's ``done``) could not attach
+#: the #5594 temp client.
+ZELLIJ_PANE_VARS: tuple[str, ...] = ("ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID")
+
+
+def client_env(env: dict[str, str] | os._Environ) -> dict[str, str]:
+    """``env`` without the pane markers in :data:`ZELLIJ_PANE_VARS`."""
+    drop = {v.upper() for v in ZELLIJ_PANE_VARS}
+    return {k: v for k, v in env.items() if k.upper() not in drop}
+
+
 def _safe_filename(name: str) -> str:
     out = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
     return out or "_"
@@ -178,6 +192,13 @@ class ZellijMux(Mux):
     """The zellij backend (the default on Windows)."""
 
     name = "zellij"
+
+    @property
+    def window_close_kills_caller(self) -> bool:  # type: ignore[override]
+        """Windows: ``close-tab-by-id`` ends every process on the tab's console,
+        including a ``fleet-agent done`` run from that tab (verified in the
+        two-stage E2E). Not observed on POSIX, which keeps tmux's behavior."""
+        return _is_windows()
 
     def __init__(
         self,
@@ -277,6 +298,7 @@ class ZellijMux(Mux):
         our stdio.
         """
         args = [str(a) for a in argv]
+        env = client_env(os.environ)
         if _is_windows():
             si = subprocess.STARTUPINFO()
             si.dwFlags |= STARTF_USESHOWWINDOW
@@ -285,16 +307,18 @@ class ZellijMux(Mux):
                 return subprocess.Popen(
                     args,
                     cwd=cwd,
+                    env=env,
                     creationflags=CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB,
                     startupinfo=si,
                 )
             except OSError:
                 return subprocess.Popen(
-                    args, cwd=cwd, creationflags=CREATE_NEW_CONSOLE, startupinfo=si
+                    args, cwd=cwd, env=env, creationflags=CREATE_NEW_CONSOLE, startupinfo=si
                 )
         return subprocess.Popen(
             args,
             cwd=cwd,
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

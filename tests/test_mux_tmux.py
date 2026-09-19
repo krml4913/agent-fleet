@@ -125,6 +125,13 @@ def _patch_run():
     return unittest.mock.patch("fleet.mux.tmux._run", return_value=None)
 
 
+class WindowCloseSemanticsTests(unittest.TestCase):
+    def test_tmux_keeps_synchronous_stage_launch(self) -> None:
+        # The deferred (detached) stage launch is zellij-on-Windows only; tmux
+        # keeps the existing in-process kill → new-window order.
+        self.assertFalse(TmuxMux().window_close_kills_caller)
+
+
 class NewWindowMockTests(unittest.TestCase):
     """Mock-based tests for new_window / new_session — no live tmux required."""
 
