@@ -133,6 +133,47 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
   was deferred because it writes to the user's claude config.
 - **#261** re-run a live tmux E2E of multi-stage handoff after #253.
 
+## 7. First fleet-leader run (2026-09-19)
+
+After the handoff, a fleet leader (claude:opus in `fleet-main:leader`) ran the
+work with claude:sonnet drivers. It reviewed, approved and merged the PRs
+itself, and filed each fleet bug it hit as an issue. What that run found and
+fixed:
+
+- **Setup gaps.** A fresh project has no formations or roles seeded, and the
+  error gave no next step. Fixed: seed hint and `fleet formation|role seed`
+  (#267/#271). `--project` is now accepted after a subcommand (#279/#280).
+  `fleet notify on|off` turns on the leader-pane push (#276/#277). The
+  `memory write` placeholder bug is fixed (#269/#270). Help text is now
+  multiplexer-neutral (#275/#278).
+- **Leader-pane push.** A notification showed `PR=(none yet)` when the outbox
+  said "PR #N" (#281/#282). It was typed into a busy leader and either
+  surfaced mid-turn or sat unsent in the composer (#288/#290). `ask` never
+  reached the leader (#287/#291). A single transient zellij error stranded the
+  queue for about an hour with no log (#292/#293).
+- **Driver lifecycle.** One transient `tab not found`, hit while another tab
+  was being closed, failed a task at prompt delivery. `send-prompt` recovered
+  the driver but left the task `failed`, and the leader was never told
+  (#289/#293). `reject` carried no reason, and the relaunched driver re-submitted
+  unchanged work (#285/#286).
+- **Discipline.** Drivers wait for green CI on every job before `done` (#273,
+  after a POSIX-only test failure passed locally on Windows). Drivers are
+  refused `merge` / `cleanup` from a driver pane (#283/#284, refs #188). A
+  flaky git-maintenance test was fixed (#272/#274).
+- **Also landed:** verify `shell:` field (#260/#266); usage recorded for
+  workspace=none tasks (#264/#268).
+
+Verified live on Windows/zellij in that run: solo and `pair_review_claude`
+(implementer → verify gate → claude code-reviewer → approval), the verify
+failure → retry loop, reject with reason, `ask` → leader `inbox` answer →
+driver resumes, and the leader-pane push, including `submit_confirmed`. Worktrees
+inside the trusted clone needed no trust-dialog attach (comment on #259).
+
+Runtime config the leader created: project formations `solo`,
+`pair_review_claude` and `smoke_verify` (a throwaway E2E smoke), global roles
+`driver`, `implementer` and `code-reviewer`, and `fleet notify on` for
+agent-fleet.
+
 ## 6. Where to look
 
 - `docs/windows-support.md` — the spec, the zellij quirks, design decisions
