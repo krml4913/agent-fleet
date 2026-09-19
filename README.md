@@ -384,8 +384,10 @@ steer a client to a tab only while that client is the only one attached:
   asks whether to trust the folder. fleet does not answer it: the task is
   surfaced as a boot gate (`awaiting_orders` + a notification), and a human
   must attach and confirm. The prompt is then delivered automatically.
-- **Verify commands run under `cmd.exe`** on Windows, so a
-  `verify` command must be valid cmd syntax.
+- **Verify commands run under `cmd.exe`** on Windows by default, so a
+  `verify` command must be valid cmd syntax — unless the formation sets
+  `verify.shell` (`bash` = Git Bash, `pwsh`, `powershell`, `sh`, `cmd`; see
+  [docs/formations.md](docs/formations.md) §2.5).
 - **codex under zellij is not verified yet.** claude drivers are.
 
 Desktop notifications use a Windows toast (on by default; set

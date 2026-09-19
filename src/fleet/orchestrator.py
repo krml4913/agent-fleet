@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from . import state as state_mod
+from . import verify_shell
 from .events import append_event, truncate_text, utcnow_iso
 
 # Default peer_review iteration cap when a stage omits peer_review.max_iterations.
@@ -499,6 +500,7 @@ def _run_verify_gate(
         returncode=result.returncode,
         timed_out=result.timed_out,
         output=output,
+        shell=verify.get("shell"),
     )
     _append_handoff_inbox(state_dir, task_id, message)
     if not dry_run:
@@ -526,9 +528,16 @@ def _run_verify_command(state_dir: Path, task: dict, verify: dict) -> _VerifyRes
     cwd = _verify_cwd(state_dir, task)
     timeout = _verify_timeout_seconds(verify)
     try:
+        argv = verify_shell.build_argv(verify.get("shell"), command)
+    except verify_shell.ShellUnavailableError as e:
+        # Nothing ran: report it like a failed check (127 = "command not
+        # found") so the driver sees the reason, and the usual iteration cap
+        # escalates to the user if the shell never becomes available.
+        return _VerifyResult(127, f"[fleet verify] {e}\n")
+    try:
         completed = subprocess.run(
-            command,
-            shell=True,
+            command if argv is None else argv,
+            shell=argv is None,
             cwd=str(cwd),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -626,12 +635,14 @@ def _verify_failure_handoff_message(
     returncode: int,
     timed_out: bool,
     output: str,
+    shell: str | None = None,
 ) -> str:
     status = "timed out" if timed_out else f"exited {returncode}"
+    shell_note = f" (shell: {shell})" if shell else ""
     return (
         f"[fleet verify] role={stage.get('role', 'driver')} iteration="
         f"{iteration}/{max_iterations} command {status}.\n\n"
-        f"Command:\n```\n{command}\n```\n\n"
+        f"Command{shell_note}:\n```\n{command}\n```\n\n"
         "Captured output (stdout+stderr, head+tail if truncated):\n"
         f"```\n{output}\n```\n\n"
         "Fix the issue and call `fleet-agent done --result approved` again."

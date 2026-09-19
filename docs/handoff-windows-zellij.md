@@ -131,8 +131,6 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
 - **#259** claude's workspace-trust dialog needs one manual attach per
   worktree. There is a proposal for an opt-in `fleet init --trust-claude`; it
   was deferred because it writes to the user's claude config.
-- **#260** optional `shell:` field for verify commands (they run under cmd.exe
-  on Windows today).
 - **#261** re-run a live tmux E2E of multi-stage handoff after #253.
 - **#264** token usage is not recorded for workspace=none tasks. Side
   effect of #262, which opens workspace=none driver panes in the project root

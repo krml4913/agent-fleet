@@ -870,7 +870,7 @@ schema language (JSON Schema etc.) is used (§1.3 principle 1).
 |---|---|---|
 | `role` | required | the role the driver plays (e.g. `driver`, `implementer`, `designer`) |
 | `agent` | optional | the agent to use (e.g. `claude:sonnet`). If omitted, the `--agent` argument value is used |
-| `verify` | optional | mechanical check gate. Subfields: `command` (required string), `timeout` (optional positive integer seconds, default 600), `max_iterations` (optional positive integer, default 3) |
+| `verify` | optional | mechanical check gate. Subfields: `command` (required string), `shell` (optional: `bash` / `sh` / `pwsh` / `powershell` / `cmd`; default is the platform shell — `cmd.exe` on Windows), `timeout` (optional positive integer seconds, default 600), `max_iterations` (optional positive integer, default 3) |
 | `peer_review` | optional | specified when inserting AI review. Subfields: `role` (reviewer's role, required), `agent` (reviewer's agent, optional). If `agent` is omitted, it falls back in order to the stage's `agent` → `claude:sonnet` |
 | `user_approval` | optional | human approval point. The string `"required"` / `"optional"`, or an object form |
 
@@ -883,7 +883,8 @@ boundary (P8) cannot silently vanish into a bare solo:
   object carrying a bool `required`;
 - a present `peer_review` must be an object carrying `role`;
 - a present `verify` must be an object carrying a non-empty `command` string;
-  optional `timeout` and `max_iterations` must be positive integers;
+  optional `timeout` and `max_iterations` must be positive integers, and an
+  optional `shell` must be one of `bash`, `sh`, `pwsh`, `powershell`, `cmd`;
 - a stage key that is a **near-miss misspelling** of a gate key — a case-only
   difference or an edit distance threshold from `user_approval` / `peer_review`
   / `verify` (e.g. `user_aproval`, `peer_reveiw`, `verfy`) — is rejected. The
