@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +20,21 @@ from tests._fake_mux import use_fake_mux  # noqa: E402
 
 READY_PANE = 'status\n❯ Try "help"\n'      # claude idle prompt
 BUSY_PANE = "✻ Thinking… (esc to interrupt)\n"  # mid-turn, no ❯ prompt
+
+_REAL_RUN_CAPTURE = leader_notifier._run_capture
+_lookup_patch = None
+
+
+def setUpModule() -> None:
+    """Hermetic: no test may run a real ``git`` / ``gh`` for the PR lookups."""
+    global _lookup_patch
+    _lookup_patch = patch.object(leader_notifier, "_run_capture", return_value=None)
+    _lookup_patch.start()
+
+
+def tearDownModule() -> None:
+    if _lookup_patch is not None:
+        _lookup_patch.stop()
 
 
 class LeaderNotifierTests(unittest.TestCase):
@@ -384,6 +400,227 @@ class LeaderNotifierTests(unittest.TestCase):
         finally:
             leader_notifier._release_lock(fp)
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+
+class PrUrlLookupTests(unittest.TestCase):
+    """``scan_pr_url``: full URL, then ``PR #<n>`` + origin remote, then ``gh`` by branch."""
+
+    BRANCH = "fleet/task/7"
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name)
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        self.state_dir = root / "state"
+        state.init_state(self.state_dir, name="demo", repo=self.repo.resolve())
+        state.save_task(self.state_dir, "7", {"id": "7", "branch": self.BRANCH})
+        leader_notifier._ORIGIN_CACHE.clear()
+        self.addCleanup(leader_notifier._ORIGIN_CACHE.clear)
+        self.calls: list[tuple[list[str], str | None]] = []
+        self.remote = "https://github.com/o/r.git\n"
+        self.gh_out: str | None = json.dumps([{"url": "https://github.com/o/r/pull/9"}])
+        self.gh_path: str | None = "/usr/bin/gh"
+        for patcher in (
+            patch.object(leader_notifier, "_run_capture", side_effect=self._fake_run),
+            patch("fleet.leader_notifier.shutil.which", side_effect=lambda _n: self.gh_path),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _fake_run(self, argv, cwd):
+        self.calls.append((list(argv), str(cwd) if cwd else None))
+        return self.remote if argv[0] == "git" else self.gh_out
+
+    def _outbox(self, text: str) -> None:
+        tdir = state.task_dir(self.state_dir, "7")
+        tdir.mkdir(parents=True, exist_ok=True)
+        (tdir / "outbox.md").write_text(text, encoding="utf-8")
+
+    def _gh_calls(self) -> list[list[str]]:
+        return [a for a, _ in self.calls if a[0] != "git"]
+
+    # -- 1. full URL -------------------------------------------------------
+
+    def test_full_url_wins_without_any_subprocess(self) -> None:
+        self._outbox("PR #5 opened\nhttps://github.com/o/r/pull/12\nlater: PR #99\n")
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True),
+            "https://github.com/o/r/pull/12",
+        )
+        self.assertEqual(self.calls, [])
+
+    # -- 2. PR #<n> + origin ----------------------------------------------
+
+    def test_pr_number_is_expanded_with_origin_remote(self) -> None:
+        self._outbox("## done\nPR #280 opened, CI green\n")
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7"),
+            "https://github.com/o/r/pull/280",
+        )
+        self.assertEqual(self.calls, [(["git", "remote", "get-url", "origin"], str(self.repo.resolve()))])
+
+    def test_pr_number_uses_last_mention_and_pull_request_wording(self) -> None:
+        self._outbox("PR #5 superseded by Pull Request #6\n")
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7"), "https://github.com/o/r/pull/6"
+        )
+
+    def test_origin_remote_forms(self) -> None:
+        cases = [
+            "https://github.com/o/r.git",
+            "https://github.com/o/r",
+            "https://user@github.com/o/r.git",
+            "git@github.com:o/r.git",
+            "ssh://git@github.com/o/r.git",
+            "ssh://git@github.com:22/o/r",
+        ]
+        self._outbox("PR #3\n")
+        for remote in cases:
+            with self.subTest(remote=remote):
+                leader_notifier._ORIGIN_CACHE.clear()
+                self.remote = remote + "\n"
+                self.assertEqual(
+                    leader_notifier.scan_pr_url(self.state_dir, "7"),
+                    "https://github.com/o/r/pull/3",
+                )
+
+    def test_non_github_or_missing_origin_yields_none(self) -> None:
+        self._outbox("PR #3\n")
+        for remote in ("git@gitlab.com:o/r.git\n", ""):
+            with self.subTest(remote=remote):
+                leader_notifier._ORIGIN_CACHE.clear()
+                self.remote = remote
+                self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7"))
+
+    def test_origin_lookup_is_cached_per_directory(self) -> None:
+        self._outbox("PR #3\n")
+        leader_notifier.scan_pr_url(self.state_dir, "7")
+        leader_notifier.scan_pr_url(self.state_dir, "7")
+        self.assertEqual(len(self.calls), 1)
+
+    def test_git_failure_yields_none(self) -> None:
+        self._outbox("PR #3\n")
+        with patch.object(leader_notifier, "_run_capture", return_value=None):
+            self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7"))
+
+    # -- 3. gh by branch ---------------------------------------------------
+
+    def test_gh_fallback_looks_up_by_branch(self) -> None:
+        self._outbox("finished, no PR mentioned\n")
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True),
+            "https://github.com/o/r/pull/9",
+        )
+        self.assertEqual(
+            self._gh_calls(),
+            [["/usr/bin/gh", "pr", "list", "--head", self.BRANCH, "--state", "all",
+              "--json", "url", "--limit", "1"]],
+        )
+        self.assertEqual(self.calls[-1][1], str(self.repo.resolve()))
+
+    def test_gh_fallback_works_without_outbox_and_prefers_explicit_branch(self) -> None:
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7", branch="other/br", use_gh=True),
+            "https://github.com/o/r/pull/9",
+        )
+        self.assertIn("other/br", self._gh_calls()[0])
+
+    def test_gh_is_off_by_default(self) -> None:
+        self._outbox("nothing here\n")
+        self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7"))
+        self.assertEqual(self._gh_calls(), [])
+
+    def test_gh_not_on_path_is_skipped(self) -> None:
+        self.gh_path = None
+        self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True))
+        self.assertEqual(self.calls, [])
+
+    def test_gh_bad_output_yields_none(self) -> None:
+        for out in (None, "", "not json", "[]", "{}", '[{"number": 1}]', '[{"url": 5}]'):
+            with self.subTest(out=out):
+                self.gh_out = out
+                self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True))
+
+    def test_outbox_pr_number_is_preferred_over_gh(self) -> None:
+        self._outbox("PR #280\n")
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True),
+            "https://github.com/o/r/pull/280",
+        )
+        self.assertEqual(self._gh_calls(), [])
+
+    def test_gh_used_when_origin_unresolvable(self) -> None:
+        self._outbox("PR #280\n")
+        self.remote = ""
+        self.assertEqual(
+            leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True),
+            "https://github.com/o/r/pull/9",
+        )
+
+    # -- never raises / never blocks done ---------------------------------
+
+    def test_scan_never_raises(self) -> None:
+        self._outbox("PR #3\n")
+        with patch.object(leader_notifier, "_run_capture", side_effect=RuntimeError("boom")):
+            self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "7", use_gh=True))
+
+    def test_run_capture_swallows_timeouts_and_missing_binaries(self) -> None:
+        for exc in (
+            subprocess.TimeoutExpired(cmd="gh", timeout=1),
+            FileNotFoundError("gh"),
+            OSError("nope"),
+        ):
+            with self.subTest(exc=type(exc).__name__):
+                with patch("fleet.leader_notifier.subprocess.run", side_effect=exc):
+                    self.assertIsNone(_REAL_RUN_CAPTURE(["gh", "x"], None))
+
+    def test_run_capture_returns_stdout_only_on_success(self) -> None:
+        ok = subprocess.CompletedProcess(["x"], 0, stdout="out\n", stderr="")
+        bad = subprocess.CompletedProcess(["x"], 1, stdout="out\n", stderr="err")
+        with patch("fleet.leader_notifier.subprocess.run", return_value=ok) as run:
+            self.assertEqual(_REAL_RUN_CAPTURE(["x"], self.repo), "out\n")
+            kwargs = run.call_args.kwargs
+            self.assertEqual(kwargs["timeout"], leader_notifier.LOOKUP_TIMEOUT_SECONDS)
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertEqual(kwargs["cwd"], str(self.repo))
+            self.assertNotIn("shell", kwargs)
+        with patch("fleet.leader_notifier.subprocess.run", return_value=bad):
+            self.assertIsNone(_REAL_RUN_CAPTURE(["x"], None))
+
+    # -- call sites --------------------------------------------------------
+
+    def test_build_record_resolves_pr_number_but_never_calls_gh(self) -> None:
+        self._outbox("PR #280\n")
+        rec = leader_notifier.build_record(
+            state_dir=self.state_dir, task_id="7", status="completed",
+            branch=self.BRANCH, worktree=None, summary="done",
+        )
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/280")
+        self.assertEqual(self._gh_calls(), [])
+
+    def test_build_record_does_not_call_gh_when_nothing_found(self) -> None:
+        rec = leader_notifier.build_record(
+            state_dir=self.state_dir, task_id="7", status="completed",
+            branch=self.BRANCH, worktree=None, summary="done",
+        )
+        self.assertIsNone(rec["pr_url"])
+        self.assertEqual(self._gh_calls(), [])
+
+    def test_refill_falls_back_to_gh_by_record_branch(self) -> None:
+        rec = {"task_id": "7", "state_dir": str(self.state_dir), "branch": "rec/branch",
+               "pr_url": None}
+        leader_notifier._refill_pr_urls([rec])
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/9")
+        self.assertIn("rec/branch", self._gh_calls()[0])
+
+    def test_refill_resolves_pr_number_written_after_done(self) -> None:
+        rec = {"task_id": "7", "state_dir": str(self.state_dir), "branch": self.BRANCH,
+               "pr_url": None}
+        self._outbox("PR #280\n")
+        leader_notifier._refill_pr_urls([rec])
+        self.assertEqual(rec["pr_url"], "https://github.com/o/r/pull/280")
 
 
 class DoneHookTests(unittest.TestCase):
