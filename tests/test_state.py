@@ -323,7 +323,7 @@ class DashboardTests(_FleetHomeBase):
     def test_dashboard_rebuilt_on_task_save(self) -> None:
         state_dir = self._make_project()
         state.save_task(state_dir, "1", {"title": "T", "status": "pending"})
-        dash = (state_dir / "dashboard.md").read_text()
+        dash = (state_dir / "dashboard.md").read_text(encoding="utf-8")
         self.assertIn("1", dash)
         self.assertIn("T", dash)
         self.assertIn("pending", dash)

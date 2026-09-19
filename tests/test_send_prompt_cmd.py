@@ -56,7 +56,7 @@ class SendPromptTests(unittest.TestCase):
     def test_no_session(self) -> None:
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)
-        (td / "driver-prompt.md").write_text("hello\n")
+        (td / "driver-prompt.md").write_text("hello\n", encoding="utf-8")
         # owner_session resolves the target tmux session (Issue #166); the label
         # here matches the project name, so the (absent) session is fleet-<name>.
         state.save_task(
@@ -75,7 +75,7 @@ class SendPromptTests(unittest.TestCase):
 
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)
-        (td / "driver-prompt.md").write_text("hello\n")
+        (td / "driver-prompt.md").write_text("hello\n", encoding="utf-8")
         state.save_task(
             self.state_dir,
             "1",
@@ -123,7 +123,7 @@ class SendPromptTests(unittest.TestCase):
 
         td = state.task_dir(self.state_dir, "missing-yaml")
         td.mkdir(parents=True)
-        (td / "driver-prompt.md").write_text("hello\n")
+        (td / "driver-prompt.md").write_text("hello\n", encoding="utf-8")
         mock_resolve.return_value = self.state_dir
         mock_tmux.available.return_value = True
         mock_tmux.session_exists.return_value = True

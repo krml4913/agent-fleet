@@ -36,12 +36,12 @@ class NotifyTests(unittest.TestCase):
             "macos:\n  enabled: false\n"
             "slack:\n  enabled: false\n  webhook_url: ''\n"
         )
-        (self.state_dir / notify.CONFIG_FILE).write_text(cfg)
+        (self.state_dir / notify.CONFIG_FILE).write_text(cfg, encoding="utf-8")
         # Must not call out to anything — and must not raise.
         notify.send(self.state_dir, "title", "message")
 
     def test_invalid_config_no_raise(self) -> None:
-        (self.state_dir / notify.CONFIG_FILE).write_text("{[}@@@")
+        (self.state_dir / notify.CONFIG_FILE).write_text("{[}@@@", encoding="utf-8")
         # Bad YAML → warning but no exception.
         notify.send(self.state_dir, "title", "message")
 
@@ -51,7 +51,7 @@ class NotifyTests(unittest.TestCase):
             "slack:\n  enabled: true\n"
             "  webhook_url: 'http://127.0.0.1:1/no-listener-here'\n"
         )
-        (self.state_dir / notify.CONFIG_FILE).write_text(cfg)
+        (self.state_dir / notify.CONFIG_FILE).write_text(cfg, encoding="utf-8")
         notify.send(self.state_dir, "title", "message")  # must not raise
 
 
@@ -79,7 +79,7 @@ class NoNotifyEnvTests(unittest.TestCase):
             "slack:\n  enabled: true\n"
             "  webhook_url: 'https://hooks.slack.com/fake'\n"
         )
-        (self.state_dir / notify.CONFIG_FILE).write_text(cfg)
+        (self.state_dir / notify.CONFIG_FILE).write_text(cfg, encoding="utf-8")
         with patch.dict(os.environ, {"FLEET_NO_NOTIFY": "1"}):
             with patch("fleet.notify._macos_notify") as mock_macos, \
                  patch("fleet.notify._slack_notify") as mock_slack:

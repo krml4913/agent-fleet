@@ -14,11 +14,10 @@ touch** by the leader (§4.1, §12.8), pointed at by ``leader-base.md``.
 """
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
 
 from . import state as state_mod
-from .paths import fleet_agent_bin
+from .paths import fleet_agent_bin, prompt_bin_ref
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "docs" / "prompts"
 _TEMPLATE_PATH = _PROMPTS_DIR / "leader-base.md"
@@ -89,7 +88,7 @@ def render(*, fleet_bin: str | None = None, session_label: str | None = None) ->
     """
     bin_path = fleet_bin if fleet_bin is not None else fleet_agent_bin()
     base = _TEMPLATE_PATH.read_text(encoding="utf-8").rstrip()
-    base = base.replace("fleet-agent", shlex.quote(bin_path))
+    base = base.replace("fleet-agent", prompt_bin_ref(bin_path))
 
     parts = [base]
     memory_section = _global_memory_index_section()
@@ -106,7 +105,7 @@ def render(*, fleet_bin: str | None = None, session_label: str | None = None) ->
         body
         + "\n\n---\n"
         + f"global memory:  {global_index}  — read this first\n"
-        + f"start cmd:  {shlex.quote(bin_path)} start <id> --project <name> --formation <name>"
+        + f"start cmd:  {prompt_bin_ref(bin_path)} start <id> --project <name> --formation <name>"
         + "  (always pass --project)\n"
         + "---\n"
     )

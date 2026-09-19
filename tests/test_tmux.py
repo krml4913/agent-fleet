@@ -52,7 +52,7 @@ class TmuxTests(unittest.TestCase):
 
     def test_load_and_paste_buffer(self) -> None:
         prompt_file = self.tmp / "prompt.txt"
-        prompt_file.write_text("hello buffer\n")
+        prompt_file.write_text("hello buffer\n", encoding="utf-8")
         tmux.load_buffer("fleet-test-buf", str(prompt_file))
         # Open a window so we can paste somewhere.
         tmux.new_window(SESSION, "scratch", cwd=str(self.tmp))

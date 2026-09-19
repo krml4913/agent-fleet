@@ -46,25 +46,25 @@ class InboxCmdTests(unittest.TestCase):
         r = self._run("inbox", "1", "Hello", "from", "leader", "--project", "demo")
         self.assertEqual(r.returncode, 0, r.stderr)
         inbox = self.state_dir / "tasks" / "task-1" / "inbox.md"
-        self.assertIn("Hello from leader", inbox.read_text())
+        self.assertIn("Hello from leader", inbox.read_text(encoding="utf-8"))
 
     def test_multiple_messages_accumulate(self) -> None:
         self._run("inbox", "1", "first", "--project", "demo")
         self._run("inbox", "1", "second", "--project", "demo")
-        text = (self.state_dir / "tasks" / "task-1" / "inbox.md").read_text()
+        text = (self.state_dir / "tasks" / "task-1" / "inbox.md").read_text(encoding="utf-8")
         self.assertIn("first", text)
         self.assertIn("second", text)
 
     def test_emits_event(self) -> None:
         self._run("inbox", "1", "msg", "--project", "demo")
         events_path = self.state_dir / "events.jsonl"
-        events = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        events = [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l]
         self.assertTrue(any(e["type"] == "inbox_message" for e in events))
 
     def test_event_contains_inbox_ts(self) -> None:
         self._run("inbox", "1", "msg", "--project", "demo")
         events_path = self.state_dir / "events.jsonl"
-        events = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        events = [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l]
         msg_events = [e for e in events if e["type"] == "inbox_message"]
         self.assertTrue(msg_events)
         self.assertIn("inbox_ts", msg_events[0])

@@ -29,7 +29,7 @@ class AskTests(unittest.TestCase):
         os.environ["FLEET_HOME"] = str(self.fleet_home)
         self.state_dir = make_project(self.fleet_home, "demo", self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
         # Spawn one task to ask about.
         result = run_fleet_agent(
@@ -51,7 +51,7 @@ class AskTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "--task-id", "1",
              "Should I use approach A or B?"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(self.project),
             env=env,
         )
@@ -59,10 +59,10 @@ class AskTests(unittest.TestCase):
 
         task = state.load_task(self.state_dir, "1")
         self.assertEqual(task["status"], "awaiting_orders")
-        questions = (self.state_dir / "tasks" / "task-1" / "questions.md").read_text()
+        questions = (self.state_dir / "tasks" / "task-1" / "questions.md").read_text(encoding="utf-8")
         self.assertIn("approach A or B", questions)
         events = [
-            json.loads(l) for l in (self.state_dir / "events.jsonl").read_text().splitlines() if l
+            json.loads(l) for l in (self.state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines() if l
         ]
         awaiting_orders_events = [e for e in events if e["type"] == "awaiting_orders"]
         self.assertEqual(len(awaiting_orders_events), 1)
@@ -75,7 +75,7 @@ class AskTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "from cwd"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(task_cwd),
             env=env,
         )
@@ -86,7 +86,7 @@ class AskTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         result = subprocess.run(
             [sys.executable, str(FLEET), "ask", "--task-id", "999", "?"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(self.project),
             env=env,
         )

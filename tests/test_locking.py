@@ -26,29 +26,29 @@ class AtomicWriteTests(unittest.TestCase):
         target = self.base / "out.txt"
         with atomic_write(target) as f:
             f.write("hello\n")
-        self.assertEqual(target.read_text(), "hello\n")
+        self.assertEqual(target.read_text(encoding="utf-8"), "hello\n")
 
     def test_creates_parents(self) -> None:
         target = self.base / "deep" / "nested" / "out.txt"
         with atomic_write(target) as f:
             f.write("ok")
-        self.assertEqual(target.read_text(), "ok")
+        self.assertEqual(target.read_text(encoding="utf-8"), "ok")
 
     def test_replaces_existing(self) -> None:
         target = self.base / "out.txt"
-        target.write_text("old")
+        target.write_text("old", encoding="utf-8")
         with atomic_write(target) as f:
             f.write("new")
-        self.assertEqual(target.read_text(), "new")
+        self.assertEqual(target.read_text(encoding="utf-8"), "new")
 
     def test_no_partial_on_exception(self) -> None:
         target = self.base / "out.txt"
-        target.write_text("preserved")
+        target.write_text("preserved", encoding="utf-8")
         with self.assertRaises(RuntimeError):
             with atomic_write(target) as f:
                 f.write("would be lost")
                 raise RuntimeError("boom")
-        self.assertEqual(target.read_text(), "preserved")
+        self.assertEqual(target.read_text(encoding="utf-8"), "preserved")
         # Temp file should have been cleaned up.
         leftover = [p for p in self.base.iterdir() if ".tmp" in p.name]
         self.assertEqual(leftover, [])
@@ -73,7 +73,7 @@ class AtomicWriteTests(unittest.TestCase):
         for t in threads:
             t.join()
 
-        final = target.read_text()
+        final = target.read_text(encoding="utf-8")
         self.assertIn(final, payloads)
 
 

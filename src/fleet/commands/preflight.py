@@ -83,7 +83,14 @@ def _check_command(name: str, version_argv: list[str], *, required: bool) -> Che
     if not shutil.which(name):
         return CheckResult(name, False, "not on PATH", required)
     try:
-        r = subprocess.run(version_argv, capture_output=True, text=True, timeout=5)
+        r = subprocess.run(
+            version_argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
         if r.returncode != 0:
             return CheckResult(name, False, f"non-zero from `{name}`", required)
         detail = (r.stdout or r.stderr).strip().splitlines()[0] if (r.stdout or r.stderr) else "found"
@@ -109,6 +116,8 @@ def _git_toplevel(cwd: Path) -> Path | None:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -198,6 +207,8 @@ def _codex_version() -> str | None:
             ["codex", "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -218,6 +229,8 @@ def _npm_latest_codex_version() -> str | None:
             ["npm", "view", "@openai/codex", "version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -235,6 +248,8 @@ def _npm_global_codex_version() -> str | None:
             ["npm", "root", "-g"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):

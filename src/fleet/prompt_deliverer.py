@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ from pathlib import Path
 from . import agents, notify, prompt_pointer, state as state_mod, tmux
 from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
+from .proc import spawn_detached
 
 
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
@@ -81,17 +81,7 @@ def start_detached(
     ]
     if session_name:
         args.extend(["--session-name", session_name])
-    with log_path.open("ab") as log:
-        subprocess.Popen(  # noqa: S603 - argv is constructed, no shell.
-            args,
-            cwd=str(repo_root),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-            close_fds=True,
-        )
+    spawn_detached(args, cwd=repo_root, env=env, log_path=log_path)
     append_event(
         state_dir / "events.jsonl",
         "prompt_deliverer_started",

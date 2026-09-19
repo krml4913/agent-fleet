@@ -48,7 +48,7 @@ class DoneTests(unittest.TestCase):
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo", repo=self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
         state.save_task(self.state_dir, "1", _solo_task_data("1"))
 
@@ -61,7 +61,7 @@ class DoneTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(cwd) if cwd else str(self.project),
             env=env,
         )
@@ -74,7 +74,7 @@ class DoneTests(unittest.TestCase):
         self.assertEqual(task["stages"][0]["status"], "done")
         events_path = self.state_dir / "events.jsonl"
         events = [
-            json.loads(line) for line in events_path.read_text().splitlines() if line
+            json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line
         ]
         self.assertTrue(any(e["type"] == "done" for e in events))
 
@@ -103,9 +103,9 @@ class DoneTests(unittest.TestCase):
         })
         task_dir = sd / "tasks" / "task-2"
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "driver-prompt.md").write_text("test prompt")
-        (task_dir / "inbox.md").write_text("")
-        (task_dir / "outbox.md").write_text("")
+        (task_dir / "driver-prompt.md").write_text("test prompt", encoding="utf-8")
+        (task_dir / "inbox.md").write_text("", encoding="utf-8")
+        (task_dir / "outbox.md").write_text("", encoding="utf-8")
 
         from fleet.commands import done as done_mod
 
@@ -175,7 +175,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo", repo=self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -264,9 +264,9 @@ class DoneNotifyTests(unittest.TestCase):
         })
         task_dir = self.state_dir / "tasks" / "task-ms1"
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "driver-prompt.md").write_text("test prompt")
-        (task_dir / "inbox.md").write_text("")
-        (task_dir / "outbox.md").write_text("")
+        (task_dir / "driver-prompt.md").write_text("test prompt", encoding="utf-8")
+        (task_dir / "inbox.md").write_text("", encoding="utf-8")
+        (task_dir / "outbox.md").write_text("", encoding="utf-8")
 
         ret, title, message = self._run_done("ms1")
 
@@ -299,9 +299,9 @@ class DoneNotifyTests(unittest.TestCase):
         })
         task_dir = self.state_dir / "tasks" / "task-pr1"
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "driver-prompt.md").write_text("test prompt")
-        (task_dir / "inbox.md").write_text("")
-        (task_dir / "outbox.md").write_text("")
+        (task_dir / "driver-prompt.md").write_text("test prompt", encoding="utf-8")
+        (task_dir / "inbox.md").write_text("", encoding="utf-8")
+        (task_dir / "outbox.md").write_text("", encoding="utf-8")
 
         ret, title, message = self._run_done("pr1")
 
@@ -332,9 +332,9 @@ class DoneNotifyTests(unittest.TestCase):
         })
         task_dir = self.state_dir / "tasks" / "task-prask"
         task_dir.mkdir(parents=True, exist_ok=True)
-        (task_dir / "driver-prompt.md").write_text("test prompt")
-        (task_dir / "inbox.md").write_text("")
-        (task_dir / "outbox.md").write_text("")
+        (task_dir / "driver-prompt.md").write_text("test prompt", encoding="utf-8")
+        (task_dir / "inbox.md").write_text("", encoding="utf-8")
+        (task_dir / "outbox.md").write_text("", encoding="utf-8")
 
         ret, title, message = self._run_done("prask")
 

@@ -34,7 +34,7 @@ class WorkspaceWorktreeTests(unittest.TestCase):
         })
 
         self.git("init", "-q", "-b", "main")
-        (self.project / "README.md").write_text("hello\n")
+        (self.project / "README.md").write_text("hello\n", encoding="utf-8")
         self.git("add", "README.md")
         self.git("commit", "-q", "-m", "initial")
 
@@ -85,7 +85,7 @@ class WorkspaceWorktreeTests(unittest.TestCase):
             check=True,
             env=self.git_env,
         )
-        (upstream_clone / "README.md").write_text("hello\nremote update\n")
+        (upstream_clone / "README.md").write_text("hello\nremote update\n", encoding="utf-8")
         self.git("add", "README.md", cwd=upstream_clone)
         self.git("commit", "-q", "-m", "remote update", cwd=upstream_clone)
         self.git("push", cwd=upstream_clone)

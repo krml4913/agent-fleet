@@ -76,6 +76,8 @@ def _git_toplevel(cwd: Path) -> Path | None:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -147,7 +149,7 @@ def launch_stage_driver(
         driver_env = {
             "FLEET_TASK_ID": task_id,
             "FLEET_STATE_DIR": str(state_dir),
-            "PATH": f"{repo_root}:{os.environ.get('PATH', '')}",
+            "PATH": f"{repo_root}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         if replace_task_windows:
             tmux_mod.kill_task_windows(session, task_id)
@@ -307,6 +309,8 @@ def _infer_project_from_promptfile(prompt_file: str) -> str | None:
     """
     projects_root = state_mod.fleet_home() / state_mod.PROJECTS_SUBDIR
     pf = Path(prompt_file).resolve()
+    if sys.platform == "win32":
+        return _infer_project_windows(pf, projects_root)
     try:
         rel = pf.relative_to(projects_root)
     except ValueError:
@@ -314,6 +318,30 @@ def _infer_project_from_promptfile(prompt_file: str) -> str | None:
     if not rel.parts:
         return None
     return rel.parts[0]
+
+
+def _infer_project_windows(pf: Path, projects_root: Path) -> str | None:
+    """Windows variant of the prefix check in :func:`_infer_project_from_promptfile`.
+
+    Windows paths are case-insensitive and accept both backslash and ``/`` separators, and
+    ``resolve()`` may expand 8.3 short names (``USERNA~1``) on one side only,
+    so compare ``os.path.normcase`` forms against both the raw and the resolved
+    projects root. The returned project name keeps the prompt-file's casing.
+    """
+    pf_str = os.path.normpath(str(pf))
+    pf_norm = os.path.normcase(pf_str)
+    roots = [str(projects_root)]
+    try:
+        roots.append(str(projects_root.resolve()))
+    except OSError:
+        pass
+    for root in roots:
+        root_norm = os.path.normcase(os.path.normpath(root)).rstrip("\\")
+        if pf_norm.startswith(root_norm + "\\"):
+            parts = [p for p in pf_str[len(root_norm) + 1:].split("\\") if p]
+            if parts:
+                return parts[0]
+    return None
 
 
 def _resolve_description(args: argparse.Namespace) -> tuple[str, str | None] | None:
@@ -336,7 +364,7 @@ def _resolve_description(args: argparse.Namespace) -> tuple[str, str | None] | N
     if has_prompt_file:
         path = Path(prompt_file)
         try:
-            body = path.read_text()
+            body = path.read_text(encoding="utf-8")
         except OSError as e:
             print(f"error: cannot read --prompt-file {path}: {e}", file=sys.stderr)
             return None
@@ -527,8 +555,8 @@ def run(args: argparse.Namespace) -> int:
     state_mod.save_task(state_dir, args.task_id, task_data)
 
     task_dir_path = state_mod.task_dir(state_dir, args.task_id)
-    (task_dir_path / "inbox.md").write_text("")
-    (task_dir_path / "outbox.md").write_text("")
+    (task_dir_path / "inbox.md").write_text("", encoding="utf-8")
+    (task_dir_path / "outbox.md").write_text("", encoding="utf-8")
     prompt = dp.render(
         task_id=args.task_id,
         description=description,
@@ -537,7 +565,7 @@ def run(args: argparse.Namespace) -> int:
         agent=agent_spec,
         state_dir=state_dir,
     )
-    (task_dir_path / "driver-prompt.md").write_text(prompt)
+    (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
     project_name = (_pre_project or {}).get("name", "?")
     append_event(

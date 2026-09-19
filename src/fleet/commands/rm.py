@@ -69,9 +69,18 @@ def run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        answer = input(
-            f"Remove project {args.name!r} and delete {state_dir}? [y/N] "
-        ).strip().lower()
+        try:
+            answer = input(
+                f"Remove project {args.name!r} and delete {state_dir}? [y/N] "
+            ).strip().lower()
+        except EOFError:
+            # isatty() can be True without an interactive reader — e.g. the
+            # Windows NUL device is a character device.
+            print(
+                "\nerror: no answer on stdin; pass --yes to confirm deletion",
+                file=sys.stderr,
+            )
+            return 1
         if answer not in ("y", "yes"):
             print("aborted.")
             return 1

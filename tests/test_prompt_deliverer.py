@@ -26,7 +26,7 @@ class PromptDelivererTests(unittest.TestCase):
         self.task_dir = state.task_dir(self.state_dir, self.task_id)
         self.task_dir.mkdir(parents=True)
         self.prompt_path = self.task_dir / "driver-prompt.md"
-        self.prompt_path.write_text("FULL-PROMPT-BODY-MARKER\n")
+        self.prompt_path.write_text("FULL-PROMPT-BODY-MARKER\n", encoding="utf-8")
         state.save_task(
             self.state_dir,
             self.task_id,
@@ -65,7 +65,7 @@ class PromptDelivererTests(unittest.TestCase):
 
     def _events(self) -> list[dict]:
         path = self.state_dir / "events.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines() if line]
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     def _ack_on_enter(self, *_args, **_kwargs) -> None:
         append_event(
@@ -472,7 +472,7 @@ class PromptDelivererTests(unittest.TestCase):
         events = self._events()
         self.assertEqual([e["type"] for e in events], ["awaiting_orders", "inbox_seen", "prompt_delivered"])
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "running")
-        self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text())
+        self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text(encoding="utf-8"))
 
     def test_timeout_marks_failed_and_emits_error(self) -> None:
         with patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="booting..."):

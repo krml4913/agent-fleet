@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -68,7 +69,8 @@ class LeaderPromptTests(_FleetHomeBase):
         self.assertIn("always pass --project", text)
 
     def test_mentions_fleet_agent_start(self) -> None:
-        self.assertIn("fleet-agent start", self._render())
+        # ``…/fleet-agent`` (``…/fleet-agent.cmd`` on Windows).
+        self.assertRegex(self._render(), r"fleet-agent(\.cmd)? start")
 
     def test_mentions_primary_maintainer(self) -> None:
         self.assertIn("PRIMARY maintainer", self._render())
@@ -130,7 +132,8 @@ class FleetAgentPathInjectionTests(_FleetHomeBase):
         bin_path = leader_prompt.fleet_agent_bin()
         self.assertTrue(Path(bin_path).is_absolute(), bin_path)
         self.assertTrue(Path(bin_path).is_file(), bin_path)
-        self.assertEqual(Path(bin_path).name, "fleet-agent")
+        expected_name = "fleet-agent.cmd" if sys.platform == "win32" else "fleet-agent"
+        self.assertEqual(Path(bin_path).name, expected_name)
 
     def test_render_rewrites_commands_to_absolute_path(self) -> None:
         bin_path = "/opt/agent-fleet/fleet-agent"
@@ -145,8 +148,15 @@ class FleetAgentPathInjectionTests(_FleetHomeBase):
         self.assertIn(f"{leader_prompt.fleet_agent_bin()} start", text)
 
     def test_render_quotes_path_with_spaces(self) -> None:
-        text = leader_prompt.render(fleet_bin="/opt/agent fleet/fleet-agent")
+        with mock.patch("fleet.paths._is_windows", return_value=False):
+            text = leader_prompt.render(fleet_bin="/opt/agent fleet/fleet-agent")
         self.assertIn("'/opt/agent fleet/fleet-agent' start", text)
+
+    def test_render_windows_embeds_unquoted_forward_slash_path(self) -> None:
+        with mock.patch("fleet.paths._is_windows", return_value=True):
+            text = leader_prompt.render(fleet_bin="D:/dev/agent-fleet/fleet-agent.cmd")
+        self.assertIn("D:/dev/agent-fleet/fleet-agent.cmd start", text)
+        self.assertNotIn("'D:/dev/agent-fleet/fleet-agent.cmd'", text)
 
     def test_footer_surfaces_project_flag_in_start_hint(self) -> None:
         text = leader_prompt.render(fleet_bin="/opt/agent-fleet/fleet-agent")

@@ -102,7 +102,32 @@ def build_parser_agent() -> argparse.ArgumentParser:
     return parser
 
 
+def _ensure_utf8_stdio() -> None:
+    """Make ``print`` of non-ASCII output (``✔``, ``·``, ``—``) never raise.
+
+    On Windows, stdout/stderr redirected to a pipe or file use the ANSI code
+    page (e.g. cp932) unless ``PYTHONUTF8=1`` is set, and characters outside
+    it raise ``UnicodeEncodeError``. Reconfigure such streams to UTF-8 with
+    ``errors="replace"``. POSIX is left untouched. Streams without
+    ``reconfigure`` (e.g. a test's ``io.StringIO``) are skipped.
+    """
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("_", "-")
+        if encoding in ("utf-8", "utf8"):
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _ensure_utf8_stdio()
     parser = build_parser_user()
     args = parser.parse_args(argv)
     rc = args.func(args)
@@ -110,6 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def main_agent(argv: Sequence[str] | None = None) -> int:
+    _ensure_utf8_stdio()
     parser = build_parser_agent()
     args = parser.parse_args(argv)
     rc = args.func(args)

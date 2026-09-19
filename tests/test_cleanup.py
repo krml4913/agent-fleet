@@ -27,7 +27,7 @@ class CleanupCmdTests(unittest.TestCase):
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo", repo=self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -39,7 +39,7 @@ class CleanupCmdTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(cwd) if cwd else str(self.project),
             env=env,
         )
@@ -69,7 +69,7 @@ class CleanupCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         events_path = self.state_dir / "events.jsonl"
         events = [
-            json.loads(line) for line in events_path.read_text().splitlines() if line
+            json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line
         ]
         self.assertTrue(any(e["type"] == "cleanup" for e in events))
 
@@ -96,20 +96,20 @@ class CleanupCmdTests(unittest.TestCase):
         archive_root.mkdir(parents=True, exist_ok=True)
         old = archive_root / "task-3"
         old.mkdir()
-        (old / "marker.txt").write_text("first run")
+        (old / "marker.txt").write_text("first run", encoding="utf-8")
 
         self._save("3", "completed")
         # Mark the live (re-spawned) dir so we can tell the two apart.
-        (state.task_dir(sd, "3") / "marker.txt").write_text("second run")
+        (state.task_dir(sd, "3") / "marker.txt").write_text("second run", encoding="utf-8")
 
         r = self._run("cleanup", "3", "--archive")
         self.assertEqual(r.returncode, 0, r.stderr)
 
         self.assertFalse((sd / "tasks" / "task-3").exists())  # no stranding
-        self.assertEqual((old / "marker.txt").read_text(), "first run")  # untouched
+        self.assertEqual((old / "marker.txt").read_text(encoding="utf-8"), "first run")  # untouched
         self.assertTrue((archive_root / "task-3-2").is_dir())
         self.assertEqual(
-            (archive_root / "task-3-2" / "marker.txt").read_text(), "second run"
+            (archive_root / "task-3-2" / "marker.txt").read_text(encoding="utf-8"), "second run"
         )
         self.assertEqual(state.list_tasks(sd), [])
 

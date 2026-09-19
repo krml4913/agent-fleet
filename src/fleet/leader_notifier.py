@@ -28,11 +28,9 @@ only dropped from a *retirement* path (``merge`` / ``cleanup`` call
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import uuid
@@ -41,7 +39,8 @@ from pathlib import Path
 from . import agents, state as state_mod, tmux
 from .adapters import REGISTRY
 from .events import append_event, utcnow_iso
-from .locking import atomic_update
+from .locking import atomic_update, lock_file, unlock_file
+from .proc import spawn_detached
 
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
@@ -297,17 +296,7 @@ def start_detached(
         "--poll-interval",
         str(poll_interval),
     ]
-    with log_path.open("ab") as log:
-        subprocess.Popen(  # noqa: S603 - argv is constructed, no shell.
-            args,
-            cwd=str(repo_root),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-            close_fds=True,
-        )
+    spawn_detached(args, cwd=repo_root, env=env, log_path=log_path)
     return log_path
 
 
@@ -477,10 +466,12 @@ def _acquire_lock(session_dir: Path):
     session_dir = Path(session_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
     lock_path = session_dir / LOCK_NAME
-    fp = open(lock_path, "a+")  # noqa: SIM115 - released in _release_lock
+    fp = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115 - released in _release_lock
     try:
-        fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquired = lock_file(fp, blocking=False)
     except OSError:
+        acquired = False
+    if not acquired:
         fp.close()
         return None
     return fp
@@ -488,7 +479,7 @@ def _acquire_lock(session_dir: Path):
 
 def _release_lock(fp) -> None:
     try:
-        fcntl.flock(fp.fileno(), fcntl.LOCK_UN)
+        unlock_file(fp)
     finally:
         fp.close()
 

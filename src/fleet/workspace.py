@@ -66,6 +66,8 @@ def _git(
             ["git", "-C", str(target), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -149,6 +151,8 @@ def _worktree_add(ctx: dict[str, Any]) -> None:
         ["git", "-C", str(target), "worktree", "add", str(worktree), "-b", branch],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if r.returncode != 0:
         raise RuntimeError(
@@ -182,6 +186,8 @@ def _worktree_remove(ctx: dict[str, Any]) -> None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if r.returncode != 0:
             print(
@@ -193,6 +199,8 @@ def _worktree_remove(ctx: dict[str, Any]) -> None:
         ["git", "-C", str(project_root), "branch", "-D", branch],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if r.returncode != 0:
         msg = r.stderr.strip()

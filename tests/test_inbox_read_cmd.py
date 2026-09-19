@@ -31,7 +31,7 @@ def run_fleet_agent(
     return subprocess.run(
         [sys.executable, str(FLEET), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
         cwd=str(cwd) if cwd else None,
         env=base_env,
     )
@@ -71,7 +71,7 @@ class InboxReadCmdTests(unittest.TestCase):
 
     def _events(self) -> list[dict]:
         path = self.state_dir / "events.jsonl"
-        return [json.loads(l) for l in path.read_text().splitlines() if l]
+        return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l]
 
     def test_prints_inbox_content(self) -> None:
         self._write_inbox("### 2026-05-20T10:00:00Z\n\nhello world\n\n")

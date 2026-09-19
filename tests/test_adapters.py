@@ -220,7 +220,7 @@ class DelivererUsesRegistryTests(unittest.TestCase):
         self.task_dir = state.task_dir(self.state_dir, self.task_id)
         self.task_dir.mkdir(parents=True)
         self.prompt_path = self.task_dir / "driver-prompt.md"
-        self.prompt_path.write_text("PROMPT\n")
+        self.prompt_path.write_text("PROMPT\n", encoding="utf-8")
         state.save_task(
             self.state_dir,
             self.task_id,
@@ -254,7 +254,7 @@ class DelivererUsesRegistryTests(unittest.TestCase):
 
     def _events(self) -> list[dict]:
         path = self.state_dir / "events.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines() if line]
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     def test_fake_adapter_ready_marker_drives_delivery(self) -> None:
         with (

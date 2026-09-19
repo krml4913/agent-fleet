@@ -49,7 +49,7 @@ class FormationTemplateTests(unittest.TestCase):
                 "description: custom\n"
                 "stages:\n"
                 "  - role: driver\n"
-                "    agent: codex:o4-mini\n"
+                "    agent: codex:o4-mini\n", encoding="utf-8"
             )
             data = formation.load_formation("solo", state)
             self.assertEqual(data["description"], "custom")
@@ -63,7 +63,7 @@ class FormationTemplateTests(unittest.TestCase):
                 formation.load_formation("no-such-formation", state)
             message = str(ctx.exception)
             self.assertIn(str(state / "formations" / "no-such-formation.yaml"), message)
-            self.assertIn("global/formations/no-such-formation.yaml", message)
+            self.assertIn("global/formations/no-such-formation.yaml", message.replace(os.sep, "/"))
             self.assertNotIn("templates/no-such-formation.yaml", message)
 
     def test_load_formation_does_not_fall_back_to_template(self) -> None:
@@ -89,7 +89,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "  - role: researcher\n"
                     "    agent: claude:opus\n"
                     "    peer_review:\n"
-                    "      role: fact-checker\n"
+                    "      role: fact-checker\n", encoding="utf-8"
                 )
                 name, data = formation.resolve_formation(state, "research")
                 self.assertEqual(name, "research")
@@ -117,7 +117,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "description: global\n"
                     "stages:\n"
                     "  - role: driver\n"
-                    "    agent: codex:o4-mini\n"
+                    "    agent: codex:o4-mini\n", encoding="utf-8"
                 )
                 data = formation.load_formation("solo", state)
                 self.assertEqual(data["description"], "global")
@@ -143,7 +143,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "stages:\n"
                     "  - role: driver\n"
                     "    agent: claude:opus\n"
-                    "    user_approval: required\n"
+                    "    user_approval: required\n", encoding="utf-8"
                 )
                 (state / "formations" / "solo.yaml").write_text(
                     "name: solo\n"
@@ -151,7 +151,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "stages:\n"
                     "  - role: driver\n"
                     "    agent: codex:gpt-5.5\n"
-                    "    user_approval: required\n"
+                    "    user_approval: required\n", encoding="utf-8"
                 )
                 data = formation.load_formation("solo", state)
                 self.assertEqual(data["description"], "project")
@@ -178,7 +178,7 @@ class FormationTemplateTests(unittest.TestCase):
                 "stages:\n"
                 "  - role: driver\n"
                 "    agent: claude:sonnet\n"
-                "    user_approval: required\n"
+                "    user_approval: required\n", encoding="utf-8"
             )
             name, data = formation.resolve_formation(state, "solo")
             self.assertEqual(name, "solo")
@@ -192,8 +192,8 @@ class FormationTemplateTests(unittest.TestCase):
                 formation.resolve_formation(state, "no-such")
             message = str(ctx.exception)
             self.assertIn("Looked in:", message)
-            self.assertIn("formations/no-such.yaml", message)
-            self.assertIn("global/formations/no-such.yaml", message)
+            self.assertIn("formations/no-such.yaml", message.replace(os.sep, "/"))
+            self.assertIn("global/formations/no-such.yaml", message.replace(os.sep, "/"))
             self.assertNotIn("templates/no-such.yaml", message)
 
     def test_resolve_formation_single_custom_auto(self) -> None:
@@ -206,7 +206,7 @@ class FormationTemplateTests(unittest.TestCase):
                 "stages:\n"
                 "  - role: driver\n"
                 "    agent: claude:sonnet\n"
-                "    user_approval: required\n"
+                "    user_approval: required\n", encoding="utf-8"
             )
             name, data = formation.resolve_formation(state, None)
             self.assertEqual(name, "solo")
@@ -229,7 +229,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "name: solo\n"
                     "stages:\n"
                     "  - role: driver\n"
-                    "    agent: codex:o4-mini\n"
+                    "    agent: codex:o4-mini\n", encoding="utf-8"
                 )
                 rec = state_mod.session_record_path("main")
                 rec.parent.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ class FormationTemplateTests(unittest.TestCase):
                     "label": "main",
                     "agent": "claude:opus",
                     "started_at": "2026-01-01T00:00:00+00:00",
-                }))
+                }), encoding="utf-8")
                 buf = io.StringIO()
                 with contextlib.redirect_stderr(buf):
                     name, data = formation.resolve_formation(
@@ -258,7 +258,7 @@ class FormationTemplateTests(unittest.TestCase):
             (state / "formations").mkdir(parents=True)
             for f in ("solo.yaml", "pair_review.yaml"):
                 (state / "formations" / f).write_text(
-                    f"name: {f[:-5]}\nstages:\n  - role: driver\n    agent: claude:sonnet\n"
+                    f"name: {f[:-5]}\nstages:\n  - role: driver\n    agent: claude:sonnet\n", encoding="utf-8"
                 )
             with self.assertRaises(formation.ResolutionError):
                 formation.resolve_formation(state, None)
@@ -281,7 +281,7 @@ class FormationTemplateTests(unittest.TestCase):
                 rec.write_text(json.dumps(
                     {"label": "main", "agent": "claude:opus",
                      "started_at": "2026-01-01T00:00:00+00:00"}
-                ))
+                ), encoding="utf-8")
                 buf = io.StringIO()
                 with contextlib.redirect_stderr(buf):
                     name, data = formation.resolve_formation(
