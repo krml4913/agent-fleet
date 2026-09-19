@@ -31,6 +31,8 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -53,6 +55,15 @@ LOCK_NAME = "leader-notifier.lock"
 
 # Best-effort PR-URL scrape from a task's outbox.md.
 PR_URL_RE = re.compile(r"https://github\.com/[^\s)\]]+/pull/\d+")
+# Drivers often write just "PR #280" (or "pull request #280") instead of a URL.
+PR_NUM_RE = re.compile(r"\b(?:PR|pull\s+request)\s*#(\d+)", re.IGNORECASE)
+# owner/repo out of a github.com origin remote: https, ssh:// and scp-style forms.
+_GITHUB_REMOTE_RE = re.compile(
+    r"github\.com(?::\d+/|[:/]+)(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+?)(?:\.git)?/?\s*$", re.IGNORECASE
+)
+# git / gh lookups are best-effort: keep them short so they can never stall a caller.
+LOOKUP_TIMEOUT_SECONDS = 5.0
+_ORIGIN_CACHE: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -70,15 +81,134 @@ def queue_path(session_dir: Path) -> Path:
     return Path(session_dir) / QUEUE_NAME
 
 
-def scan_pr_url(state_dir: Path, task_id: str) -> str | None:
-    """Best-effort: return the last PR URL mentioned in the task outbox.md."""
+def _run_capture(argv: list[str], cwd: Path | str | None) -> str | None:
+    """Run ``argv`` and return its stdout, or ``None`` on any failure / timeout.
+
+    Best-effort helper for the PR lookups: never raises, never prompts (stdin is
+    closed), and gives up after :data:`LOOKUP_TIMEOUT_SECONDS`.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - argv is constructed, no shell.
+            argv,
+            cwd=str(cwd) if cwd else None,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=LOOKUP_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 - OSError, TimeoutExpired, ... all best-effort
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def _lookup_dirs(state_dir: Path, task: dict | None) -> list[Path]:
+    """Directories a git/gh lookup may run in: the project repo, then the task worktree."""
+    dirs: list[Path] = []
+    repo = state_mod.project_repo_dir(state_dir)
+    if repo is not None:
+        dirs.append(repo)
+    worktree = (task or {}).get("worktree")
+    if worktree and Path(str(worktree)).is_dir():
+        dirs.append(Path(str(worktree)))
+    return dirs
+
+
+def _github_repo_slug(remote_url: str) -> str | None:
+    """``owner/repo`` for a github.com remote URL (https / ssh forms), else ``None``."""
+    m = _GITHUB_REMOTE_RE.search(remote_url.strip())
+    return f"{m.group('owner')}/{m.group('repo')}" if m else None
+
+
+def _origin_repo_slug(dirs: list[Path]) -> str | None:
+    """``owner/repo`` of the ``origin`` remote of the first of ``dirs`` that has one."""
+    for d in dirs:
+        key = str(d)
+        slug = _ORIGIN_CACHE.get(key)
+        if slug is None:
+            out = _run_capture(["git", "remote", "get-url", "origin"], d)
+            slug = _github_repo_slug(out) if out else None
+            if slug:
+                _ORIGIN_CACHE[key] = slug
+        if slug:
+            return slug
+    return None
+
+
+def _gh_pr_url_for_branch(branch: str, dirs: list[Path]) -> str | None:
+    """Look the PR up by head branch with ``gh`` (newest first); ``None`` if unavailable."""
+    gh = shutil.which("gh")
+    if not gh or not branch:
+        return None
+    argv = [gh, "pr", "list", "--head", branch, "--state", "all", "--json", "url", "--limit", "1"]
+    for d in dirs:
+        out = _run_capture(argv, d)
+        if out is None:
+            continue
+        try:
+            rows = json.loads(out)
+            url = rows[0]["url"]
+        except (ValueError, LookupError, TypeError):
+            continue
+        if isinstance(url, str) and url:
+            return url
+    return None
+
+
+def scan_pr_url(
+    state_dir: Path,
+    task_id: str,
+    *,
+    branch: str | None = None,
+    use_gh: bool = False,
+) -> str | None:
+    """Best-effort: return the PR URL of ``task_id``. Never raises.
+
+    1. the last full ``https://github.com/<owner>/<repo>/pull/<n>`` URL in the
+       task's ``outbox.md``;
+    2. else the last ``PR #<n>`` mention, expanded with the ``origin`` remote
+       (github https / ssh forms);
+    3. else, only when ``use_gh`` is set, ``gh pr list --head <branch>`` (``gh``
+       on PATH, short timeout). It is a network call, so callers on a hot path
+       (``done``, status) leave it off; the detached notifier turns it on.
+
+    ``branch`` defaults to the task's recorded branch.
+    """
+    try:
+        return _scan_pr_url(state_dir, task_id, branch, use_gh)
+    except Exception:  # noqa: BLE001 - a PR lookup must never break its caller
+        return None
+
+
+def _scan_pr_url(state_dir: Path, task_id: str, branch: str | None, use_gh: bool) -> str | None:
     outbox = state_mod.task_dir(state_dir, task_id) / "outbox.md"
     try:
         text = outbox.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
-        return None
-    matches = PR_URL_RE.findall(text)
-    return matches[-1] if matches else None
+        text = ""
+
+    urls = list(PR_URL_RE.finditer(text))
+    if urls:
+        return urls[-1].group(0)
+
+    task: dict | None = None
+    try:
+        task = state_mod.load_task(state_dir, task_id)
+    except Exception:  # noqa: BLE001 - no task.yaml: fall back to what we were given
+        pass
+
+    nums = PR_NUM_RE.findall(text)
+    if nums:
+        slug = _origin_repo_slug(_lookup_dirs(state_dir, task))
+        if slug:
+            return f"https://github.com/{slug}/pull/{nums[-1]}"
+
+    if use_gh:
+        branch = branch or (task or {}).get("branch")
+        if branch:
+            return _gh_pr_url_for_branch(str(branch), _lookup_dirs(state_dir, task))
+    return None
 
 
 def build_record(
@@ -409,8 +539,9 @@ def _refill_pr_urls(records: list[dict]) -> None:
     Best-effort, in place: a record enqueued at ``done`` time can carry a null
     ``pr_url`` because the driver called ``done`` just before its PR landed in
     ``outbox.md``. By inject time the PR has usually been written, so re-scan
-    any record still missing a URL. Records that already carry one are left
-    untouched (not re-scanned). Each record carries its own project ``state_dir``
+    any record still missing a URL (also trying ``gh pr list`` by branch, which
+    is affordable here: the notifier is a detached poller, not ``done``).
+    Records that already carry one are left untouched (not re-scanned). Each record carries its own project ``state_dir``
     (the queue is cross-project), so the re-scan targets the right outbox.
     ``scan_pr_url`` never raises, but guard anyway so a re-scan hiccup can never
     block the injection.
@@ -423,7 +554,9 @@ def _refill_pr_urls(records: list[dict]) -> None:
         if not task_id or not state_dir:
             continue
         try:
-            url = scan_pr_url(Path(state_dir), task_id)
+            url = scan_pr_url(
+                Path(state_dir), task_id, branch=rec.get("branch"), use_gh=True
+            )
         except Exception:  # noqa: BLE001 - best-effort; never block the flush
             url = None
         if url:

@@ -8,7 +8,7 @@ Environment:
 
 Communication:
   - inbox.md — read with `fleet-agent inbox-read` (not cat/Read directly; ack won't fire). When woken by a "[fleet] new message in inbox" notification, run `fleet-agent inbox-read` immediately.
-  - outbox.md — append milestone reports here.
+  - outbox.md — append milestone reports here. When you open a PR, record its full URL (`https://github.com/<owner>/<repo>/pull/<n>`), not just `PR #<n>`: the leader's notification links it.
   - `fleet-agent ask "<question>"` records awaiting_orders + notifies the user.
   - `fleet-agent event emit <type> [...]` appends an audit event.
 
