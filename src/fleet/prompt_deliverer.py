@@ -132,7 +132,7 @@ def deliver(
             _fail(state_dir, task_id, f"prompt deliverer cannot capture pane: {e}", window)
             return 1
 
-        if adapter.ready.search(pane):
+        if adapter.is_ready(pane):
             try:
                 # Name the session BEFORE pasting the prompt: for vendors with
                 # no launch-time naming flag (codex), this drives the TUI rename
@@ -179,7 +179,7 @@ def deliver(
             )
             return 0
 
-        if not gate_notified and adapter.gate.search(pane):
+        if not gate_notified and adapter.is_gated(pane):
             gate_notified = True
             _awaiting_orders(state_dir, task_id, window, vendor)
 

@@ -261,6 +261,32 @@ class LeaderNotifierTests(unittest.TestCase):
         rearm.assert_called_once()  # handed off to a successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # still queued
 
+    def test_dialog_pane_is_not_injected_into(self) -> None:
+        # An un-numbered selection menu's cursor line (``  ❯ No, …``) matches
+        # the bare ready regex; the notifier must not type into the dialog.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        dialog = (
+            "  ❯ No, keep browser tools off\n"
+            "    Yes, use my browser\n\n"
+            "  Enter to confirm · Esc to keep browser tools off\n"
+        )
+        with (
+            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
+            patch("fleet.leader_notifier.tmux.capture_pane", return_value=dialog),
+            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.05,
+                poll_interval=0.001,
+            )
+        send_keys.assert_not_called()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
     def test_busy_then_idle_eventually_injects(self) -> None:
         # The strand bug fixed: a leader busy at first still gets the queue once
         # it goes idle. Within one process, polling rides through busy turns and

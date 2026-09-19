@@ -401,7 +401,7 @@ def _poll_until_idle(
         except tmux.TmuxError:
             return False  # window gone → leave queued
 
-        if adapter.ready.search(pane):
+        if adapter.is_ready(pane):
             if _flush_once(session_dir, session, window):
                 # Loop again: a record may have been enqueued mid-flush.
                 continue

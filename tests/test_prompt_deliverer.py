@@ -421,6 +421,35 @@ class PromptDelivererTests(unittest.TestCase):
             ["awaiting_orders", "inbox_seen", "prompt_delivered"],
         )
 
+    def test_claude_unnumbered_dialog_is_gate_not_ready(self) -> None:
+        # Real "Claude in Chrome extension detected" startup dialog: its
+        # un-numbered cursor line matched the bare ready regex, so the pointer
+        # used to be pasted into the dialog.
+        dialog = (
+            "  Claude in Chrome extension detected\n\n"
+            "  ❯ No, keep browser tools off\n"
+            "    Yes, use my browser\n\n"
+            "  Enter to confirm · Esc to keep browser tools off\n"
+        )
+        panes = iter([dialog, dialog, 'status\n❯ Try "help"\n'])
+        with (
+            patch(
+                "fleet.prompt_deliverer.tmux.capture_pane",
+                side_effect=lambda *_a, **_k: next(panes),
+            ),
+            patch("fleet.prompt_deliverer.tmux.load_buffer"),
+            patch("fleet.prompt_deliverer.tmux.paste_buffer") as paste,
+            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
+        ):
+            result = self._deliver(agent="claude:opus")
+
+        self.assertEqual(result, 0)
+        paste.assert_called_once()  # only once the real prompt appeared
+        self.assertEqual(
+            [e["type"] for e in self._events()],
+            ["awaiting_orders", "inbox_seen", "prompt_delivered"],
+        )
+
     def test_gate_emits_awaiting_orders_but_keeps_polling_until_ready(self) -> None:
         panes = iter(
             [

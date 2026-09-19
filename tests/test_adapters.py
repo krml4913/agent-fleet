@@ -106,6 +106,105 @@ class SessionNamingTests(unittest.TestCase):
         )
 
 
+RULE = "─" * 120
+
+# Real claude startup dialog captured via dump-screen (120 cols).
+CLAUDE_CHROME_DIALOG = f"""{RULE}
+  Claude in Chrome extension detected
+
+  Claude will use your Chrome browser by default — navigating sites, filling forms, and capturing screenshots in your
+  existing session.
+
+  This session is in Auto mode, so an AI classifier approves routine browser actions — you are only prompted when it
+  is unsure. Turn browser tools off for future sessions with /chrome.
+
+  ❯ No, keep browser tools off
+    Yes, use my browser
+
+  Enter to confirm · Esc to keep browser tools off
+
+"""
+
+# The same dialog without its footer: the cursor/sibling structure alone flags it.
+CLAUDE_MENU_NO_FOOTER = "  Pick one\n\n  ❯ No, keep browser tools off\n    Yes, use my browser\n"
+
+CLAUDE_READY = 'status\n❯ Try "help"\n'
+
+# A realistic idle claude screen: prompt box at column 0 plus status line.
+CLAUDE_IDLE_SCREEN = (
+    "● Done. The login flow now handles authentication errors.\n\n"
+    f"{RULE}\n❯ \n{RULE}\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n"
+)
+
+
+class DialogDetectionTests(unittest.TestCase):
+    """Selection menus must not count as ready and must report as a gate."""
+
+    C = adapters.ClaudeAdapter
+    X = adapters.CodexAdapter
+
+    def test_real_chrome_dialog_is_not_ready_and_is_gated(self) -> None:
+        # The bare regex is fooled by the cursor line — that's the bug.
+        self.assertTrue(self.C.ready.search(CLAUDE_CHROME_DIALOG))
+        self.assertFalse(self.C.is_ready(CLAUDE_CHROME_DIALOG))
+        self.assertTrue(self.C.is_dialog(CLAUDE_CHROME_DIALOG))
+        self.assertTrue(self.C.is_gated(CLAUDE_CHROME_DIALOG))
+
+    def test_unnumbered_menu_without_footer_is_detected(self) -> None:
+        self.assertFalse(self.C.is_ready(CLAUDE_MENU_NO_FOOTER))
+        self.assertTrue(self.C.is_gated(CLAUDE_MENU_NO_FOOTER))
+
+    def test_normal_prompts_stay_ready_and_ungated(self) -> None:
+        for pane in (CLAUDE_READY, CLAUDE_IDLE_SCREEN, "❯ \n"):
+            with self.subTest(pane=pane):
+                self.assertTrue(self.C.is_ready(pane))
+                self.assertFalse(self.C.is_dialog(pane))
+
+    def test_multiline_composer_input_is_not_a_dialog(self) -> None:
+        # Continuation lines of typed input are indented under a column-0 ❯.
+        pane = "❯ first line of a message\n  second line of it\n"
+        self.assertTrue(self.C.is_ready(pane))
+
+    def test_login_in_history_does_not_veto_readiness(self) -> None:
+        pane = (
+            "user: please fix the login page\n"
+            "● I updated the authentication handler; log in works now.\n"
+            + CLAUDE_READY
+        )
+        self.assertTrue(self.C.gate.search(pane))  # broad gate still matches…
+        self.assertTrue(self.C.is_ready(pane))  # …but does not veto readiness
+
+    def test_dialog_text_in_history_above_prompt_does_not_veto(self) -> None:
+        # A dialog that was dismissed and scrolled into history (or quoted in
+        # the conversation) sits above the live prompt → still ready.
+        pane = CLAUDE_CHROME_DIALOG + "● ok\n" + CLAUDE_IDLE_SCREEN
+        self.assertTrue(self.C.is_ready(pane))
+
+    def test_numbered_menus_still_gated(self) -> None:
+        claude = "Do you trust this workspace?\n❯ 1. Yes, proceed\n  2. No\n"
+        self.assertFalse(self.C.is_ready(claude))
+        self.assertTrue(self.C.is_gated(claude))
+        codex = "Update available\n› 1. Update now\n  2. Skip this version\n"
+        self.assertFalse(self.X.is_ready(codex))
+        self.assertTrue(self.X.is_gated(codex))
+
+    def test_codex_unnumbered_menu_and_ready(self) -> None:
+        menu = "  Choose\n  › Keep current setting\n    Change it\n"
+        self.assertFalse(self.X.is_ready(menu))
+        self.assertTrue(self.X.is_gated(menu))
+        self.assertTrue(self.X.is_ready("ready\n›\n"))
+        self.assertFalse(self.X.is_gated("ready\n›\n"))
+
+    def test_busy_hint_is_not_a_dialog_footer(self) -> None:
+        self.assertFalse(self.C.is_dialog("  esc to interrupt\n❯ \n"))
+
+    def test_base_without_cursor_uses_footer_only(self) -> None:
+        self.assertFalse(FakeAdapter.is_dialog("  > a\n    b\n"))
+        self.assertTrue(FakeAdapter.is_dialog("FAKE-READY\n  Esc to cancel\n"))
+        self.assertFalse(FakeAdapter.is_ready("FAKE-READY\n  Esc to cancel\n"))
+        self.assertTrue(FakeAdapter.is_ready("FAKE-READY\n"))
+
+
 class DelivererUsesRegistryTests(unittest.TestCase):
     """The deliverer's readiness detection comes from the registered adapter."""
 
