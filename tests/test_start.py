@@ -562,6 +562,61 @@ class StartAutopasteEnterTests(unittest.TestCase):
         self.assertEqual(mock_deliverer.call_args.kwargs["agent_spec"], "claude:sonnet")
         self.assertNotIn("buffer_name", mock_deliverer.call_args.kwargs)
 
+    def _start_args(self, task_id: str) -> argparse.Namespace:
+        return argparse.Namespace(
+            project="demo",
+            task_id=task_id,
+            description="pane cwd test",
+            formation="solo",
+            agent=None,
+            title=None,
+            dry_run=False,
+            auto_paste=False,
+            prompt_delay=0.0,
+        )
+
+    def test_workspace_none_pane_opens_in_project_root(self) -> None:
+        """No worktree: the pane starts in the project repo, not under fleet-state."""
+        from fleet.commands import start
+
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
+            unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start"),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = start.run(self._start_args("202"))
+
+        self.assertEqual(result, 0)
+        (_s, _w), kwargs = fake.calls_named("new_window")[0]
+        repo = state.load_project(self.state_dir)["repo"]
+        self.assertEqual(Path(kwargs["cwd"]), Path(repo))
+        self.assertEqual(Path(kwargs["cwd"]).resolve(), self.project.resolve())
+        task_dir = self.state_dir / "tasks" / "task-202"
+        self.assertNotEqual(Path(kwargs["cwd"]).resolve(), task_dir.resolve())
+
+    def test_worktree_cwd_from_workspace_hook_wins(self) -> None:
+        """workspace=worktree: the hook's ctx['cwd'] (the worktree) is the pane dir."""
+        from fleet.commands import start
+
+        worktree = Path(self._tmp.name) / "wt"
+        worktree.mkdir()
+
+        def fake_pre_start(ctx: dict) -> None:
+            ctx["cwd"] = worktree
+
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
+            unittest.mock.patch(
+                "fleet.commands.start.workspace_mod.on_pre_start", side_effect=fake_pre_start
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = start.run(self._start_args("203"))
+
+        self.assertEqual(result, 0)
+        (_s, _w), kwargs = fake.calls_named("new_window")[0]
+        self.assertEqual(kwargs["cwd"], str(worktree))
+
     def test_no_auto_paste_skips_paste_and_enter(self) -> None:
         from fleet.commands import start
 
@@ -683,10 +738,50 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         (session, window), kwargs = fake.calls_named("new_window")[0]
         self.assertEqual((session, window), ("fleet-main", f"{task_id}·implementer"))
         # argv goes to the backend (no shell quoting at this layer); env + cwd too.
+        # This project has no ``repo``, so the pane falls back to the task dir.
         self.assertEqual(kwargs["argv"][0], "claude")
         self.assertEqual(kwargs["cwd"], str(task_dir))
         self.assertEqual(kwargs["env"]["FLEET_TASK_ID"], task_id)
         self.assertEqual(kwargs["env"]["FLEET_STATE_DIR"], str(self.state_dir))
+
+    def _launch_cwd(self, task_id: str, *, window_cwd: Path | None = None) -> str:
+        from fleet.commands import start
+
+        task_dir = self._make_task_dir(task_id)
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake:
+            start.launch_stage_driver(
+                state_dir=self.state_dir,
+                task_id=task_id,
+                task_dir=task_dir,
+                stage_idx=0,
+                stage={"agent": "claude:sonnet", "role": "driver"},
+                project_name="demo",
+                owner_session="main",
+                auto_paste=False,
+                prompt_delay=0.0,
+                window_cwd=window_cwd,
+            )
+        return fake.calls_named("new_window")[0][1]["cwd"]
+
+    def _set_repo(self, repo: Path) -> None:
+        project = state.load_project(self.state_dir)
+        project["repo"] = str(repo)
+        state.save_project(self.state_dir, project)
+
+    def test_no_worktree_opens_in_project_repo(self) -> None:
+        self._set_repo(self.project)
+        self.assertEqual(self._launch_cwd("repo-cwd"), str(self.project))
+
+    def test_missing_repo_dir_falls_back_to_task_dir(self) -> None:
+        self._set_repo(self.project / "gone")
+        task_dir = self.state_dir / "tasks" / "task-gone-cwd"
+        self.assertEqual(self._launch_cwd("gone-cwd"), str(task_dir))
+
+    def test_window_cwd_wins_over_project_repo(self) -> None:
+        self._set_repo(self.project)
+        worktree = self.project / "wt"
+        worktree.mkdir()
+        self.assertEqual(self._launch_cwd("wt-cwd", window_cwd=worktree), str(worktree))
 
     def test_codex_launch_disables_update_prompt(self) -> None:
         from fleet.commands import start

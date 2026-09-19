@@ -87,6 +87,22 @@ def _git_toplevel(cwd: Path) -> Path | None:
     return Path(root).resolve() if root else None
 
 
+def _project_repo_dir(state_dir: Path) -> Path | None:
+    """Return the project's ``repo`` dir when it is set and exists on disk.
+
+    ``None`` when project.yaml is missing / unreadable, has no ``repo``, or the
+    path is not an existing directory.
+    """
+    try:
+        repo = state_mod.load_project(state_dir).get("repo")
+    except (OSError, ValueError):
+        return None
+    if not repo:
+        return None
+    path = Path(str(repo)).expanduser()
+    return path if path.is_dir() else None
+
+
 def _guard_codex_trust(vendor: str, state_dir: Path, project_root: Path | None = None) -> int | None:
     if vendor != "codex":
         return None
@@ -130,6 +146,10 @@ def launch_stage_driver(
     Issue #166 §5.2) — the session that spawned the task holds both the leader
     window and its drivers' windows. ``project_name`` is used only for the session
     *display* name so resumable panes are distinguishable in the picker.
+
+    ``window_cwd`` is the worktree (workspace=worktree). When it is ``None`` the
+    pane opens in the project's ``repo`` dir, falling back to ``task_dir`` only
+    when the project has no ``repo`` or it does not exist on disk.
     """
     agent_spec = stage.get("agent", "")
     role_name = stage.get("role", "driver")
@@ -142,7 +162,13 @@ def launch_stage_driver(
     if not m.session_exists(session):
         m.new_session(session, window="leader")
     window = f"{task_id}·{role_name}"
-    effective_cwd = window_cwd or task_dir
+    # Pane starting dir: the worktree when there is one (``window_cwd``), else
+    # the project root — the driver prompt tells a workspace=none driver to work
+    # there, and opening the pane under fleet-state/ invites edits to fleet
+    # state. The task dir is only a last resort (no usable project ``repo``).
+    # Nothing in the pane relies on the task dir as cwd: FLEET_TASK_ID /
+    # FLEET_STATE_DIR are in the env and every prompt / outbox path is absolute.
+    effective_cwd = window_cwd or _project_repo_dir(state_dir) or task_dir
 
     try:
         repo_root = _fleet_clone_root()
