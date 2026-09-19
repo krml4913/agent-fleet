@@ -466,7 +466,8 @@ Screens captured for `src/fleet/adapters/claude.py` (from `dump-screen`,
     Enter to confirm · Esc to keep browser tools off
   ```
 
-  `ready` matches this screen and `gate` does not (§10).
+  The bare `ready` regex matches this screen. Since #245, `is_ready()`
+  is `False` and `is_gated()` is `True` for it (§10).
 - Ready input prompt (idle; the text after `❯` is claude's grey
   placeholder, or a suggested follow-up after a turn):
 
@@ -623,12 +624,20 @@ prompt deliverer would therefore paste the pointer into the dialog. This
 needs its own Issue: tighten `ready`, or teach `gate` about un-numbered
 selection menus.
 
-Phase 0 reproduced this under zellij and found a simpler fix: claude has a
-**`--no-chrome`** flag ("Disable Claude in Chrome integration"). With it the
-dialog never appears and claude goes straight to the input prompt (verified).
-Adding `--no-chrome` to `ClaudeAdapter.cli_command` avoids the dialog on
-every platform. A `gate` pattern for `Esc to keep browser tools off` is still
-worth adding as a backstop.
+**Update:** fixed by #245 (`fix: treat un-numbered selection dialogs as a
+boot gate, not ready`). Phase 0 fed that code the screens captured under
+zellij. For the Chrome dialog, `ClaudeAdapter.is_ready()` is `False` and
+`is_gated()` is `True`. For the idle prompt (including the `❯t` stale-cell
+artifact from §4.9), `is_ready()` is `True` and `is_gated()` is `False`. For
+the outside-read permission dialog, `is_ready()` is `False` and `is_gated()`
+is `True`.
+
+Phase 0 also found that claude has a **`--no-chrome`** flag ("Disable Claude
+in Chrome integration"). With it, the dialog never appears and claude goes
+straight to the input prompt (verified). Adding it to
+`ClaudeAdapter.cli_command` would remove the boot-gate notification for users
+with the extension. That is optional, because #245 already keeps the
+deliverer from pasting into the dialog.
 
 ---
 
