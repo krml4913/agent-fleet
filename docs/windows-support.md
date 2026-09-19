@@ -7,7 +7,8 @@
 > Investigated 2026-09-19 on Windows 10 Pro 19045, Python 3.13, zellij 0.45.1
 > (native Windows build), claude CLI (native). codex was not installed and is
 > not yet verified. Every zellij behavior marked "verified" below was observed
-> on that machine, not taken from documentation.
+> on that machine, not taken from documentation. Phase 0 (§7) re-ran the open
+> items on the same machine the same day; its results are folded in below.
 >
 > When the plan lands, update `docs/design.md` (§3, §8.6, §11.2, §11.5 still
 > say "tmux") and turn this doc into a record of the result or delete it.
@@ -59,8 +60,8 @@ stage handoff, verify gate, cleanup / merge, and attach.
    focus, so the tmux grouped-view-session trick (Issue #76) is unnecessary.
    But `go-to-tab-name` run from outside zellij only moves the *first*
    connected client. There is no way to point a newly attached client at a
-   given tab (verified). So attach cannot land on the driver's tab unless the
-   attaching client is the only one.
+   given tab (verified). So attach can land on the driver's tab only when the
+   attaching client is the only one. That case works (verified in Phase 0).
 
 The larger share of the work is **outside zellij**. Today fleet does not even
 start on Windows: `python fleet --help` fails with
@@ -77,17 +78,17 @@ Only the primitives fleet actually uses (from `src/fleet/tmux.py` plus the raw
 |---|---|---|---|
 | session liveness | `has-session -t S` | `list-sessions -n`, then drop `(EXITED - attach to resurrect)` entries | ✅ |
 | create detached session | `new-session -d -s S -n W -c DIR -e K=V` | `attach -b S [-- <launcher argv>]` (Windows needs a console, §4.2) | ✅ |
-| open driver window | `new-window -d -t S -n W -c DIR -e K=V` | `-s S action new-tab --name W --cwd DIR --no-focus -- <launcher argv>`; prints the new tab id | ⚠ needs the #5594 workaround (§4.3) |
+| open driver window | `new-window -d -t S -n W -c DIR -e K=V` | `-s S action new-tab --name W --cwd DIR --no-focus -- <launcher argv>`; prints the new tab id. `--no-focus` needs zellij ≥ 0.45.0 (§6.6) | ✅ incl. no focus change for an attached client; ⚠ needs the #5594 workaround (§4.3) |
 | per-window env | `-e K=V` | not supported; set by the pane launcher (§6.3) | ✅ |
 | list windows | `list-windows -F '#{window_name}'` | `action list-tabs -j` / `action list-panes -a -j` | ✅ |
 | kill window | `kill-window -t S:W` | look up the tab id by name, then `action close-tab-by-id ID` (also kills the agent process) | ✅ |
 | kill session | `kill-session -t S` | `kill-session S`, then `delete-session S` (drops the resurrectable entry) | ✅ |
 | type text | `send-keys -t S:W TEXT` | `action write-chars -p terminal_N TEXT` | ✅ incl. Japanese and `·` |
-| press keys | `send-keys -t S:W Enter` / `C-u` | `action send-keys -p terminal_N "Enter"` / `"Ctrl u"` | ✅ Enter; ⬜ `Ctrl u` not yet |
-| paste pointer | `load-buffer` + `paste-buffer` | `action paste -p terminal_N TEXT` (bracketed paste; no buffer needed) | ✅ in cmd.exe; ⬜ into claude |
+| press keys | `send-keys -t S:W Enter` / `C-u` | `action send-keys -p terminal_N "Enter"` / `"Ctrl u"` | ✅ Enter; ✅ `Ctrl u` clears claude's composer (cmd.exe has no line-kill key and just echoes `^U`) |
+| paste pointer | `load-buffer` + `paste-buffer` | `action paste -p terminal_N TEXT` (bracketed paste; no buffer needed) | ✅ in cmd.exe and into claude (paste, 0.25 s, `Enter` submits) |
 | capture pane | `capture-pane -p -J -S -200 -t S:W` | `action dump-screen -p terminal_N` (viewport; `-f` for full scrollback) | ✅ incl. a non-focused tab and claude's TUI |
 | attach | `attach -t S` (`execvp`) | `attach S` (as a subprocess; `execvp` is not a real exec on Windows) | ✅ |
-| attach to a task window without disturbing other clients | grouped view session (Issue #76) | per-client focus is built in, but the new client's tab cannot be chosen from outside | ⚠ degraded (§6.5) |
+| attach to a task window without disturbing other clients | grouped view session (Issue #76) | per-client focus is built in; `go-to-tab-name` steers the new client only when it is the sole client | ⚠ degraded when other clients are attached (§6.5) |
 
 Pane addressing: tmux targets `S:W` by name. zellij's `-p` takes a pane id.
 The backend resolves `(session, tab name) → terminal_<id>` at call time from
@@ -141,6 +142,22 @@ then terminate the client. The tab keeps the temp client's size (e.g.
 Skip the workaround when a client is already attached, and on zellij versions
 that contain the fix.
 
+Phase 0 measurements: the temp client shows up in `list-clients` about
+0.3–0.6 s after spawn. Calling `new-tab` right then (no extra settle) worked in
+23 of 24 runs, with both `cmd.exe` and `claude.exe` as the tab command. The
+tab stayed 120×28 after the client was killed. In the one failure (the first
+probe of the day, on a session created 1 s earlier), `new-tab` printed a tab id
+but the tab was gone by the time the client had been killed. That failure did
+not reproduce. So after `new-tab` the backend must confirm the tab exists by
+name, with a terminal pane, in `list-panes -a -j`. It confirms again after
+killing the temp client, and retries the whole sequence once if the tab is
+missing.
+
+The first client attached to a fresh session lands on a floating
+"About Zellij" plugin pane (`plugin_3`, `zellij:about`), and that is what
+`list-clients` reports as its focused pane. Match clients by the first
+column (client id) only, never by the pane column.
+
 ### 4.4 Panes do not inherit the client's environment
 
 A pane started by `new-tab` did not see a variable set in the environment of
@@ -152,6 +169,24 @@ the agent CLI is resolved to an absolute path **by fleet** at launch time.
 (On the investigation machine the Windows `PATH` held a literal
 `~/.local/bin`, so PowerShell could not find `claude` even though Git Bash
 could.)
+
+Phase 0 confirmed the full picture. A session created from a Python process
+whose env had an extra first `PATH` entry and a marker variable gave every
+later `new-tab` pane that exact `PATH` (extra entry still first) and the
+marker. A different marker value in the env of the `zellij action new-tab`
+caller did not reach the pane. The result was the same whether the creating
+Python was started from PowerShell or from Git Bash (except `SHELL`, §4.5).
+
+**The creator's Claude Code markers leak into every pane.** When the session
+is created by a process running under Claude Code (a leader's tool call, or
+these probes), panes see `CLAUDECODE=1`, `CLAUDE_CODE_CHILD_SESSION=1`,
+`CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET` / `_TOKEN`,
+`CLAUDE_PID`, and others. A claude started in such a pane runs, but shows
+`⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker`.
+That breaks the usage accounting that reads claude's session JSONL. The
+launcher must strip these variables (§6.3). tmux has the same exposure when a
+leader creates the tmux server, but there it is already the existing
+behavior.
 
 ### 4.5 The default shell depends on who created the session
 
@@ -175,6 +210,21 @@ With two clients attached, `action go-to-tab-name X` moved only client 1.
 With no clients attached, it did not affect which tab the next client landed
 on. There is no `--client-id` option. See §6.5.
 
+Phase 0 details (via `list-clients`, mapping each client's pane id to a tab
+through `list-panes -a -j`):
+
+- The target is the client with the **lowest id**. Client ids restart at 1
+  once every client has detached. When client 1 detached, client 2 became
+  the one `go-to-tab-name` moves.
+- A sole client moves as expected, even when `go-to-tab-name` runs right
+  after the client first appears in `list-clients` (about 0.3 s after spawn).
+- A newly attached client starts on the tab the session last had focused.
+  With another client already attached, that is the other client's current
+  tab.
+- `new-tab --no-focus` left an attached client's focus alone (it stayed on
+  tab `A` across three `--no-focus` tabs). `new-tab` without `--no-focus`
+  moved the client to the new tab.
+
 ### 4.8 Tab ids can be reused
 
 After the discarded tabs from §4.3 went away, the next tab got id `1` again.
@@ -190,6 +240,16 @@ After the discarded tabs from §4.3 went away, the next tab got id `1` again.
   outlived the agent tool call that spawned it, and could drive zellij
   afterwards. That is what the prompt deliverer and leader notifier need.
 - A fresh background session's first tab is 50×50 until a client attaches.
+- `kill-session` also ended the `claude.exe` running in its tabs (no stray
+  processes afterwards).
+- After claude's `/exit`, the tab stays with the pane held:
+  `list-panes` reports `"exited": true, "exit_status": 0`.
+- `dump-screen` of claude's composer can show stale cells. While text is in
+  the composer, the dump shows `❯Reply…` with no space after `❯`. After
+  `Ctrl u`, the dump showed `❯t` (the first typed character) even though the
+  composer was empty: the next submitted message had no leading `t`. So never
+  treat composer text in a dump as exact. `ClaudeAdapter.ready` is not
+  affected.
 
 ---
 
@@ -293,6 +353,9 @@ Responsibilities:
 
 - Apply the env (`FLEET_TASK_ID`, `FLEET_STATE_DIR`, `FLEET_SESSION`,
   `PATH` prefixed with the clone root, `PYTHONUTF8=1`, `MSYS_NO_PATHCONV=1`).
+- Remove the inherited agent-session markers before starting the agent:
+  `CLAUDECODE`, every `CLAUDE_CODE_*`, and `CLAUDE_PID` (§4.4). Keep
+  user-level settings such as `CLAUDE_CONFIG_DIR` and `ANTHROPIC_*`.
 - Resolve the agent CLI to an absolute path with `shutil.which` under that
   `PATH`. On failure, print a clear error and keep the pane open.
 - Run the agent (inheriting the console) and wait. When it exits, the pane
@@ -315,19 +378,35 @@ spawned in, a later process cannot switch backends under it.
 - Run `zellij attach fleet-<label>` as a subprocess.
 - If no other client is attached, a short helper waits for the new client to
   appear in `list-clients` and then runs `go-to-tab-name <window>`. The only
-  client is the first client, so this lands on the right tab (to verify in
-  Phase 0).
+  client is the first client, so this lands on the right tab (verified in
+  Phase 0; no extra settle is needed after the client appears).
 - Otherwise, print the tab's position before attaching (e.g.
-  "task `42·implementer` is tab 3 — press Ctrl+t then 3").
+  "task `42·implementer` is tab 3 — press Ctrl+t then 3"). Never run
+  `go-to-tab-name` in this case: it would move the *other*, lower-id client
+  (§4.7). The new client starts on the other client's current tab.
+- Check `list-clients` just before `attach`. A client that arrives between
+  that check and `go-to-tab-name` would be the one moved. Accept that race;
+  it only moves a tab and loses no state.
 
 ### 6.6 Supported zellij versions
 
-- Minimum **0.44.0** (first native Windows release; introduced `list-panes`,
-  `dump-screen`, pane-id targeting, and ids returned from creation). Phase 0
-  must confirm that 0.44.x has `paste -p`, `close-tab-by-id`, and
-  `new-tab --no-focus`. If it lacks any of them, the minimum becomes 0.45.0.
+- Minimum **0.45.0**. Phase 0 checked the 0.44.3 Windows release (`--help`
+  only): it has `action paste -p`, `close-tab-by-id`, `list-panes -a -j`,
+  `list-tabs -j`, `dump-screen -p` / `-f`, `send-keys -p`, `write-chars`,
+  `list-clients`, `go-to-tab-name`, `attach -b`, and `list-sessions -n`, and
+  `new-tab` returns a tab id. But it has **no `new-tab --no-focus`**, so on
+  0.44.x every driver spawn would pull the first attached client (for
+  example the user watching the leader) onto the driver tab. 0.45.0 has
+  `--no-focus`.
 - **0.45.0–0.45.1:** supported with the §4.3 workaround. `fleet preflight`
-  reports that the workaround is active.
+  reports that the workaround is active. 0.45.1 was still the latest release
+  on 2026-09-19, and the fix (#5612) was still unmerged.
+- Different zellij versions share one session namespace on Windows: the
+  0.44.3 binary listed a session served by 0.45.1. fleet must always run the
+  same `zellij` binary for the server and every `action` / `attach`, so it
+  should resolve the binary once to an absolute path. Preflight should warn
+  when `zellij --version` differs from the version of a running fleet
+  session's server, if that can be found out cheaply.
 
 ---
 
@@ -350,6 +429,74 @@ unchanged unless stated.
    `fleet-agent start`), the detached deliverer survives the tool call.
 6. Which `PATH` the panes see when the session was created from the user's
    terminal vs. from the leader.
+
+#### Phase 0 results (2026-09-19)
+
+Environment: Windows 10 Pro 19045, Python 3.13, zellij 0.45.1 (plus the
+0.44.3 and 0.45.0 Windows release zips, `--help` only), claude CLI 2.1.277
+(`--model sonnet`). zellij was driven from Python `subprocess` with argv
+lists. Sessions were created with `CREATE_NEW_CONSOLE` and a hidden window,
+and tabs were opened while a hidden temp client was attached (§4.3). All
+probe sessions were killed and deleted afterwards.
+
+| # | Item | Result |
+|---|---|---|
+| 1 | claude under zellij: ready prompt, pointer paste + `Enter` | ✅ `paste -p` + 0.25 s + `send-keys -p … Enter` submitted, both a one-liner and the real `pointer_text()` with a Windows path. `write-chars` + 0.25 s + `Enter` also submitted. `/exit` ended claude cleanly. The `inbox_seen` ack needs the real deliverer, so it moves to PR3's "done when". |
+| 2 | `send-keys "Ctrl u"` clears a typed line | ✅ in claude's composer. In cmd.exe it only echoes `^U`: cmd.exe has no such key, so this is not a zellij issue. |
+| 3 | `new-tab --no-focus` keeps an attached client's focus | ✅ with a hidden client. A visible, human-driven client was not tried, but zellij treats both kinds of client the same. |
+| 4 | Sole-client attach focus (§6.5) | ✅ the sole client moves to the `go-to-tab-name` target, even with no settle. With two clients, only the lowest-id client moves (§4.7). |
+| 5 | `PATH` / env seen by panes | ✅ panes get the session creator's env exactly (extra `PATH` entry first, marker set). The caller's env is ignored. The same holds when the creator is launched from PowerShell or from Git Bash. ⚠ Claude Code markers leak (§4.4). A session created from a real user terminal was not tried here: every process on this machine descended from Claude Code. |
+| 6 | zellij 0.44.3 compatibility | ❌ no `new-tab --no-focus`, so the minimum is 0.45.0 (§6.6). Everything else is present. #5594 was not live-tested on 0.44.3, because the 0.44.3 binary shares the session namespace with the running 0.45.1 (it listed the 0.45.1 session). |
+| 7 | codex | ⬜ not installed; still unverified (item 1 above, §5 #15). |
+| — | Phase 0 item 5 (deliverer survives a real leader tool call) | ⬜ not run in this pass; covered by PR3's "done when". |
+
+Screens captured for `src/fleet/adapters/claude.py` (from `dump-screen`,
+120×28):
+
+- Startup dialog when the Claude in Chrome extension is installed. It
+  appears before the input prompt. It is skipped entirely with
+  **`claude --no-chrome`**:
+
+  ```
+    Claude in Chrome extension detected
+    …
+    ❯ No, keep browser tools off
+      Yes, use my browser
+
+    Enter to confirm · Esc to keep browser tools off
+  ```
+
+  `ready` matches this screen and `gate` does not (§10).
+- Ready input prompt (idle; the text after `❯` is claude's grey
+  placeholder, or a suggested follow-up after a turn):
+
+  ```
+                                                                 ● high · /effort
+  ────────────────────────────────────────────────────────────────────────────
+  ❯ Try "fix lint errors"
+  ────────────────────────────────────────────────────────────────────────────
+    ⏵⏵ auto mode on (shift+tab to cycle)
+  ```
+
+  An empty composer renders as `❯ ` on its own line. While claude is working
+  the composer still shows `❯ `, and the footer adds `· esc to interrupt`. So
+  `ready` also matches a busy screen, as it does under tmux.
+- Permission dialog triggered by the pointer when the prompt file lies
+  outside claude's working directories. `gate` matches it and `ready` does
+  not:
+
+  ```
+   Allow reads outside the working directories?
+   ❯ 1. Yes, keep allowing reads outside the working directories
+     2. No, block reads outside the working directories from now on
+     3. No, ask again next time
+  ```
+
+  The probe ran claude without `--dangerously-skip-permissions`. fleet's
+  `driver-prompt.md` lives under `<state>/tasks/…`, which is also outside the
+  worktree, but fleet launches claude with that flag. Whether the dialog can
+  still appear then was not tested. If it does, `gate` already holds the
+  deliverer back. The dialog is not Windows-specific.
 
 ### PR1 — Windows-compatible core (`windows-base`)
 
@@ -398,7 +545,7 @@ and ends the agent process.
 
 - zellij attach (§6.5).
 - `fleet preflight`, per backend:
-  - multiplexer presence and version (flag 0.45.0–0.45.1);
+  - multiplexer presence and version (fail below 0.45.0; flag 0.45.0–0.45.1);
   - agent CLIs resolvable to absolute paths;
   - clone path without spaces;
   - `core.longpaths`.
@@ -449,7 +596,15 @@ the §8 checklist.
 - **No real-zellij CI.** Windows correctness relies on the manual checklist.
 - **Temp-client cleanup (#5594 workaround).** If killing the hidden client
   fails, it lingers and keeps the tab sized to its console. Reap stray
-  clients via `list-clients` and track the pid.
+  clients via `list-clients` and track the pid. (`Popen.kill()` on the
+  `zellij attach` process removed the client within 1 s in every Phase 0
+  run.)
+- **Workaround reliability.** 1 of 24 Phase 0 runs lost the new tab
+  (§4.3). Verify the tab after creation and retry once. Fall back to §6.2 B
+  if losses keep happening in PR3 testing.
+- **Inherited agent env.** A session created from inside an agent passes
+  that agent's session markers to every pane (§4.4). The launcher strips
+  them.
 - **Agent TUIs under ConPTY.** claude rendered correctly under `dump-screen`.
   codex is unverified.
 - **Clone path with spaces** breaks the unquoted prompt embedding (§5 #9).
@@ -467,6 +622,13 @@ not: it only knows numbered options and login / trust / update wording. The
 prompt deliverer would therefore paste the pointer into the dialog. This
 needs its own Issue: tighten `ready`, or teach `gate` about un-numbered
 selection menus.
+
+Phase 0 reproduced this under zellij and found a simpler fix: claude has a
+**`--no-chrome`** flag ("Disable Claude in Chrome integration"). With it the
+dialog never appears and claude goes straight to the input prompt (verified).
+Adding `--no-chrome` to `ClaudeAdapter.cli_command` avoids the dialog on
+every platform. A `gate` pattern for `Esc to keep browser tools off` is still
+worth adding as a backstop.
 
 ---
 
