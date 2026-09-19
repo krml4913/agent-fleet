@@ -13,7 +13,11 @@ After completing work, always run the following steps before calling `fleet-agen
 1. `git add` / `git commit` — commit the changes
 2. `git push -u origin <branch>` — push to the remote
 3. `gh pr create` — create a PR (write an appropriate title and body)
-4. `fleet-agent done` — finally, call done to notify the orchestrator
+4. `gh pr checks <number> --watch` — wait for CI and make sure **every** job is green
+   (Linux and Windows). A local run covers only your own OS: path separators,
+   shells and locales differ, so a local pass is not enough. Fix failures and
+   push again before going on.
+5. `fleet-agent done` — finally, call done to notify the orchestrator
 
 - The driver does not merge the PR. Merging is left to the judgment of the leader / user.
 - If a conflict occurs, the driver (AI) resolves it on its own:
