@@ -269,7 +269,7 @@ After the discarded tabs from §4.3 went away, the next tab got id `1` again.
 | 10 | Git Bash converts POSIX-looking arguments (`/k` became `K:/` in the investigation) when an agent calls `fleet-agent` | agent tool calls | The launcher sets `MSYS_NO_PATHCONV=1` in the pane environment. |
 | 11 | Path comparisons assume case-sensitive, `/`-separated paths | e.g. `commands/start.py` `_infer_project_from_promptfile` | Compare with `os.path.normcase`. |
 | 12 | The verify gate runs `shell=True`, which is `cmd.exe` on Windows | `orchestrator.py:529` | Document that verify commands run under `cmd.exe` on Windows (an optional `shell:` field can come later). |
-| 13 | Desktop notifications are macOS-only | `notify.py:113` | Slack already works. A Windows toast is optional (§7, PR5). |
+| 13 | Desktop notifications are macOS-only | `notify.py:113` | **Done** (`windows-toast`): `notify.py` `_windows_notify` shows a WinRT toast via `powershell.exe -EncodedCommand` (config `windows: {enabled: true}`, default-on). Slack also works. |
 | 14 | Deep worktree paths can exceed `MAX_PATH` | `fleet-state/projects/<p>/worktrees/task-<id>/…` | Preflight checks `git config core.longpaths`. |
 | 15 | codex's `config.toml` trust key format on Windows is unknown (may be `\\?\`-prefixed) | `agents.codex_repo_trusted` | Verify in Phase 0 and normalize. |
 

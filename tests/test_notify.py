@@ -1,8 +1,11 @@
 """Tests for ``fleet.notify`` — best-effort, never raises."""
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -20,6 +23,10 @@ class NotifyTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.state_dir = Path(self._tmp.name)
+        # Never pop a real desktop toast from the suite on Windows hosts.
+        win = patch("fleet.notify._windows_notify")
+        self.mock_windows = win.start()
+        self.addCleanup(win.stop)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -61,6 +68,10 @@ class NoNotifyEnvTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.state_dir = Path(self._tmp.name)
+        # Never pop a real desktop toast from the suite on Windows hosts.
+        win = patch("fleet.notify._windows_notify")
+        self.mock_windows = win.start()
+        self.addCleanup(win.stop)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -72,6 +83,7 @@ class NoNotifyEnvTests(unittest.TestCase):
                 notify.send(self.state_dir, "title", "message")
         mock_macos.assert_not_called()
         mock_slack.assert_not_called()
+        self.mock_windows.assert_not_called()
 
     def test_fleet_no_notify_blocks_slack(self) -> None:
         cfg = (
@@ -86,6 +98,7 @@ class NoNotifyEnvTests(unittest.TestCase):
                 notify.send(self.state_dir, "title", "message")
         mock_macos.assert_not_called()
         mock_slack.assert_not_called()
+        self.mock_windows.assert_not_called()
 
     def test_fleet_no_notify_empty_string_does_not_suppress(self) -> None:
         with patch.dict(os.environ, {"FLEET_NO_NOTIFY": ""}):
@@ -141,6 +154,117 @@ class MacosRenderTests(unittest.TestCase):
         self.assertIn("✅", script)
         self.assertIn("the message", script)
         self.assertIn("the title", script)
+
+
+class WindowsToastTests(unittest.TestCase):
+    """Windows toast via PowerShell + WinRT; best-effort, Windows-only."""
+
+    @staticmethod
+    def _decode(argv: list) -> str:
+        return base64.b64decode(argv[-1]).decode("utf-16-le")
+
+    def _run(self, cfg: dict, title: str, message: str, level: str = "info"):
+        with patch("fleet.notify.platform.system", return_value="Windows"), \
+             patch("fleet.notify.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            notify._windows_notify(cfg, title, message, level)
+        return mock_run
+
+    def test_invokes_powershell_encoded_no_window(self) -> None:
+        mock_run = self._run({}, "fleet test", "hello", "success")
+        mock_run.assert_called_once()
+        argv = mock_run.call_args.args[0]
+        self.assertEqual(argv[0], "powershell.exe")
+        self.assertIn("-NoProfile", argv)
+        self.assertIn("-NonInteractive", argv)
+        self.assertEqual(argv[-2], "-EncodedCommand")
+        kwargs = mock_run.call_args.kwargs
+        self.assertLessEqual(kwargs["timeout"], 10)
+        self.assertEqual(
+            kwargs["creationflags"],
+            getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        script = self._decode(argv)
+        self.assertIn("ToastNotificationManager", script)
+        self.assertIn(notify._WINDOWS_TOAST_APP_ID, script)
+        self.assertIn("<text>fleet test</text>", script)
+        # Level emoji as a char ref: the whole script is pure ASCII.
+        self.assertIn("&#9989; hello", script)
+        self.assertTrue(script.isascii())
+
+    def test_escapes_xml_and_powershell_quotes(self) -> None:
+        mock_run = self._run(
+            {}, "a <b> & 'c'", "x \"y\" it’s $(evil) 'z'\nline2"
+        )
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertIn("a &lt;b&gt; &amp; &apos;c&apos;", script)
+        self.assertIn(
+            "x &quot;y&quot; it&#8217;s $(evil) &apos;z&apos; line2", script
+        )
+        # The only raw single quotes on that line are the PS string delimiters.
+        load = next(ln for ln in script.splitlines() if "LoadXml" in ln)
+        self.assertEqual(load.count("'"), 2)
+
+    def test_truncates_title_and_body(self) -> None:
+        mock_run = self._run({}, "T" * 100, "m" * 1000)
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertIn("<text>" + "T" * 60 + "</text>", script)
+        self.assertNotIn("T" * 61, script)
+        self.assertIn("m" * 290, script)
+        self.assertNotIn("m" * 300, script)
+
+    def test_disabled_in_config(self) -> None:
+        mock_run = self._run({"enabled": False}, "t", "m")
+        mock_run.assert_not_called()
+
+    def test_non_windows_never_calls(self) -> None:
+        for system in ("Darwin", "Linux"):
+            with patch("fleet.notify.platform.system", return_value=system), \
+                 patch("fleet.notify.subprocess.run") as mock_run:
+                notify._windows_notify({}, "t", "m")
+            mock_run.assert_not_called()
+
+    def test_failure_warns_never_raises(self) -> None:
+        for effect in (
+            subprocess.TimeoutExpired("powershell.exe", 5),
+            OSError("nope"),
+        ):
+            err = io.StringIO()
+            with patch("fleet.notify.platform.system", return_value="Windows"), \
+                 patch("fleet.notify.subprocess.run", side_effect=effect), \
+                 patch("sys.stderr", err):
+                notify._windows_notify({}, "t", "m")
+            self.assertIn("Windows notify failed", err.getvalue())
+
+    def test_nonzero_exit_warns(self) -> None:
+        err = io.StringIO()
+        with patch("fleet.notify.platform.system", return_value="Windows"), \
+             patch("fleet.notify.subprocess.run") as mock_run, \
+             patch("sys.stderr", err):
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stderr = b"boom"
+            notify._windows_notify({}, "t", "m")
+        self.assertIn("boom", err.getvalue())
+
+    def test_send_honors_windows_disabled(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "FLEET_NO_NOTIFY"}
+        with TemporaryDirectory() as d:
+            (Path(d) / notify.CONFIG_FILE).write_text(
+                "windows:\n  enabled: false\n", encoding="utf-8"
+            )
+            with patch.dict(os.environ, env, clear=True), \
+                 patch("fleet.notify.platform.system", return_value="Windows"), \
+                 patch("fleet.notify.subprocess.run") as mock_run:
+                notify.send(Path(d), "t", "m")
+        mock_run.assert_not_called()
+
+    def test_send_fleet_no_notify_skips_windows(self) -> None:
+        with TemporaryDirectory() as d, \
+             patch.dict(os.environ, {"FLEET_NO_NOTIFY": "1"}), \
+             patch("fleet.notify.platform.system", return_value="Windows"), \
+             patch("fleet.notify.subprocess.run") as mock_run:
+            notify.send(Path(d), "t", "m")
+        mock_run.assert_not_called()
 
 
 class SlackRenderTests(unittest.TestCase):
