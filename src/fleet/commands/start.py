@@ -88,19 +88,8 @@ def _git_toplevel(cwd: Path) -> Path | None:
 
 
 def _project_repo_dir(state_dir: Path) -> Path | None:
-    """Return the project's ``repo`` dir when it is set and exists on disk.
-
-    ``None`` when project.yaml is missing / unreadable, has no ``repo``, or the
-    path is not an existing directory.
-    """
-    try:
-        repo = state_mod.load_project(state_dir).get("repo")
-    except (OSError, ValueError):
-        return None
-    if not repo:
-        return None
-    path = Path(str(repo)).expanduser()
-    return path if path.is_dir() else None
+    """Return the project's ``repo`` dir when it is set and exists on disk."""
+    return state_mod.project_repo_dir(state_dir)
 
 
 def _guard_codex_trust(vendor: str, state_dir: Path, project_root: Path | None = None) -> int | None:

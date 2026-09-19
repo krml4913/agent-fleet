@@ -536,7 +536,7 @@ is captured somewhere. fleet records it **per task**, into the task's own
 
 - **Seam = the vendor adapter.** Token accounting is vendor-specific in exactly
   the same way the launch command is, so it lives where the other vendor seams do:
-  a `VendorAdapter.usage_from_session(*, cwd, home=None)` classmethod (§ adapter
+  a `VendorAdapter.usage_from_session(*, cwd, home=None, pointer=None)` classmethod (§ adapter
   registry, `src/fleet/adapters/`). It **defaults to `None`** — a vendor that
   cannot report usage contributes nothing rather than erroring — and `claude` /
   `codex` override it. Adding a vendor stays "one file plus one registry line".
@@ -547,7 +547,11 @@ is captured somewhere. fleet records it **per task**, into the task's own
   cache-creation + cache-read, since claude reports input excluding cache); codex
   takes the last cumulative `token_count` total from each
   `~/.codex/sessions/**/rollout-*.jsonl` whose recorded `cwd` matches. The working
-  dir (the task's worktree, unique per task) is the attribution key. Reading
+  dir (the task's worktree, unique per task) is the attribution key. A
+  workspace=none task runs in the shared project root, so there the key is the
+  root **plus the task's prompt pointer** (`pointer=`, the text fleet pastes as
+  the pane's first input): only sessions whose first pointer mention is this
+  task's count, which keeps the leader's and other tasks' sessions out. Reading
   home-dir vendor logs mirrors fleet's existing posture (e.g. reading
   `~/.codex/config.toml`); fleet never writes its state into the home dir — usage
   lands in `task.yaml` only.

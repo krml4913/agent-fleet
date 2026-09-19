@@ -1,11 +1,16 @@
 """Adapter for OpenAI's ``codex`` CLI."""
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-from .base import Key, KeystrokeStep, VendorAdapter
+from .base import (
+    Key,
+    KeystrokeStep,
+    VendorAdapter,
+    parse_jsonl_records,
+    session_started_by_pointer,
+)
 
 
 class CodexAdapter(VendorAdapter):
@@ -70,7 +75,11 @@ class CodexAdapter(VendorAdapter):
 
     @classmethod
     def usage_from_session(
-        cls, *, cwd: str | Path, home: Path | None = None
+        cls,
+        *,
+        cwd: str | Path,
+        home: Path | None = None,
+        pointer: str | None = None,
     ) -> dict | None:
         """Sum token usage from codex's rollout logs for ``cwd``.
 
@@ -83,8 +92,9 @@ class CodexAdapter(VendorAdapter):
 
         Rollouts are not grouped by directory, so this scans them and keeps
         only the ones whose ``cwd`` matches (unique per task), summing each
-        matched file's final total. Returns ``None`` when no matching usage is
-        found; never raises.
+        matched file's final total. With ``pointer`` (a ``cwd`` shared with
+        other sessions), a rollout must also have been started by that pointer.
+        Returns ``None`` when no matching usage is found; never raises.
         """
         base = (home or Path.home()) / ".codex" / "sessions"
         if not base.is_dir():
@@ -104,14 +114,10 @@ class CodexAdapter(VendorAdapter):
                 continue
             file_cwd: str | None = None
             last_total: dict | None = None
-            for line in text.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except (ValueError, TypeError):
-                    continue
+            records = parse_jsonl_records(text)
+            if pointer is not None and not session_started_by_pointer(records, pointer):
+                continue
+            for record in records:
                 payload = record.get("payload") if isinstance(record, dict) else None
                 if not isinstance(payload, dict):
                     continue

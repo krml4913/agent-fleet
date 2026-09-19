@@ -527,6 +527,22 @@ def load_project(state_dir: Path) -> dict[str, str]:
     return simple_yaml.load(p.read_text(encoding="utf-8"))
 
 
+def project_repo_dir(state_dir: Path) -> Path | None:
+    """Return the project's ``repo`` dir when it is set and exists on disk.
+
+    ``None`` when project.yaml is missing / unreadable, has no ``repo``, or the
+    path is not an existing directory.
+    """
+    try:
+        repo = load_project(state_dir).get("repo")
+    except (OSError, ValueError):
+        return None
+    if not repo:
+        return None
+    path = Path(str(repo)).expanduser()
+    return path if path.is_dir() else None
+
+
 def save_project(state_dir: Path, data: dict[str, str]) -> None:
     text = simple_yaml.dump(data)
     with atomic_write(project_path(state_dir)) as f:
@@ -647,11 +663,13 @@ def record_task_usage(
     to the task's state dir when there is no worktree). ``home`` overrides the
     home directory for tests (``None`` means the adapter uses ``Path.home``).
 
-    A workspace=none driver runs in the shared project root, whose session
-    logs cannot be attributed to one task (the leader and other tasks may run
-    there too), so its usage is deliberately not looked up there: the task-dir
-    lookup only matches panes that really ran in the task dir (the fallback
-    when the project has no usable ``repo``), and otherwise degrades to absent.
+    A workspace=none driver runs in the shared project root (or, when the
+    project has no usable ``repo``, the task dir). The root's session logs also
+    hold the leader's and other tasks' sessions, so the directory alone cannot
+    attribute them: there the lookup is narrowed to the sessions this task's
+    prompt pointer started (the first thing fleet pastes into the pane; see
+    ``VendorAdapter.usage_from_session``). The task-dir lookup needs no
+    narrowing — nothing else runs there.
 
     Any problem — unknown/unparseable agent spec, no adapter usage, missing or
     malformed log — leaves ``task['usage']`` unset. A terminal transition must
@@ -667,8 +685,22 @@ def record_task_usage(
         spec = stages[idx].get("agent")
         if not spec:
             return
-        cwd = task.get("worktree") or str(task_dir(state_dir, task_id))
-        usage = agents.usage_from_session(spec, cwd=cwd, home=home)
+        worktree = task.get("worktree")
+        if worktree:
+            usage = agents.usage_from_session(spec, cwd=worktree, home=home)
+        else:
+            from . import prompt_pointer
+
+            tdir = task_dir(state_dir, task_id)
+            usage = None
+            repo = project_repo_dir(state_dir)
+            if repo is not None:
+                pointer = prompt_pointer.pointer_text(tdir / "driver-prompt.md")
+                usage = agents.usage_from_session(
+                    spec, cwd=repo, home=home, pointer=pointer
+                )
+            if not usage:
+                usage = agents.usage_from_session(spec, cwd=tdir, home=home)
         if usage:
             task["usage"] = usage
     except Exception:
