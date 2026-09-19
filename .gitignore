@@ -16,3 +16,6 @@ fleet-state/
 .DS_Store
 .vscode/
 .idea/
+
+# Agent worktrees created by Claude Code subagents
+.claude/worktrees/
