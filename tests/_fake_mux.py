@@ -16,12 +16,18 @@ effects with ``fake.on[method_name] = callable``.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
 from pathlib import Path
 from typing import Any, Iterator
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+# Same hermetic guard as tests/_fleet_test_helpers.py: never touch a real
+# multiplexer unless live tests are opted into.
+if not (os.environ.get("FLEET_LIVE_TMUX") or os.environ.get("FLEET_LIVE_ZELLIJ")):
+    os.environ.setdefault("FLEET_NO_MUX", "1")
 
 from fleet import mux  # noqa: E402
 from fleet.mux.base import Key, Mux, MuxError, parse_key  # noqa: E402

@@ -18,6 +18,13 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
 
+# Hermetic by default: no test may create a REAL multiplexer session (tmux, or
+# zellij — the default backend on Windows) unless live tests are explicitly
+# opted into. ``FLEET_NO_MUX`` makes every backend report unavailable (and the
+# zellij backend refuse to run at all); subprocesses inherit it.
+if not (os.environ.get("FLEET_LIVE_TMUX") or os.environ.get("FLEET_LIVE_ZELLIJ")):
+    os.environ.setdefault("FLEET_NO_MUX", "1")
+
 # Windows: tests that call command ``run()`` functions in-process print
 # ``·`` / ``—`` to the runner's stdout, which uses the ANSI code page (e.g.
 # cp932) when piped. The real CLI entrypoints reconfigure stdio to UTF-8

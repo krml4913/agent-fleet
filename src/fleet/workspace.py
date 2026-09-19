@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 VALUES = ("worktree", "none")
 DEFAULT = "worktree"
+
+#: Windows only: a just-killed agent can hold its cwd (the worktree) open for
+#: a moment after its pane closes, so ``worktree remove`` is retried briefly.
+WORKTREE_REMOVE_ATTEMPTS = 6
+WORKTREE_REMOVE_RETRY_SECONDS = 0.5
 
 
 def load(state_dir: Path) -> str:
@@ -179,16 +185,21 @@ def _worktree_remove(ctx: dict[str, Any]) -> None:
     branch = f"{project_name}/task/{task_id}"
 
     if worktree.exists():
-        r = subprocess.run(
-            [
-                "git", "-C", str(project_root),
-                "worktree", "remove", "--force", str(worktree),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        attempts = WORKTREE_REMOVE_ATTEMPTS if sys.platform == "win32" else 1
+        for attempt in range(attempts):
+            r = subprocess.run(
+                [
+                    "git", "-C", str(project_root),
+                    "worktree", "remove", "--force", str(worktree),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if r.returncode == 0 or attempt == attempts - 1:
+                break
+            time.sleep(WORKTREE_REMOVE_RETRY_SECONDS)
         if r.returncode != 0:
             print(
                 f"warn: git worktree remove failed: {r.stderr.strip()}",

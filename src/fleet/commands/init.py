@@ -274,6 +274,6 @@ def run(args: argparse.Namespace) -> int:
     print(f"  project name: {name}")
     print(f"  repo:         {repo}")
     print(f"  state dir:    {state_dir}")
-    print(f"  tmux session: fleet-{name}")
+    print(f"  session:      fleet-{name}")
     print(f"  formations copied: {formations_summary}")
     return 0
