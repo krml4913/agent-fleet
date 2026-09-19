@@ -707,23 +707,29 @@ deliverer from pasting into the dialog.
 
 ## 11. Remaining follow-ups
 
-- **codex under zellij is unverified** (§5 #15, §7 Phase 0 item 7, §8 step
-  10): ready / gate regexes against `dump-screen`, the `/rename` flow with
+Each item has a GitHub issue. The handoff note for the fleet leader is
+[`handoff-windows-zellij.md`](handoff-windows-zellij.md).
+
+- **codex under zellij is unverified** (#256; §5 #15, §7 Phase 0 item 7, §8
+  step 10): ready / gate regexes against `dump-screen`, the `/rename` flow with
   `Ctrl u`, and the `config.toml` trust-key format on Windows.
-- **`multi_stage` handoff and the verify gate under zellij** (§8 steps 6–7):
-  end-to-end runs are in progress by a teammate.
-- **Visible-terminal attach is not exercised by automation.** Phase 0
-  checked attach focus with hidden clients only; `fleet attach <task>` with and without another
-  client in a real, visible terminal (§8 step 8) is manual only.
-- **zellij on macOS / Linux is untested.** `FLEET_MUX=zellij` may work there,
-  but only Windows was tried.
-- **claude's workspace-trust dialog.** claude's first run in a fresh
+- **Visible-terminal attach is not exercised by automation** (#257). Phase 0
+  checked attach focus with hidden clients only; `fleet attach <task>` with and
+  without another client in a real, visible terminal (§8 step 8) is manual only.
+- **zellij on macOS / Linux is untested** (#258). `FLEET_MUX=zellij` may work
+  there, but only Windows was tried.
+- **claude's workspace-trust dialog** (#259). claude's first run in a fresh
   worktree asks whether to trust the folder. The adapter's `gate` regex
   catches it, so the deliverer holds back and the task is surfaced as a boot
   gate (`awaiting_orders` + notification), but a human still has to attach
   and confirm it once per worktree.
-- From §7 PR5: an optional `shell:` field for verify commands (today they run
-  under `cmd.exe` on Windows, §5 #12).
+- **An optional `shell:` field for verify commands** (#260; from §7 PR5).
+  Today they run under `cmd.exe` on Windows (§5 #12).
+- **Re-check multi-stage handoff on tmux** (#261). #253 changed the handoff
+  path for zellij only; tmux is covered by unit tests but was not re-run live.
+
+The `multi_stage` handoff and the verify gate under zellij (§8 steps 6–7)
+were verified end to end and fixed in #253.
 
 ---
 
