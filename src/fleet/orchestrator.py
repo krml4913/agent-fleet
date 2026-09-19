@@ -531,6 +531,8 @@ def _run_verify_command(state_dir: Path, task: dict, verify: dict) -> _VerifyRes
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as e:

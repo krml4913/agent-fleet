@@ -59,7 +59,7 @@ class ApprovalCommandTests(unittest.TestCase):
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
             cwd=str(self.project),
             env=env,
         )
@@ -75,7 +75,7 @@ class ApprovalCommandTests(unittest.TestCase):
 
         events = [
             json.loads(line)
-            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            for line in (self.state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
         self.assertTrue(any(e["type"] == "approve" for e in events))
@@ -91,7 +91,7 @@ class ApprovalCommandTests(unittest.TestCase):
 
         events = [
             json.loads(line)
-            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            for line in (self.state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
         self.assertTrue(any(e["type"] == "reject" for e in events))

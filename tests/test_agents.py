@@ -63,7 +63,9 @@ class CodexRepoTrustedTests(unittest.TestCase):
             root.mkdir()
             config = Path(tmp) / "config.toml"
             config.write_text(
-                f'[projects."{root.resolve()}"]\ntrust_level = "trusted"\n'
+                # TOML literal string: Windows backslashes are not escapes.
+                f"[projects.'{root.resolve()}']\ntrust_level = \"trusted\"\n",
+                encoding="utf-8",
             )
 
             self.assertTrue(agents.codex_repo_trusted(root, config_path=config))
@@ -74,7 +76,8 @@ class CodexRepoTrustedTests(unittest.TestCase):
             root.mkdir()
             config = Path(tmp) / "config.toml"
             config.write_text(
-                f'[projects."{root.resolve()}"]\ntrust_level = "untrusted"\n'
+                f"[projects.'{root.resolve()}']\ntrust_level = \"untrusted\"\n",
+                encoding="utf-8",
             )
 
             self.assertFalse(agents.codex_repo_trusted(root, config_path=config))
@@ -93,7 +96,7 @@ class CodexRepoTrustedTests(unittest.TestCase):
             root = Path(tmp) / "repo"
             root.mkdir()
             config = Path(tmp) / "config.toml"
-            config.write_text("[projects.\n")
+            config.write_text("[projects.\n", encoding="utf-8")
 
             self.assertFalse(agents.codex_repo_trusted(root, config_path=config))
 

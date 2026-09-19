@@ -410,7 +410,7 @@ class EditCommandTests(unittest.TestCase):
             [sys.executable, str(ROOT / "fleet"), "edit", "--project", "proj", "--no-browser"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=True, encoding="utf-8",
             env=env,
             cwd=str(self.repo),
         )

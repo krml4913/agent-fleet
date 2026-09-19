@@ -56,7 +56,7 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(tmux.session_exists(self.session))
         events_path = state.session_dir(self.label) / "events.jsonl"
-        events = [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        events = [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l]
         self.assertTrue(any(e["type"] == "leader_start" for e in events))
         self.assertTrue(any(e.get("label") == self.label for e in events))
 
@@ -67,7 +67,7 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         record_path = state.session_record_path(self.label)
         self.assertTrue(record_path.exists(), "session.json was not written")
-        data = json.loads(record_path.read_text())
+        data = json.loads(record_path.read_text(encoding="utf-8"))
         self.assertEqual(data["agent"], "claude:opus")
         self.assertEqual(data["label"], self.label)
         self.assertIn("started_at", data)
@@ -90,7 +90,7 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         prompt_path = state.session_dir(self.label) / "leader-prompt.md"
         self.assertTrue(prompt_path.exists(), "leader-prompt.md was not written")
-        content = prompt_path.read_text()
+        content = prompt_path.read_text(encoding="utf-8")
         self.assertIn("You are a fleet leader session", content)
 
     @requires_live_tmux

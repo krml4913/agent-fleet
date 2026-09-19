@@ -33,7 +33,7 @@ class InitCommandTests(unittest.TestCase):
         self.assertTrue((state_dir / "project.yaml").is_file())
         self.assertTrue((state_dir / "events.jsonl").is_file())
         self.assertTrue((state_dir / "tasks").is_dir())
-        self.assertIn("name: demo", (state_dir / "project.yaml").read_text())
+        self.assertIn("name: demo", (state_dir / "project.yaml").read_text(encoding="utf-8"))
 
     def test_name_defaults_to_basename(self) -> None:
         result = run_fleet("init", str(self.project), fleet_home=self.fleet_home)
@@ -181,14 +181,14 @@ class FormationListCmdTests(unittest.TestCase):
             "stages:\n"
             "  - role: driver\n"
             "    agent: claude:opus\n"
-            "    user_approval: required\n"
+            "    user_approval: required\n", encoding="utf-8"
         )
         (self.state_dir / "formations" / "solo.yaml").write_text(
             "name: solo\n"
             "stages:\n"
             "  - role: driver\n"
             "    agent: codex:gpt-5.5\n"
-            "    user_approval: required\n"
+            "    user_approval: required\n", encoding="utf-8"
         )
 
         result = run_fleet("formation", "list",

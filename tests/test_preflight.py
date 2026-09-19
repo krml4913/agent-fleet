@@ -160,7 +160,7 @@ class PreflightCmdSmokeTest(unittest.TestCase):
         r = subprocess.run(
             [sys.executable, str(FLEET), "preflight"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8",
         )
         self.assertIn("python", r.stdout)
         # Exit 0 or 1 depending on the host; just assert it ran.

@@ -35,7 +35,7 @@ class EventEmitTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             cwd=str(cwd) if cwd else str(self.project),
             env=env,
         )
@@ -68,7 +68,7 @@ class EventEmitTests(unittest.TestCase):
 
     def _events(self) -> list[dict]:
         events_path = self.state_dir / "events.jsonl"
-        return [json.loads(l) for l in events_path.read_text().splitlines() if l]
+        return [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l]
 
 
 if __name__ == "__main__":

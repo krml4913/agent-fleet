@@ -50,7 +50,7 @@ class AdvanceApprovedTests(unittest.TestCase):
         self.sd = self.project / ".fleet-state"
         state.init_state(self.sd, name="demo")
         (self.sd / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -152,7 +152,7 @@ class AdvanceChangesRequestedTests(unittest.TestCase):
             "project reviewer role\n", encoding="utf-8"
         )
         (self.sd / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -199,7 +199,7 @@ class PeerReviewLoopTests(unittest.TestCase):
             "project reviewer role\n", encoding="utf-8"
         )
         (self.sd / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -307,7 +307,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         # questions.md should exist
         qpath = state.task_dir(self.sd, "24") / "questions.md"
         self.assertTrue(qpath.exists())
-        self.assertIn("exceeded", qpath.read_text())
+        self.assertIn("exceeded", qpath.read_text(encoding="utf-8"))
 
     # ── peer_review.max_iterations override ───────────────────────────────
 
@@ -325,7 +325,7 @@ class PeerReviewLoopTests(unittest.TestCase):
         updated = state.load_task(self.sd, "24a")
         self.assertEqual(updated["status"], "awaiting_orders")
         qpath = state.task_dir(self.sd, "24a") / "questions.md"
-        self.assertIn("maximum 2 iterations", qpath.read_text())
+        self.assertIn("maximum 2 iterations", qpath.read_text(encoding="utf-8"))
 
     def test_max_iterations_override_allows_more(self) -> None:
         # max_iterations=5 → iteration 3 does NOT escalate; it increments to 4.
@@ -481,7 +481,7 @@ class UserApprovalGateTests(unittest.TestCase):
         self.sd = self.project / ".fleet-state"
         state.init_state(self.sd, name="demo")
         (self.sd / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -641,7 +641,7 @@ class UserApprovalGateTests(unittest.TestCase):
         orchestrator.advance(self.sd, "32", task, result="approved", dry_run=True)
         qpath = state.task_dir(self.sd, "32") / "questions.md"
         self.assertTrue(qpath.exists())
-        content = qpath.read_text()
+        content = qpath.read_text(encoding="utf-8")
         self.assertIn("approval", content)
         self.assertIn("Tell the leader", content)
         self.assertNotIn("fleet-agent done", content)
@@ -762,13 +762,16 @@ class VerifyGateTests(unittest.TestCase):
             "project reviewer role\n", encoding="utf-8"
         )
         (self.sd / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
     def _python(self, code: str) -> str:
+        if sys.platform == "win32":
+            # The verify gate runs ``shell=True``, i.e. cmd.exe on Windows.
+            return subprocess.list2cmdline([sys.executable, "-c", code])
         return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
 
     def test_verify_pass_advances_to_user_approval(self) -> None:
@@ -872,7 +875,7 @@ class VerifyGateTests(unittest.TestCase):
         self.assertFalse(task["stages"][0]["verify"]["passed"])
         orchestrator.advance(self.sd, "v4", task, result="approved", dry_run=True)
 
-        self.assertEqual((self.project / "verify-count.txt").read_text(), "2")
+        self.assertEqual((self.project / "verify-count.txt").read_text(encoding="utf-8"), "2")
         updated = state.load_task(self.sd, "v4")
         self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "reviewing")
 
@@ -906,7 +909,7 @@ class VerifyGateTests(unittest.TestCase):
         self.assertFalse(task["stages"][0]["verify"]["passed"])
         orchestrator.advance(self.sd, "v5", task, result="approved", dry_run=True)
 
-        self.assertEqual((self.project / "approval-count.txt").read_text(), "2")
+        self.assertEqual((self.project / "approval-count.txt").read_text(encoding="utf-8"), "2")
         updated = state.load_task(self.sd, "v5")
         self.assertEqual(updated["stages"][0]["peer_review"]["phase"], "reviewing")
 
@@ -955,8 +958,8 @@ class VerifyGateTests(unittest.TestCase):
         self.assertEqual(updated["status"], "awaiting_orders")
         self.assertTrue(updated["stages"][0]["verify"]["escalated"])
         qpath = state.task_dir(self.sd, "v7") / "questions.md"
-        self.assertIn("verify", qpath.read_text())
-        self.assertIn("maximum 2 iterations", qpath.read_text())
+        self.assertIn("verify", qpath.read_text(encoding="utf-8"))
+        self.assertIn("maximum 2 iterations", qpath.read_text(encoding="utf-8"))
 
     def test_workspace_none_runs_verify_in_project_root(self) -> None:
         command = self._python("from pathlib import Path; Path('root-cwd.txt').write_text('root')")

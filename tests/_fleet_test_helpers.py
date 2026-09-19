@@ -18,6 +18,18 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
 
+# Windows: tests that call command ``run()`` functions in-process print
+# ``·`` / ``—`` to the runner's stdout, which uses the ANSI code page (e.g.
+# cp932) when piped. The real CLI entrypoints reconfigure stdio to UTF-8
+# (``fleet.cli._ensure_utf8_stdio``); mirror that for the test process.
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
 # Opt-in gate for tests that create REAL tmux sessions (and, for the leader
 # launch tests, a real claude-code CLI session). These are skipped by default so
 # a plain `python -m unittest` run leaks zero sessions onto the developer's
@@ -85,7 +97,7 @@ def run_fleet(*args: str, fleet_home: Path | None = None, cwd: Path | None = Non
     return subprocess.run(
         [sys.executable, str(FLEET), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
         cwd=str(cwd) if cwd else None,
         env=env,
     )
@@ -105,7 +117,7 @@ def run_fleet_agent(*args: str, fleet_home: Path | None = None, cwd: Path | None
     return subprocess.run(
         [sys.executable, str(FLEET_AGENT), *args],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8",
         cwd=str(cwd) if cwd else None,
         env=env,
     )

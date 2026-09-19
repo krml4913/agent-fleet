@@ -123,6 +123,8 @@ def run(args: argparse.Namespace) -> int:
         cwd=str(project_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if merge.returncode != 0:
         detail = (merge.stderr or merge.stdout).strip()
@@ -168,6 +170,8 @@ def _delete_remote_branch(project_root: Path, branch: str) -> None:
         ["git", "-C", str(project_root), "push", "origin", "--delete", branch],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if r.returncode == 0:
         return

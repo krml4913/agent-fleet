@@ -7,12 +7,11 @@ plugin hook, not here.
 """
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
 from typing import Any
 
 from . import state as state_mod
-from .paths import fleet_agent_bin  # re-exported: shared by leader_prompt
+from .paths import fleet_agent_bin, prompt_bin_ref  # fleet_agent_bin re-exported: shared by leader_prompt
 
 _CLONE_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROMPTS_DIR = _CLONE_ROOT / "docs" / "prompts"
@@ -135,7 +134,7 @@ def render(
     role_fragment = _load_role_fragment(role, state_dir).strip()
     parts.append(role_fragment)
     body = "\n\n".join(parts)
-    body = body.replace("fleet-agent", shlex.quote(bin_path))
+    body = body.replace("fleet-agent", prompt_bin_ref(bin_path))
     memory_section = _memory_index_section(state_dir)
     if memory_section:
         body = body + "\n\n" + memory_section

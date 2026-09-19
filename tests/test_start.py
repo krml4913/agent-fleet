@@ -49,7 +49,7 @@ class StartTests(unittest.TestCase):
         self.assertTrue((tdir / "inbox.md").is_file())
         self.assertTrue((tdir / "outbox.md").is_file())
         self.assertTrue((tdir / "driver-prompt.md").is_file())
-        text = (tdir / "task.yaml").read_text()
+        text = (tdir / "task.yaml").read_text(encoding="utf-8")
         task_data = state.load_task(self.state_dir, "7")
         self.assertEqual(str(task_data["id"]), "7")
         self.assertIn("agent: claude:sonnet", text)
@@ -75,7 +75,7 @@ class StartTests(unittest.TestCase):
         )
         events_path = self.state_dir / "events.jsonl"
         lines = [
-            json.loads(line) for line in events_path.read_text().splitlines() if line
+            json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines() if line
         ]
         starts = [e for e in lines if e.get("type") == "start"]
         self.assertEqual(len(starts), 1)
@@ -85,7 +85,7 @@ class StartTests(unittest.TestCase):
     def test_prompt_file_reads_description(self) -> None:
         prompt_file = self.project / "task-prompt.md"
         prompt_text = "File prompt first line\nSecond line from file\n"
-        prompt_file.write_text(prompt_text)
+        prompt_file.write_text(prompt_text, encoding="utf-8")
 
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
@@ -98,11 +98,11 @@ class StartTests(unittest.TestCase):
         task_data = state.load_task(self.state_dir, "from-file")
         self.assertEqual(task_data["description"], prompt_text)
         self.assertEqual(task_data["title"], "File prompt first line")
-        prompt = (tdir / "driver-prompt.md").read_text()
+        prompt = (tdir / "driver-prompt.md").read_text(encoding="utf-8")
         self.assertIn(prompt_text, prompt)
         lines = [
             json.loads(line)
-            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            for line in (self.state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
         starts = [e for e in lines if e.get("type") == "start"]
@@ -114,7 +114,7 @@ class StartTests(unittest.TestCase):
         # title; a warn is printed.
         prompt_file = self.project / "task-prompt.md"
         prompt_text = "File prompt first line\nSecond line from file\n"
-        prompt_file.write_text(prompt_text)
+        prompt_file.write_text(prompt_text, encoding="utf-8")
 
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
@@ -133,7 +133,7 @@ class StartTests(unittest.TestCase):
         # --title still wins over the relegated positional description.
         prompt_file = self.project / "task-prompt.md"
         prompt_text = "File body\n"
-        prompt_file.write_text(prompt_text)
+        prompt_file.write_text(prompt_text, encoding="utf-8")
 
         result = run_fleet_agent(
             "start", "--project", "demo", "--dry-run",
@@ -180,7 +180,7 @@ class StartTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         prompt = (
             self.state_dir / "tasks" / "task-no-git" / "driver-prompt.md"
-        ).read_text()
+        ).read_text(encoding="utf-8")
         self.assertNotIn("Git workflow", prompt)
         self.assertNotIn("gh pr create", prompt)
 
@@ -199,7 +199,7 @@ class StartTests(unittest.TestCase):
             fleet_home=self.fleet_home,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        text = (self.state_dir / "tasks" / "task-2" / "task.yaml").read_text()
+        text = (self.state_dir / "tasks" / "task-2" / "task.yaml").read_text(encoding="utf-8")
         self.assertIn("agent: codex:o4-mini", text)
 
     def test_codex_untrusted_repo_stops_before_task_creation(self) -> None:
@@ -247,7 +247,7 @@ class StartTests(unittest.TestCase):
             "    peer_review:\n"
             "      role: code-reviewer\n"
             "      agent: claude:opus\n"
-            "    user_approval: required\n"
+            "    user_approval: required\n", encoding="utf-8"
         )
         args = argparse.Namespace(
             project="demo",
@@ -266,7 +266,7 @@ class StartTests(unittest.TestCase):
         ):
             result = start.run(args)
         self.assertEqual(result, 0)
-        text = (self.state_dir / "tasks" / "task-3" / "task.yaml").read_text()
+        text = (self.state_dir / "tasks" / "task-3" / "task.yaml").read_text(encoding="utf-8")
         self.assertIn("role: implementer", text)
         self.assertIn("agent: codex:gpt-5.5", text)
         task_data = state.load_task(self.state_dir, "3")
@@ -403,7 +403,7 @@ class InferProjectFromPromptFileTests(unittest.TestCase):
         other_dir = self.fleet_home / "projects" / "bmweb" / "tasks"
         other_dir.mkdir(parents=True, exist_ok=True)
         pf = other_dir / "feature-prompt.md"
-        pf.write_text("Build the feature pipeline.\n")
+        pf.write_text("Build the feature pipeline.\n", encoding="utf-8")
         return pf
 
     def test_infers_project_from_prompt_file_and_proceeds(self) -> None:
@@ -435,7 +435,7 @@ class InferProjectFromPromptFileTests(unittest.TestCase):
         own_dir = self.fleet_home / "projects" / "demo" / "tasks"
         own_dir.mkdir(parents=True, exist_ok=True)
         pf = own_dir / "own-prompt.md"
-        pf.write_text("Do the demo work.\n")
+        pf.write_text("Do the demo work.\n", encoding="utf-8")
         result = run_fleet_agent(
             "start", "--dry-run", "--prompt-file", str(pf), "ownwork",
             fleet_home=self.fleet_home, cwd=self.project,
@@ -445,7 +445,7 @@ class InferProjectFromPromptFileTests(unittest.TestCase):
 
     def test_prompt_file_outside_any_project_tree_uses_cwd(self) -> None:
         pf = self.project / "local-prompt.md"
-        pf.write_text("Local prompt, not under any project tree.\n")
+        pf.write_text("Local prompt, not under any project tree.\n", encoding="utf-8")
         result = run_fleet_agent(
             "start", "--dry-run", "--prompt-file", str(pf), "localwork",
             fleet_home=self.fleet_home, cwd=self.project,
@@ -460,7 +460,7 @@ class InferProjectFromPromptFileTests(unittest.TestCase):
         unreg_dir = self.fleet_home / "projects" / "learn-xgboost" / "tasks"
         unreg_dir.mkdir(parents=True)
         pf = unreg_dir / "p.md"
-        pf.write_text("Unregistered project prompt.\n")
+        pf.write_text("Unregistered project prompt.\n", encoding="utf-8")
         result = run_fleet_agent(
             "start", "--dry-run", "--prompt-file", str(pf), "feat",
             fleet_home=self.fleet_home, cwd=self.project,
@@ -594,7 +594,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
     def _make_task_dir(self, task_id: str) -> Path:
         task_dir = self.state_dir / "tasks" / f"task-{task_id}"
         task_dir.mkdir(parents=True)
-        (task_dir / "driver-prompt.md").write_text("prompt content")
+        (task_dir / "driver-prompt.md").write_text("prompt content", encoding="utf-8")
         return task_dir
 
     def test_kill_task_windows_called_before_new_window(self) -> None:

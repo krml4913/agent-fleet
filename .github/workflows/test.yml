@@ -25,3 +25,16 @@ jobs:
         run: ./fleet preflight || true   # claude/codex are optional; ignore exit code
       - name: Run unittest
         run: python -m unittest discover tests
+
+  unittest-windows:
+    # Windows-compatible core (docs/windows-support.md §7 PR1). No tmux here:
+    # tests that genuinely need tmux/POSIX skip on win32.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run unittest
+        run: python -m unittest discover tests

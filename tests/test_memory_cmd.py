@@ -53,7 +53,7 @@ class MemoryCmdTests(unittest.TestCase):
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         return subprocess.run(
             [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True, cwd=str(self.project), env=env,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(self.project), env=env,
             input=stdin,
         )
 

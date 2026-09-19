@@ -34,7 +34,7 @@ class MergeCmdTests(unittest.TestCase):
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo", repo=self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
 
     def tearDown(self) -> None:
@@ -65,7 +65,7 @@ class MergeCmdTests(unittest.TestCase):
         path = self.state_dir / "events.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line]
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     # -- happy path ---------------------------------------------------------
 
@@ -263,7 +263,7 @@ class MergeLeaderProjectTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         events = [
             json.loads(line)
-            for line in (self.state_dir / "events.jsonl").read_text().splitlines()
+            for line in (self.state_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
         self.assertTrue(any(e["type"] == "merge" for e in events))
@@ -279,7 +279,7 @@ class TeardownHelperTests(unittest.TestCase):
         self.state_dir = Path(self._tmp.name) / "state"
         state.init_state(self.state_dir, name="demo", repo=self.project)
         (self.state_dir / "notify.yaml").write_text(
-            "macos:\n  enabled: false\nslack:\n  enabled: false\n"
+            "macos:\n  enabled: false\nslack:\n  enabled: false\n", encoding="utf-8"
         )
         state.save_task(self.state_dir, "1", {
             "id": "1", "title": "t1", "status": "completed",
@@ -313,7 +313,7 @@ class TeardownHelperTests(unittest.TestCase):
         archive_root = self.state_dir / "tasks" / "_archive"
         archive_root.mkdir(parents=True, exist_ok=True)
         (archive_root / "task-1").mkdir()
-        (archive_root / "task-1" / "marker.txt").write_text("first run")
+        (archive_root / "task-1" / "marker.txt").write_text("first run", encoding="utf-8")
 
         task = state.load_task(self.state_dir, "1")
         with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
@@ -325,7 +325,7 @@ class TeardownHelperTests(unittest.TestCase):
         self.assertTrue(archived)
         self.assertFalse((self.state_dir / "tasks" / "task-1").exists())
         self.assertEqual(
-            (archive_root / "task-1" / "marker.txt").read_text(), "first run"
+            (archive_root / "task-1" / "marker.txt").read_text(encoding="utf-8"), "first run"
         )
         self.assertTrue((archive_root / "task-1-2").is_dir())
 

@@ -67,7 +67,7 @@ class LeaderNotifierTests(unittest.TestCase):
         path = self.session_dir / "events.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line]
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     # -- record shape / payload -------------------------------------------
 
@@ -91,7 +91,7 @@ class LeaderNotifierTests(unittest.TestCase):
         self._seed_task("8", pr_url="https://github.com/o/r/pull/1")
         outbox = state.task_dir(self.state_dir, "8") / "outbox.md"
         outbox.write_text(
-            outbox.read_text() + "\nhttps://github.com/o/r/pull/99\n", encoding="utf-8"
+            outbox.read_text(encoding="utf-8") + "\nhttps://github.com/o/r/pull/99\n", encoding="utf-8"
         )
         self.assertEqual(
             leader_notifier.scan_pr_url(self.state_dir, "8"),
