@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet import leader_notifier, state  # noqa: E402
 from fleet.commands import ask as ask_cmd  # noqa: E402
 from fleet.commands import done as done_cmd  # noqa: E402
+from tests import _pane_fixtures as pane_fx  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
 
 READY_PANE = 'status\n❯ Try "help"\n'      # claude idle prompt
@@ -393,6 +394,157 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertEqual(fake.calls_named("send_text"), [])  # never mid-turn
         rearm.assert_called_once()  # handed off to a successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # still queued
+
+    def test_busy_claude_with_visible_composer_is_never_injected_into(self) -> None:
+        # Issue #288: claude keeps ``❯`` on screen mid-turn, so ``is_ready`` alone
+        # let the notifier type into a working leader. A real busy capture must hold
+        # it back until the spinner is gone.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=pane_fx.CLAUDE_BUSY) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.05,
+                poll_interval=0.001,
+            )
+        self.assertEqual(fake.sent(), [])
+        rearm.assert_called_once()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+    def test_real_busy_then_idle_injects_once_at_the_boundary(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        panes = [pane_fx.CLAUDE_BUSY, pane_fx.CLAUDE_BUSY_ESC_HINT, pane_fx.CLAUDE_IDLE]
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=panes) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=5.0,
+                poll_interval=0.001,
+            )
+        self.assertEqual([kind for kind, _w, _p in fake.sent()].count("text"), 1)
+        # Both busy screens were captured (and skipped) before the idle one + its
+        # confirming capture, i.e. nothing was typed until the boundary.
+        names = fake.method_names()
+        self.assertGreaterEqual(names[:names.index("send_text")].count("capture"), 4)
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    def test_idle_only_on_the_first_capture_is_not_enough(self) -> None:
+        # A gap between two tool calls looks idle for one capture. The confirming
+        # capture (taken right before the keystrokes) sees the next spinner, so
+        # nothing is typed that round; the flush happens once idle holds.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        panes = [pane_fx.CLAUDE_IDLE, pane_fx.CLAUDE_BUSY, pane_fx.CLAUDE_IDLE]
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=panes) as fake,
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=5.0,
+                poll_interval=0.001,
+            )
+        sent = fake.method_names()
+        self.assertEqual(sent.count("send_text"), 1)
+        # capture(idle) → capture(busy: confirm fails) → capture(idle) → capture(idle) → send
+        first_send = sent.index("send_text")
+        self.assertGreaterEqual(sent[:first_send].count("capture"), 3)
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    def test_confirming_capture_precedes_the_keystrokes(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=pane_fx.CLAUDE_IDLE) as fake:
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.5,
+                poll_interval=0.001,
+            )
+        names = fake.method_names()
+        send = names.index("send_text")
+        self.assertEqual(names[send - 1], "capture")  # confirm, immediately before typing
+        self.assertGreaterEqual(names[:send].count("capture"), 2)
+
+    def _run_with_stuck_composer(self, *, swallow_enters: int):
+        """Inject into an idle leader whose next ``swallow_enters`` Enters do nothing.
+
+        The typed text stays in the composer (stuck pane) until an Enter that is
+        not swallowed clears it — the Issue #288 "unsent in the composer" case.
+        """
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        state = {"typed": None, "enters_left": swallow_enters}
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=pane_fx.CLAUDE_IDLE) as fake:
+            def on_send_text(_session, _window, text, *, enter=True):
+                state["typed"] = text
+                if state["enters_left"] > 0:
+                    state["enters_left"] -= 1
+                    fake._capture = pane_fx.claude_stuck_composer(text)
+
+            def on_send_key(_session, _window, key):
+                if state["typed"] is None:
+                    return
+                if state["enters_left"] > 0:
+                    state["enters_left"] -= 1
+                else:
+                    fake._capture = pane_fx.claude_submitted_echo(state["typed"])
+
+            fake.on["send_text"] = on_send_text
+            fake.on["send_key"] = on_send_key
+            with patch("fleet.leader_notifier.start_detached"):
+                leader_notifier.notify(
+                    session_dir=self.session_dir,
+                    session="fleet-main",
+                    window="leader",
+                    agent_spec="claude:opus",
+                    timeout=5.0,
+                    poll_interval=0.001,
+                )
+        return fake
+
+    def test_unsubmitted_text_gets_one_more_enter(self) -> None:
+        fake = self._run_with_stuck_composer(swallow_enters=1)  # the submit Enter is lost
+        self.assertEqual(len(fake.calls_named("send_text")), 1)  # typed exactly once
+        self.assertEqual(len(fake.calls_named("send_key")), 1)
+        self.assertEqual(fake.calls_named("send_key")[0][0][2], "Enter")
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        last = self._events()[-1]
+        self.assertEqual(last["type"], "leader_notified")
+        self.assertTrue(last["submit_confirmed"])
+        self.assertEqual(last["enter_retries"], 1)
+
+    def test_enter_retry_is_bounded_and_never_retypes(self) -> None:
+        fake = self._run_with_stuck_composer(swallow_enters=99)  # composer never clears
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        self.assertEqual(len(fake.calls_named("send_key")), leader_notifier.SUBMIT_ENTER_RETRIES)
+        # Queue is cleared (the text IS typed; re-injecting would append a duplicate)
+        # and the event records that the submit could not be confirmed.
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        last = self._events()[-1]
+        self.assertFalse(last["submit_confirmed"])
+        self.assertEqual(last["enter_retries"], leader_notifier.SUBMIT_ENTER_RETRIES)
+
+    def test_submitted_text_needs_no_extra_enter(self) -> None:
+        fake = self._run_with_stuck_composer(swallow_enters=0)
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        self.assertEqual(fake.calls_named("send_key"), [])
+        last = self._events()[-1]
+        self.assertTrue(last["submit_confirmed"])
+        self.assertEqual(last["enter_retries"], 0)
 
     def test_dialog_pane_is_not_injected_into(self) -> None:
         # An un-numbered selection menu's cursor line (``  ❯ No, …``) matches

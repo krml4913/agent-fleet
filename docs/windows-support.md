@@ -486,7 +486,10 @@ Screens captured for `src/fleet/adapters/claude.py` (from `dump-screen`,
 
   An empty composer renders as `❯ ` on its own line. While claude is working
   the composer still shows `❯ `, and the footer adds `· esc to interrupt`. So
-  `ready` also matches a busy screen, as it does under tmux.
+  `ready` also matches a busy screen, as it does under tmux. Since #288 the
+  leader notifier also requires `not is_busy()`: the claude build captured for
+  #288 showed no `esc to interrupt` text, only the spinner line
+  (`✢ Frosting… (48s · ↓ 4.0k tokens)`), so `ClaudeAdapter.busy` matches both.
 - Permission dialog triggered by the pointer when the prompt file lies
   outside claude's working directories. `gate` matches it and `ready` does
   not:

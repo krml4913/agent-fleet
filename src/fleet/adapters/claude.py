@@ -12,6 +12,20 @@ class ClaudeAdapter(VendorAdapter):
 
     ready = re.compile(r"(?m)^\s*❯(?!\s*\d+\.)")
     menu_cursor = "❯"
+
+    # claude keeps the ``❯`` composer on screen while it works, so ``ready``
+    # matches a busy pane too. A running turn shows either the spinner status
+    # line above the composer box (``✢ Frosting… (48s · ↓ 4.0k tokens)``; the
+    # glyph cycles through ``· ✢ ✳ ✶ ✻ ✽``) or an ``esc to interrupt`` hint
+    # (``✻ Thinking… (esc to interrupt)``, or in the footer). The finished-turn
+    # line (``✻ Cooked for 1m 3s``) has no ``…`` and does not match. The hint is
+    # anchored to a line start or a ``(`` / ``·`` so prose that merely mentions
+    # it (a quoted diff) is not busy.
+    busy = re.compile(
+        r"(?im)(?:^\s*|[(·•]\s*)esc to interrupt\b"
+        r"|^[^\S\n]*[·✢✳✶✻✽][^\S\n]+[^\n(]*?(?:…|\.\.\.)"
+    )
+    pasted_marker = re.compile(r"\[Pasted text #\d+")
     gate = re.compile(
         r"(?im)"
         r"(?:login|log in|sign in|authentication|authenticate|"

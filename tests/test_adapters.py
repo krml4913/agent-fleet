@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet import adapters, agents, prompt_deliverer, state  # noqa: E402
 from fleet.adapters.base import Key, VendorAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
+from tests import _pane_fixtures as pane_fx  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
@@ -205,6 +206,110 @@ class DialogDetectionTests(unittest.TestCase):
         self.assertTrue(FakeAdapter.is_dialog("FAKE-READY\n  Esc to cancel\n"))
         self.assertFalse(FakeAdapter.is_ready("FAKE-READY\n  Esc to cancel\n"))
         self.assertTrue(FakeAdapter.is_ready("FAKE-READY\n"))
+
+
+class BusyDetectionTests(unittest.TestCase):
+    """``is_busy`` / ``is_idle``: a visible ``❯`` composer does not mean idle (Issue #288)."""
+
+    C = adapters.ClaudeAdapter
+    X = adapters.CodexAdapter
+
+    def test_real_busy_claude_screen_is_ready_but_busy(self) -> None:
+        # The bug: the composer is on screen mid-turn, so ``is_ready`` alone is True.
+        self.assertTrue(self.C.is_ready(pane_fx.CLAUDE_BUSY))
+        self.assertTrue(self.C.is_busy(pane_fx.CLAUDE_BUSY))
+        self.assertFalse(self.C.is_idle(pane_fx.CLAUDE_BUSY))
+
+    def test_interrupt_hint_layout_is_busy(self) -> None:
+        self.assertTrue(self.C.is_busy(pane_fx.CLAUDE_BUSY_ESC_HINT))
+        self.assertFalse(self.C.is_idle(pane_fx.CLAUDE_BUSY_ESC_HINT))
+        footer_hint = pane_fx.CLAUDE_IDLE.replace("(shift+tab to cycle)", "(shift+tab to cycle) · esc to interrupt")
+        self.assertTrue(self.C.is_busy(footer_hint))
+
+    def test_turn_boundary_screen_is_idle(self) -> None:
+        for pane in (pane_fx.CLAUDE_IDLE, CLAUDE_IDLE_SCREEN, CLAUDE_READY, "❯ \n"):
+            with self.subTest(pane=pane):
+                self.assertTrue(self.C.is_ready(pane))
+                self.assertFalse(self.C.is_busy(pane))
+                self.assertTrue(self.C.is_idle(pane))
+
+    def test_every_spinner_glyph_frame_is_busy(self) -> None:
+        for glyph in "·✢✳✶✻✽":
+            with self.subTest(glyph=glyph):
+                pane = pane_fx.CLAUDE_BUSY.replace("✢ Frosting…", f"{glyph} Frosting…")
+                self.assertTrue(self.C.is_busy(pane))
+
+    def test_prose_and_finished_turn_lines_are_not_busy(self) -> None:
+        for line in (
+            "✻ Cooked for 1m 3s",
+            "● The footer says esc to interrupt while a turn runs.",
+            "  ⎿  + busy = re.compile(r\"esc to interrupt\")",
+            "● Waiting for CI… then I will merge.",  # ``●`` is not a spinner glyph
+        ):
+            with self.subTest(line=line):
+                pane = pane_fx.CLAUDE_IDLE.replace("✻ Cooked for 48s", line)
+                self.assertFalse(self.C.is_busy(pane))
+                self.assertTrue(self.C.is_idle(pane))
+
+    def test_busy_hint_far_above_the_tail_is_ignored(self) -> None:
+        stale = "✻ Thinking… (esc to interrupt)\n" + "".join(f"line {i}\n" for i in range(40))
+        self.assertFalse(self.C.is_busy(stale + pane_fx.CLAUDE_IDLE))
+
+    def test_dialog_is_neither_ready_nor_idle(self) -> None:
+        self.assertFalse(self.C.is_idle(CLAUDE_CHROME_DIALOG))
+
+    def test_no_prompt_is_not_idle(self) -> None:
+        self.assertFalse(self.C.is_idle("✻ Thinking… (esc to interrupt)\n"))
+
+    def test_vendor_without_busy_pattern_is_never_busy(self) -> None:
+        self.assertIsNone(VendorAdapter.busy)
+        self.assertFalse(FakeAdapter.is_busy("✻ Thinking… (esc to interrupt)\nFAKE-READY\n"))
+        self.assertTrue(FakeAdapter.is_idle("FAKE-READY\n"))
+
+    def test_codex_working_hint_is_busy(self) -> None:
+        self.assertTrue(self.X.is_ready(pane_fx.CODEX_BUSY))
+        self.assertTrue(self.X.is_busy(pane_fx.CODEX_BUSY))
+        self.assertFalse(self.X.is_idle(pane_fx.CODEX_BUSY))
+        self.assertTrue(self.X.is_idle(pane_fx.CODEX_IDLE))
+
+
+class ComposerHoldsTests(unittest.TestCase):
+    """``composer_holds``: is the injected text still typed-but-unsent in the composer?"""
+
+    C = adapters.ClaudeAdapter
+    X = adapters.CodexAdapter
+    TEXT = (
+        "[fleet] 2 driver notification(s) — for each: pull the diff and run the gate. "
+        "Skip any task already completed+merged. :: task-a [completed] task-a done "
+        "branch=fleet/task/a PR=https://github.com/o/r/pull/1"
+    )
+
+    def test_text_left_in_the_composer_is_detected_across_wraps(self) -> None:
+        for width in (60, 100, 150):
+            with self.subTest(width=width):
+                pane = pane_fx.claude_stuck_composer(self.TEXT, width=width)
+                self.assertTrue(self.C.composer_holds(pane, self.TEXT))
+
+    def test_submitted_text_echoed_into_history_is_not_in_the_composer(self) -> None:
+        self.assertFalse(self.C.composer_holds(pane_fx.claude_submitted_echo(self.TEXT), self.TEXT))
+
+    def test_empty_composer_and_missing_prompt(self) -> None:
+        self.assertFalse(self.C.composer_holds(pane_fx.CLAUDE_BUSY, self.TEXT))
+        self.assertFalse(self.C.composer_holds("no prompt here\n", self.TEXT))
+        self.assertFalse(self.C.composer_holds(pane_fx.CLAUDE_BUSY, ""))
+
+    def test_other_text_in_the_composer_is_not_ours(self) -> None:
+        pane = pane_fx.claude_stuck_composer("please also update the README")
+        self.assertFalse(self.C.composer_holds(pane, self.TEXT))
+
+    def test_collapsed_paste_placeholder_counts(self) -> None:
+        pane = pane_fx.CLAUDE_BUSY.replace("❯ ", "❯ [Pasted text #1 +0 lines]")
+        self.assertTrue(self.C.composer_holds(pane, self.TEXT))
+        self.assertFalse(self.X.composer_holds(pane_fx.CODEX_IDLE, self.TEXT))
+
+    def test_codex_composer(self) -> None:
+        pane = pane_fx.CODEX_BUSY.replace("Find and fix a bug in @filename", self.TEXT)
+        self.assertTrue(self.X.composer_holds(pane, self.TEXT))
 
 
 class DelivererUsesRegistryTests(unittest.TestCase):
