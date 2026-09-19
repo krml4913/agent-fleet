@@ -57,6 +57,24 @@ class VendorAdapter:
         r"esc to (?!interrupt)\w|press enter to continue\b)"
     )
 
+    #: Matches the CLI's "a turn is running" indicator (claude's spinner status
+    #: line / ``esc to interrupt`` hint). ``ready`` alone cannot tell idle from
+    #: busy: these TUIs keep the input composer visible while working. ``None``
+    #: means the vendor has no known busy indicator, so :meth:`is_busy` is
+    #: always ``False`` — the conservative default for a poller (an unknown
+    #: pattern must never strand a queue behind a permanent "busy").
+    busy: re.Pattern[str] | None = None
+
+    #: How many trailing non-blank pane lines :meth:`is_busy` inspects. Wider
+    #: than :attr:`dialog_tail_lines`: the spinner line sits above the composer
+    #: box and any task list / queued-message lines, not directly on it.
+    busy_tail_lines: int = 16
+
+    #: Matches the placeholder a CLI collapses a long paste into (claude's
+    #: ``[Pasted text #1 +3 lines]``), for :meth:`composer_holds`. ``None``
+    #: when the vendor does not collapse.
+    pasted_marker: re.Pattern[str] | None = None
+
     #: Whether the CLI shows an update-check prompt on startup that the
     #: launch command suppresses (folded into :meth:`cli_command`).
     suppress_update_check: bool = False
@@ -105,6 +123,50 @@ class VendorAdapter:
         line_start = pane.rfind("\n", 0, last.start()) + 1
         below = _tail(pane[line_start:].splitlines(), cls.dialog_tail_lines)
         return not _dialog_in(below, cls)
+
+    @classmethod
+    def is_busy(cls, pane: str) -> bool:
+        """Whether ``pane`` shows a running turn (spinner / interrupt hint).
+
+        Only the last :attr:`busy_tail_lines` non-blank lines are inspected, so
+        a busy hint quoted further up in the conversation is ignored. Always
+        ``False`` for a vendor without a :attr:`busy` pattern.
+        """
+        if cls.busy is None:
+            return False
+        tail = "\n".join(_tail(pane.splitlines(), cls.busy_tail_lines))
+        return cls.busy.search(tail) is not None
+
+    @classmethod
+    def is_idle(cls, pane: str) -> bool:
+        """Whether ``pane`` is at a real turn boundary: ready for input AND not busy.
+
+        The bar for *unsolicited* injection into a pane a human or leader agent
+        is working in (the leader notifier). :meth:`is_ready` alone is the right
+        bar for a freshly booted driver pane (the prompt deliverer).
+        """
+        return cls.is_ready(pane) and not cls.is_busy(pane)
+
+    @classmethod
+    def composer_holds(cls, pane: str, text: str) -> bool:
+        """Whether ``text`` is still sitting, unsubmitted, in the input composer.
+
+        The composer is the last ``ready`` line and everything below it. Matching
+        squeezes all whitespace out of both sides (the composer wraps long text
+        across lines and a dump can drop the space after the prompt glyph) and
+        compares only the head of ``text``. A message already submitted is echoed
+        into the history *above* the composer, so it does not count.
+        """
+        last = None
+        for last in cls.ready.finditer(pane):
+            pass
+        if last is None:
+            return False
+        composer = pane[pane.rfind("\n", 0, last.start()) + 1:]
+        probe = _squeeze(text)[:_COMPOSER_PROBE_CHARS]
+        if probe and probe in _squeeze(composer):
+            return True
+        return cls.pasted_marker is not None and cls.pasted_marker.search(composer) is not None
 
     @classmethod
     def is_gated(cls, pane: str) -> bool:
@@ -230,6 +292,17 @@ def session_started_by_pointer(records: list, pointer: str) -> bool:
 def _tail(lines: list[str], n: int) -> list[str]:
     """The last ``n`` non-blank lines of ``lines``, in order."""
     return [line for line in lines if line.strip()][-n:] if n > 0 else []
+
+
+#: How much of an injected text's head :meth:`VendorAdapter.composer_holds`
+#: looks for (after whitespace is squeezed out) — enough to be unique, short
+#: enough to sit on the composer's first wrapped line.
+_COMPOSER_PROBE_CHARS = 40
+
+
+def _squeeze(s: str) -> str:
+    """``s`` without any whitespace (incl. the NBSP claude draws after its prompt glyph)."""
+    return re.sub(r"\s+", "", s)
 
 
 _NUMBERED_OPTION = re.compile(r"\d+\.")
