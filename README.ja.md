@@ -24,10 +24,10 @@ Windows では **zellij ≥ 0.45.0**（[Windows](#windows) を参照）。**`pip
 ## 60 秒で分かる概念
 
 - **Leader** — あなたがチャットする相手のエージェント。プロジェクトごとに 1 つで、
-  `fleet-<project>` という名前の tmux セッション内に常駐する。タスクを割り当て、
+  `fleet-<project>` という名前のマルチプレクサセッション内に常駐する。タスクを割り当て、
   あなたの判断を中継する。自分ではコードを書かず、driver にディスパッチする。
-- **Driver** — 単一のタスクを実際に処理するエージェントで、専用の tmux ウィンドウ
-  内で動く。driver は claude でも codex でもよい。任意の driver ペインにアタッチ
+- **Driver** — 単一のタスクを実際に処理するエージェントで、専用のマルチプレクサウィンドウ
+  （zellij ではタブ）内で動く。driver は claude でも codex でもよい。任意の driver ペインにアタッチ
   できる。
 - **Formation** — *誰がどうタスクを処理するか* を記述した YAML ファイル。stage の
   並び、各 stage を担当するエージェント、AI による peer review の有無、人間の承認
@@ -96,9 +96,9 @@ git add -A && git -c user.email=t@x -c user.name=t commit -m init
 ~/dev/agent-fleet/fleet leader --attach
 ```
 
-これは `fleet-trial` という tmux セッションを作成し、その中で leader エージェント
+これは `fleet-trial` というマルチプレクサセッションを作成し、その中で leader エージェント
 （デフォルトは `claude:opus`）を動かし、フォアグラウンドでアタッチする。セッションは
-プロジェクトごとに単一インスタンスである。いつでも `C-b d` でデタッチでき、leader は
+プロジェクトごとに単一インスタンスである。いつでもデタッチでき（tmux は `C-b d`、zellij は `Ctrl o` のあと `d`）、leader は
 動き続ける。あなたが常駐するのはこの 1 つのペインだ。
 
 ### 4. leader に話しかける
@@ -138,7 +138,7 @@ driver の肩越しに覗いたり引き継いだりするには、そのペイ�
 ```
 
 ライブのエージェントセッションに直接降り立つ —— 出力を読み、入力し、軌道を修正し、
-終わったら `C-b d` でデタッチする。
+終わったらデタッチする（tmux は `C-b d`、zellij は `Ctrl o` のあと `d`）。
 
 driver が判断を必要とするときは通知を発火する（ペインの出力だけではあなたに
 届かない）。`user_approval` ゲートを持つ formation も、同じように一時停止する。
@@ -170,11 +170,11 @@ cd /tmp/trial
 
 第 1 引数（ここでは `hello-world`）は自分で付ける **タスク id** である。短い
 kebab-case の slug（小文字英字・数字・ハイフン）でタスクに名前を付ける。自動採番の
-番号ではない。これが branch 名・state ディレクトリ・tmux ウィンドウ名になるので、
+番号ではない。これが branch 名・state ディレクトリ・マルチプレクサのウィンドウ名になるので、
 内容が分かる名前を付ける。
 
 これはタスク state を書き込み、`driver-prompt.md` をレンダリングし、最初の stage の
-driver を動かす新しい tmux ウィンドウを開き、（デフォルトでは）エージェントの準備が
+driver を動かす新しいマルチプレクサウィンドウ（zellij ではタブ）を開き、（デフォルトでは）エージェントの準備が
 できたらプロンプトへのポインタをペインに自動ペーストする。team の形は
 `--formation`（`solo`、`pair_review`、`multi_stage`、または任意のカスタム）で選び、
 最初の stage のエージェントは `--agent` で上書きする。長い説明をインラインではなく
@@ -212,7 +212,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 ```
 
 これは workspace のクリーンアップフックを実行し（worktree を使っていれば削除し）、
-タスクの tmux ウィンドウを kill し、そのプロンプトバッファを破棄する。終端状態で
+タスクのマルチプレクサウィンドウを kill し、そのプロンプトバッファを破棄する。終端状態で
 ないタスクに対しては、`--force` を渡さない限り実行を拒否する。
 
 後でプロジェクト全体を fleet から削除するには:
@@ -221,7 +221,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 ~/dev/agent-fleet/fleet rm trial --yes
 ```
 
-これはプロジェクトの登録を解除し、その state を削除する。アクティブな tmux
+これはプロジェクトの登録を解除し、その state を削除する。アクティブなマルチプレクサ
 セッションは自動では kill されない。まだ動いているものを見つけると fleet が警告する。
 
 ---

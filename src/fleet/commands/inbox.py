@@ -1,7 +1,7 @@
 """``fleet-agent inbox <task-id> "<message>"`` — send a message to a driver's inbox.md.
 
-A timestamped block is appended and the driver pane is woken via tmux send-keys
-so it sees the notification even while waiting for input.
+A timestamped block is appended and the driver pane is woken through the
+multiplexer so it sees the notification even while waiting for input.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Append a message to a driver's inbox.md",
         description=(
             "Adds a timestamped block to <state>/tasks/task-<id>/inbox.md, "
-            "emits an `inbox_message` event, and wakes the driver pane via tmux."
+            "emits an `inbox_message` event, and wakes the driver pane via the multiplexer."
         ),
     )
     p.add_argument("task_id", help="Task id")
@@ -76,13 +76,13 @@ def run(args: argparse.Namespace) -> int:
 
 
 def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
-    """Send a notification text into the driver's tmux pane.
+    """Send a notification text into the driver's multiplexer pane.
 
-    Silently skips if tmux is unavailable or the pane doesn't exist yet
+    Silently skips if the multiplexer is unavailable or the pane doesn't exist yet
     (e.g. driver not spawned or already finished). The driver window lives in
     its task's owner session (``fleet-<owner_session>``, Issue #166 §5.2), so we
     resolve the session from the task rather than the project. The inbox.md write
-    is independent of this — only the live tmux nudge depends on the pane.
+    is independent of this — only the live multiplexer nudge depends on the pane.
     """
     m = mux.get()
     if not m.available():

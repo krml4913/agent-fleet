@@ -216,8 +216,8 @@ def clear_task_records(session_dir: Path, task_id: str) -> int:
 def render_block(records: list[dict]) -> str:
     """Coalesce N records into ONE single-line, auto-submittable block.
 
-    Single-line on purpose: ``tmux send-keys`` turns an embedded newline into
-    Enter, which would submit prematurely. So fields are joined inline and the
+    Single-line on purpose: typing text into a pane (tmux ``send-keys``) turns an
+    embedded newline into Enter, which would submit prematurely. So fields are joined inline and the
     whole block is submitted with one trailing Enter.
     """
     n = len(records)

@@ -275,7 +275,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="Write state but don't touch the multiplexer (tmux). Useful in CI / tests.",
+        help="Write state but don't touch the multiplexer (tmux / zellij). Useful in CI / tests.",
     )
     p.add_argument(
         "--no-auto-paste",
@@ -283,8 +283,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         dest="auto_paste",
         help=(
             "Disable the default auto-paste of the driver-prompt pointer into the pane. "
-            "On tmux the pointer is still preloaded into a named buffer for manual "
-            "paste (C-b ] then Enter); or run fleet-agent send-prompt."
+            "On tmux only, the pointer is still preloaded into a named buffer for manual "
+            "paste (C-b ] then Enter); on zellij (or any backend) run "
+            "fleet-agent send-prompt instead."
         ),
     )
     p.set_defaults(auto_paste=True)
@@ -454,7 +455,7 @@ def run(args: argparse.Namespace) -> int:
 
     # Scope guard: block dispatch to projects outside the owner session's scope.
     # Only applies when the session has a declared scope (unscoped ⇒ no-op).
-    # The guard runs even in --dry-run so unit tests can exercise it without tmux.
+    # The guard runs even in --dry-run so unit tests can exercise it without a multiplexer.
     if not getattr(args, "allow_out_of_scope", False):
         try:
             _project_meta = state_mod.load_project(state_dir)
@@ -614,7 +615,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"  formation:       {formation_name}")
 
     if args.dry_run:
-        print("dry-run: tmux step skipped.")
+        print("dry-run: multiplexer step skipped.")
         return 0
 
     m = mux.get()

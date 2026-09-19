@@ -2,8 +2,8 @@
 
 Conceptually distinct from ``fleet-agent done``:
   * ``done``    flips the status to ``completed`` and emits an event.
-  * ``cleanup`` is the destructive step: kill the tmux window, drop the
-    driver-prompt buffer, run the workspace ``on_cleanup`` hook
+  * ``cleanup`` is the destructive step: kill the multiplexer window, drop
+    the driver-prompt buffer, run the workspace ``on_cleanup`` hook
     (workspace=worktree removes the worktree + branch), and optionally
     archive the task dir.
 
@@ -120,10 +120,11 @@ def teardown(
 def add_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "cleanup",
-        help="Tear down a finished task (worktree, tmux window, optional archive)",
+        help="Tear down a finished task (worktree, multiplexer window, optional archive)",
         description=(
             "Run the workspace on_cleanup hook (removes worktree if workspace=worktree), "
-            "kill the task's tmux window if any, drop its prompt buffer. Optionally archive "
+            "kill the task's multiplexer window (tmux window / zellij tab) if any, drop its "
+            "prompt buffer (tmux only). Optionally archive "
             "the task directory. Refuses to run on a non-terminal task "
             "unless --force is passed."
         ),

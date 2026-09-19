@@ -21,11 +21,11 @@ Windows). Any Python dependency is vendored under `vendor/`.
 
 ## Concepts in 60 seconds
 
-- **Leader** — the agent you chat with. One per project, living in a tmux
+- **Leader** — the agent you chat with. One per project, living in a multiplexer
   session named `fleet-<project>`. It assigns tasks and relays your decisions.
   It does not write code itself; it dispatches drivers.
-- **Driver** — an agent that actually works a single task, in its own tmux
-  window. Drivers can be claude or codex. You can attach into any driver pane.
+- **Driver** — an agent that actually works a single task, in its own multiplexer
+  window (a tab on zellij). Drivers can be claude or codex. You can attach into any driver pane.
 - **Formation** — a YAML file describing *who works a task and how*: the
   sequence of stages, which agent runs each one, whether there is AI peer
   review, and where human approval gates sit. Three are shipped: `solo`,
@@ -90,9 +90,9 @@ Optionally give each task its own git branch/worktree (the default is in-place):
 ~/dev/agent-fleet/fleet leader --attach
 ```
 
-This creates the tmux session `fleet-trial` with the leader agent (default
+This creates the multiplexer session `fleet-trial` with the leader agent (default
 `claude:opus`) running in it, and attaches you in the foreground. The session is
-single-instance per project. Detach any time with `C-b d`; the leader keeps
+single-instance per project. Detach any time (tmux: `C-b d`; zellij: `Ctrl o`, then `d`); the leader keeps
 running. This is the one pane you live in.
 
 ### 4. Talk to the leader
@@ -132,7 +132,7 @@ the core of the felt experience:
 ```
 
 You land directly in the live agent session — read its output, type into it,
-correct its course, then detach with `C-b d`.
+correct its course, then detach (tmux: `C-b d`; zellij: `Ctrl o`, then `d`).
 
 When a driver needs a decision it fires a notification (pane output alone never
 reaches you), and formations with a `user_approval` gate pause the same way.
@@ -165,10 +165,10 @@ cd /tmp/trial
 The first argument (`hello-world` here) is the **task id** you choose — a short
 kebab-case slug (lowercase letters, digits, hyphens) that names the task. It is
 not an auto-assigned number; it becomes the branch name, the state directory,
-and the tmux window label, so pick something descriptive.
+and the multiplexer window label, so pick something descriptive.
 
-This writes the task state, renders a `driver-prompt.md`, opens a new tmux
-window running the first stage's driver, and (by default) auto-pastes a pointer
+This writes the task state, renders a `driver-prompt.md`, opens a new multiplexer
+window (a tab on zellij) running the first stage's driver, and (by default) auto-pastes a pointer
 to the prompt into the pane once the agent is ready. Pick the team shape with
 `--formation` (`solo`, `pair_review`, `multi_stage`, or any custom one), and
 override the first-stage agent with `--agent`. Use `--prompt-file PATH` to pass
@@ -206,7 +206,7 @@ When a task is done, tear it down (and optionally archive its state):
 ```
 
 This runs the workspace cleanup hook (removing the worktree if you used one),
-kills the task's tmux window, and drops its prompt buffer. It refuses to run on
+kills the task's multiplexer window, and drops its prompt buffer. It refuses to run on
 a non-terminal task unless you pass `--force`.
 
 To remove the whole project from fleet later:
@@ -215,7 +215,7 @@ To remove the whole project from fleet later:
 ~/dev/agent-fleet/fleet rm trial --yes
 ```
 
-That unregisters the project and deletes its state. Active tmux sessions are
+That unregisters the project and deletes its state. Active multiplexer sessions are
 not killed for you — fleet warns if it spots one still running.
 
 ---

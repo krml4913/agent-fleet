@@ -14,8 +14,9 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "attach",
         help="Attach to the leader pane or a task driver pane",
         description=(
-            "Attach to the session fleet-<project> on the given window "
-            "(tmux: like `tmux attach -t fleet-<project>:<window>`). "
+            "Attach to the multiplexer session fleet-<project> on the given window "
+            "(tmux window / zellij tab; on tmux this is like "
+            "`tmux attach -t fleet-<project>:<window>`). "
             "Target is either 'leader' (default) or a task id."
         ),
     )

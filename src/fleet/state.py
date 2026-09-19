@@ -152,7 +152,7 @@ def session_record_path(label: str) -> Path:
     """Return ``global/sessions/<label>/session.json`` — the per-session record.
 
     The relocated successor of the old per-project ``leader-session.json``
-    (Issue #166): label / agent spec / started_at / tmux pane for one session.
+    (Issue #166): label / agent spec / started_at / multiplexer pane for one session.
     """
     return session_dir(label) / SESSION_RECORD_NAME
 
@@ -202,7 +202,7 @@ def validate_registered_projects(names: list[str] | None) -> None:
     """Raise ``ValueError`` if any of *names* is not a registered project.
 
     Shared by ``fleet scope`` and ``fleet leader --scope`` so an invalid project
-    name can be rejected *before* any session / tmux side effects are created.
+    name can be rejected *before* any session / multiplexer side effects are created.
     Empty / falsy input is a no-op.
     """
     if not names:

@@ -3,7 +3,7 @@
 The stage transition logic lives in :mod:`fleet.orchestrator`; this command
 is intentionally thin: resolve context → call orchestrator → emit event.
 
-Real cleanup (worktree removal, branch deletion, tmux window kill) belongs
+Real cleanup (worktree removal, branch deletion, multiplexer window kill) belongs
 in ``fleet-agent cleanup``.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "With --result=approved (default) the next stage is launched or "
             "the task is completed. With --result=changes-requested the stage "
             "result is recorded for the stage-5 peer_review loop. "
-            "Cleanup (worktree / branch / tmux window) is done via fleet-agent cleanup."
+            "Cleanup (worktree / branch / multiplexer window) is done via fleet-agent cleanup."
         ),
     )
     p.add_argument(
@@ -155,7 +155,7 @@ def _maybe_notify_leader(
     Default OFF → zero behaviour change. Always enqueues a persisted record
     (never dropped) into the owner session's queue when the feature is on, then
     best-effort spawns the detached notifier against the ``fleet-<label>`` pane.
-    tmux/leader absence only leaves the record queued — it never errors ``done``.
+    multiplexer/leader absence only leaves the record queued — it never errors ``done``.
 
     Routing is keyed by ``owner_session`` (Issue #166 §10.3): the queue lives under
     that session's dir and the agent ``ready`` regex is read from its record. A

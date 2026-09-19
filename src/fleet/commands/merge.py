@@ -16,7 +16,7 @@ Order of operations:
      for conflict resolution.
   3. Teardown — the same path ``cleanup`` runs (:func:`cleanup.teardown`):
      workspace ``on_cleanup`` (worktree remove + local ``branch -D``), kill the
-     tmux window, drop the prompt buffer.
+     multiplexer window, drop the prompt buffer.
   4. Delete the remote branch — ``git push origin --delete <branch>`` once the
      worktree is gone. "Already deleted" is treated as success.
   5. Archive by default (merge implies full retire) unless ``--keep``.
@@ -43,7 +43,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         description=(
             "Atomically retire a finished task: merge its PR (merge commit by "
             "default, --squash to squash), remove the worktree + local & remote "
-            "branch, kill the tmux window, and archive the task dir (unless "
+            "branch, kill the multiplexer window, and archive the task dir (unless "
             "--keep). If the merge fails nothing is torn down, so the worktree "
             "survives for conflict resolution. Refuses to run on a non-terminal "
             "task unless --force is passed."
@@ -135,7 +135,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # 2. Teardown (shared with cleanup): worktree + local branch, tmux, archive.
+    # 2. Teardown (shared with cleanup): worktree + local branch, multiplexer, archive.
     archived = cleanup_mod.teardown(
         state_dir,
         task_id,
