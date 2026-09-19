@@ -1,21 +1,24 @@
-"""Best-effort notifications: macOS Notification Center + Slack webhook.
+"""Best-effort notifications: macOS / Windows desktop + Slack webhook.
 
 Configuration lives in ``<state_dir>/notify.yaml`` (created on demand;
-its absence means "default settings — silent slack, native macOS"):
+its absence means "default settings — silent slack, native desktop"):
 
 ```yaml
 macos:
+  enabled: true
+windows:
   enabled: true
 slack:
   enabled: true
   webhook_url: "https://hooks.slack.com/..."
 ```
 
-Both transports are best-effort — failures are reported to stderr but
+All transports are best-effort — failures are reported to stderr but
 never raise. Nothing in this module imports anything heavy.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import platform
@@ -27,6 +30,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import escape as _xml_escape
 
 import yaml
 
@@ -107,6 +111,7 @@ def send(
         return
     cfg = load_config(state_dir)
     _macos_notify(cfg.get("macos") or {}, title, message, level)
+    _windows_notify(cfg.get("windows") or {}, title, message, level)
     _slack_notify(cfg.get("slack") or {}, title, message, level)
 
 
@@ -131,6 +136,81 @@ def _macos_notify(
         )
     except Exception as e:  # noqa: BLE001 — best effort
         print(f"warn: macOS notify failed: {e}", file=sys.stderr)
+
+
+# AppUserModelID of Windows PowerShell's own Start-menu shortcut: toasts shown
+# under it need no AUMID registration of our own.
+_WINDOWS_TOAST_APP_ID = (
+    r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+)
+
+_WINDOWS_TOAST_SCRIPT = """\
+$ErrorActionPreference = 'Stop'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml('{xml}')
+$toast = New-Object Windows.UI.Notifications.ToastNotification $xml
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}').Show($toast)
+"""
+
+
+def _toast_text(text: str) -> str:
+    """XML-escape ``text`` into pure ASCII (non-ASCII → ``&#N;``).
+
+    Quotes become entities too, so the result sits safely inside a
+    PowerShell single-quoted string (PowerShell also treats the typographic
+    quotes U+2018..U+201B as ``'``; being non-ASCII they become ``&#N;``).
+    """
+    escaped = _xml_escape(text, {'"': "&quot;", "'": "&apos;"})
+    return escaped.encode("ascii", "xmlcharrefreplace").decode("ascii")
+
+
+def _windows_toast_script(title: str, message: str, level: str) -> str:
+    body = f"{level_emoji(level)} {message}".replace("\n", " ")[:300]
+    xml = (
+        '<toast><visual><binding template="ToastGeneric">'
+        f"<text>{_toast_text(title.replace(chr(10), ' ')[:60])}</text>"
+        f"<text>{_toast_text(body)}</text>"
+        "</binding></visual></toast>"
+    )
+    return _WINDOWS_TOAST_SCRIPT.format(xml=xml, app_id=_WINDOWS_TOAST_APP_ID)
+
+
+def _windows_notify(
+    cfg: dict[str, Any], title: str, message: str, level: str = DEFAULT_LEVEL
+) -> None:
+    if cfg.get("enabled") is False:  # default-on
+        return
+    if platform.system() != "Windows":
+        return
+    script = _windows_toast_script(title, message, level)
+    # -EncodedCommand (base64 UTF-16LE) sidesteps all command-line quoting.
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    try:
+        proc = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            capture_output=True,
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as e:  # noqa: BLE001 — best effort
+        print(f"warn: Windows notify failed: {e}", file=sys.stderr)
+        return
+    if proc.returncode != 0:
+        err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        print(
+            f"warn: Windows notify failed (exit {proc.returncode}): {err[:200]}",
+            file=sys.stderr,
+        )
 
 
 def _slack_notify(
