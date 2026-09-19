@@ -48,7 +48,7 @@ from .commands import workspace as workspace_cmd
 def build_parser_user() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fleet",
-        description="Hierarchical multi-vendor agent orchestration over tmux.",
+        description="Hierarchical multi-vendor agent orchestration over tmux or zellij.",
     )
     parser.add_argument(
         "--version",

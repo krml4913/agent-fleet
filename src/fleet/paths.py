@@ -23,9 +23,9 @@ def fleet_agent_bin() -> str:
     """Return the path used to invoke ``fleet-agent`` from inside an agent pane.
 
     Agent panes (driver *and* leader) do not get ``fleet-agent`` on their
-    ``PATH``: ``start`` / ``leader`` inject ``PATH=<clone-root>:…`` via
-    ``tmux new-window -e``, but macOS ``path_helper`` (run by ``/etc/zprofile``
-    on every zsh login) plus the user's rc files rebuild ``PATH`` from scratch
+    ``PATH``: ``start`` / ``leader`` inject ``PATH=<clone-root>:…`` into
+    the pane environment (tmux: ``new-window -e``), but macOS ``path_helper``
+    (run by ``/etc/zprofile`` on every zsh login) plus the user's rc files rebuild ``PATH`` from scratch
     and drop the injected entry. Plain env vars (``FLEET_TASK_ID`` etc.) survive
     that rebuild; ``PATH`` does not. So lifecycle signaling commands must be
     referenced by absolute path — the one channel that is identical for both

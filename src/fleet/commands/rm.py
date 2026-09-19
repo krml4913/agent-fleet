@@ -15,7 +15,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         help="Remove a project from the registry and delete its state",
         description=(
             "Unregisters <name> from projects.yaml and deletes "
-            "fleet-state/projects/<name>/. Active tmux sessions are not killed "
+            "fleet-state/projects/<name>/. Active multiplexer sessions are not killed "
             "automatically; a warning is shown when one is detected."
         ),
     )
