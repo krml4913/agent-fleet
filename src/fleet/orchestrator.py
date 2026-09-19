@@ -647,12 +647,12 @@ def _launch_driver_for_stage(
     *,
     replace_task_windows: bool = True,
 ) -> None:
-    """Render driver-prompt.md for a stage and open its tmux window."""
+    """Render driver-prompt.md for a stage and open its multiplexer window."""
     from . import driver_prompt as dp
-    from . import tmux as tmux_mod
+    from . import mux
     from .commands.start import launch_stage_driver
 
-    if not tmux_mod.available():
+    if not mux.get().available():
         return
 
     task_dir_path = state_mod.task_dir(state_dir, task_id)
@@ -699,17 +699,18 @@ def _handoff_to_stage_driver(
     append_message: bool = True,
 ) -> None:
     """Wake a live stage driver, launching it first if its pane does not exist."""
-    from . import tmux as tmux_mod
+    from . import mux
 
-    if not tmux_mod.available():
+    m = mux.get()
+    if not m.available():
         return
 
     session = f"fleet-{state_mod.task_owner_session(task)}"
     window = _stage_window_name(task_id, stage)
 
     try:
-        windows = tmux_mod.task_window_names(session, task_id)
-    except tmux_mod.TmuxError:
+        windows = mux.task_window_names(session, task_id, backend=m)
+    except mux.MuxError:
         windows = []
 
     if window not in windows:
@@ -735,12 +736,12 @@ def _handoff_to_stage_driver(
         from . import driver_prompt as dp
 
         fleet_bin = dp.fleet_agent_bin()
-        tmux_mod.send_keys(
+        m.send_text(
             session,
             window,
             f"[fleet] new message in inbox. run {fleet_bin} inbox-read to check",
         )
-    except tmux_mod.TmuxError:
+    except mux.MuxError:
         return
     append_event(
         state_dir / "events.jsonl",

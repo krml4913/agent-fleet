@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import leader_notifier, state  # noqa: E402
 from fleet.commands import done as done_cmd  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 READY_PANE = 'status\n❯ Try "help"\n'      # claude idle prompt
 BUSY_PANE = "✻ Thinking… (esc to interrupt)\n"  # mid-turn, no ❯ prompt
@@ -178,9 +179,7 @@ class LeaderNotifierTests(unittest.TestCase):
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         self._seed_task("1", pr_url="https://github.com/o/r/pull/77")
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
         ):
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
@@ -191,8 +190,8 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_called_once()
-        injected = send_keys.call_args[0][2]
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        injected = fake.calls_named("send_text")[-1][0][2]
         self.assertIn("https://github.com/o/r/pull/77", injected)
         self.assertNotIn("(none yet)", injected)
 
@@ -200,9 +199,7 @@ class LeaderNotifierTests(unittest.TestCase):
         self._seed_task("1")  # PR never appears
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
         ):
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
@@ -213,8 +210,8 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_called_once()
-        self.assertIn("PR=(none yet)", send_keys.call_args[0][2])
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        self.assertIn("PR=(none yet)", fake.calls_named("send_text")[-1][0][2])
 
     # -- queue eviction on retirement (stale-pending guard) ----------------
 
@@ -243,9 +240,7 @@ class LeaderNotifierTests(unittest.TestCase):
         # next idle boundary is still caught.
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", return_value=BUSY_PANE),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=BUSY_PANE) as fake,
             patch("fleet.leader_notifier.start_detached") as rearm,
         ):
             rc = leader_notifier.notify(
@@ -257,7 +252,7 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_not_called()  # never mid-turn
+        self.assertEqual(fake.calls_named("send_text"), [])  # never mid-turn
         rearm.assert_called_once()  # handed off to a successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # still queued
 
@@ -271,9 +266,7 @@ class LeaderNotifierTests(unittest.TestCase):
             "  Enter to confirm · Esc to keep browser tools off\n"
         )
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", return_value=dialog),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=dialog) as fake,
             patch("fleet.leader_notifier.start_detached"),
         ):
             leader_notifier.notify(
@@ -284,7 +277,7 @@ class LeaderNotifierTests(unittest.TestCase):
                 timeout=0.05,
                 poll_interval=0.001,
             )
-        send_keys.assert_not_called()
+        self.assertEqual(fake.calls_named("send_text"), [])
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
 
     def test_busy_then_idle_eventually_injects(self) -> None:
@@ -294,9 +287,7 @@ class LeaderNotifierTests(unittest.TestCase):
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         panes = [BUSY_PANE, BUSY_PANE, READY_PANE]
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", side_effect=panes),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=panes) as fake,
             patch("fleet.leader_notifier.start_detached") as rearm,
         ):
             rc = leader_notifier.notify(
@@ -308,7 +299,7 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_called_once()  # flushed on the idle boundary
+        self.assertEqual(len(fake.calls_named("send_text")), 1)  # flushed on the idle boundary
         rearm.assert_not_called()  # delivered → no successor
         self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
 
@@ -316,9 +307,7 @@ class LeaderNotifierTests(unittest.TestCase):
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         leader_notifier.enqueue(self.session_dir, self._record("2"))
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=True),
-            patch("fleet.leader_notifier.tmux.capture_pane", return_value=READY_PANE),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
         ):
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
@@ -329,8 +318,8 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_called_once()
-        args, kwargs = send_keys.call_args
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        args, kwargs = fake.calls_named("send_text")[-1]
         self.assertEqual(args[0], "fleet-main")
         self.assertEqual(args[1], "leader")
         self.assertIn("task-1", args[2])
@@ -346,8 +335,7 @@ class LeaderNotifierTests(unittest.TestCase):
     def test_leader_detached_leaves_records_queued(self) -> None:
         leader_notifier.enqueue(self.session_dir, self._record("1"))
         with (
-            patch("fleet.leader_notifier.tmux.session_exists", return_value=False),
-            patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+            use_fake_mux(sessions={}) as fake,
             patch("fleet.leader_notifier.start_detached") as rearm,
         ):
             rc = leader_notifier.notify(
@@ -359,12 +347,12 @@ class LeaderNotifierTests(unittest.TestCase):
                 poll_interval=0.001,
             )
         self.assertEqual(rc, 0)
-        send_keys.assert_not_called()
+        self.assertEqual(fake.calls_named("send_text"), [])
         rearm.assert_not_called()  # dead session needs no successor
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
 
     def test_empty_queue_is_noop(self) -> None:
-        with patch("fleet.leader_notifier.tmux.session_exists") as exists:
+        with use_fake_mux() as fake:
             rc = leader_notifier.notify(
                 session_dir=self.session_dir,
                 session="fleet-main",
@@ -373,7 +361,7 @@ class LeaderNotifierTests(unittest.TestCase):
                 timeout=0.05,
             )
         self.assertEqual(rc, 0)
-        exists.assert_not_called()  # bailed before touching tmux
+        self.assertEqual(fake.calls, [])  # bailed before touching the mux
 
     def test_second_notifier_noops_while_lock_held(self) -> None:
         leader_notifier.enqueue(self.session_dir, self._record("1"))
@@ -381,8 +369,7 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertIsNotNone(fp)
         try:
             with (
-                patch("fleet.leader_notifier.tmux.session_exists") as exists,
-                patch("fleet.leader_notifier.tmux.send_keys") as send_keys,
+                use_fake_mux() as fake,
             ):
                 rc = leader_notifier.notify(
                     session_dir=self.session_dir,
@@ -392,8 +379,7 @@ class LeaderNotifierTests(unittest.TestCase):
                     timeout=0.05,
                 )
             self.assertEqual(rc, 0)
-            exists.assert_not_called()  # lock held → immediate no-op
-            send_keys.assert_not_called()
+            self.assertEqual(fake.calls, [])  # lock held → immediate no-op
         finally:
             leader_notifier._release_lock(fp)
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
@@ -469,8 +455,7 @@ class DoneHookTests(unittest.TestCase):
     def test_on_enqueues_to_session_dir_then_skips_spawn_when_no_record(self) -> None:
         project = {"name": "demo", "notify_leader_on_driver_done": "true"}
         with (
-            patch("fleet.commands.done.tmux.available", return_value=True),
-            patch("fleet.commands.done.tmux.session_exists", return_value=True),
+            use_fake_mux(sessions={"fleet-main": ["leader"], "fleet-migration": ["leader"]}),
             patch("fleet.leader_notifier.start_detached") as spawn,
         ):
             done_cmd._maybe_notify_leader(
@@ -493,8 +478,7 @@ class DoneHookTests(unittest.TestCase):
             json.dumps({"label": "main", "agent": "claude:opus"}), encoding="utf-8"
         )
         with (
-            patch("fleet.commands.done.tmux.available", return_value=True),
-            patch("fleet.commands.done.tmux.session_exists", return_value=True),
+            use_fake_mux(sessions={"fleet-main": ["leader"], "fleet-migration": ["leader"]}),
             patch("fleet.leader_notifier.start_detached") as spawn,
         ):
             done_cmd._maybe_notify_leader(
@@ -519,8 +503,7 @@ class DoneHookTests(unittest.TestCase):
             json.dumps({"label": "migration", "agent": "codex:gpt-5.5"}), encoding="utf-8"
         )
         with (
-            patch("fleet.commands.done.tmux.available", return_value=True),
-            patch("fleet.commands.done.tmux.session_exists", return_value=True),
+            use_fake_mux(sessions={"fleet-main": ["leader"], "fleet-migration": ["leader"]}),
             patch("fleet.leader_notifier.start_detached") as spawn,
         ):
             done_cmd._maybe_notify_leader(

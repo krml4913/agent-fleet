@@ -8,7 +8,7 @@ entry_points / plugin magic) so the supported vendors are obvious here.
 """
 from __future__ import annotations
 
-from .base import VendorAdapter
+from .base import Key, KeystrokeStep, VendorAdapter
 from .claude import ClaudeAdapter
 from .codex import CodexAdapter
 
@@ -17,4 +17,4 @@ REGISTRY: dict[str, type[VendorAdapter]] = {
     CodexAdapter.name: CodexAdapter,
 }
 
-__all__ = ["VendorAdapter", "ClaudeAdapter", "CodexAdapter", "REGISTRY"]
+__all__ = ["Key", "KeystrokeStep", "VendorAdapter", "ClaudeAdapter", "CodexAdapter", "REGISTRY"]

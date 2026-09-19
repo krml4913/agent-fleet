@@ -1,7 +1,9 @@
-"""Tests for ``fleet-agent start`` (dry-run path — tmux not exercised)."""
+"""Tests for ``fleet-agent start`` (dry-run path + a fake multiplexer backend)."""
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -16,6 +18,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import prompt_pointer, state  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 class StartTests(unittest.TestCase):
@@ -516,26 +519,24 @@ class StartAutopasteEnterTests(unittest.TestCase):
         )
 
         with (
-            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
             unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start"),
             unittest.mock.patch(
                 "fleet.commands.start.prompt_deliverer.start_detached",
                 return_value=self.state_dir / "tasks" / "task-200" / "prompt-deliverer.log",
             ) as mock_deliverer,
         ):
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
             result = start.run(args)
 
         self.assertEqual(result, 0)
         # start itself does not paste; the detached deliverer does, once the
         # pane is ready. start only pre-loads the pointer (not the prompt
-        # body) into the tmux buffer for the no-auto-paste manual-paste path.
-        mock_tmux.paste_buffer.assert_not_called()
-        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
-        self.assertEqual(loaded_path.name, ".driver-prompt.md.paste-pointer")
-        pointer = loaded_path.read_text(encoding="utf-8")
+        # body) into the named buffer for the no-auto-paste manual-paste path.
+        self.assertEqual(fake.calls_named("paste"), [])
+        (buffer_name, pointer), _kw = fake.calls_named("preload_paste")[0]
+        self.assertEqual(buffer_name, "fleet-task-200")
+        sidecar = self.state_dir / "tasks" / "task-200" / ".driver-prompt.md.paste-pointer"
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), pointer)
         prompt_path = self.state_dir / "tasks" / "task-200" / "driver-prompt.md"
         self.assertIn("Read the prompt file at this path", pointer)
         self.assertTrue(pointer.endswith(str(prompt_path.resolve())))
@@ -544,6 +545,7 @@ class StartAutopasteEnterTests(unittest.TestCase):
         mock_deliverer.assert_called_once()
         self.assertEqual(mock_deliverer.call_args.kwargs["task_id"], "200")
         self.assertEqual(mock_deliverer.call_args.kwargs["agent_spec"], "claude:sonnet")
+        self.assertNotIn("buffer_name", mock_deliverer.call_args.kwargs)
 
     def test_no_auto_paste_skips_paste_and_enter(self) -> None:
         from fleet.commands import start
@@ -560,22 +562,29 @@ class StartAutopasteEnterTests(unittest.TestCase):
             prompt_delay=0.0,
         )
 
+        buf = io.StringIO()
         with (
-            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
             unittest.mock.patch("fleet.commands.start.workspace_mod.on_pre_start"),
+            contextlib.redirect_stdout(buf),
         ):
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
             result = start.run(args)
 
         self.assertEqual(result, 0)
-        mock_tmux.paste_buffer.assert_not_called()
-        mock_tmux.load_buffer.assert_called_once()
+        self.assertEqual(fake.calls_named("paste"), [])
+        self.assertEqual(len(fake.calls_named("preload_paste")), 1)
         prompt_path = self.state_dir / "tasks" / "task-201" / "driver-prompt.md"
-        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
-        self.assertEqual(loaded_path, prompt_pointer.pointer_path(prompt_path))
-        self.assertIn(str(prompt_path.resolve()), loaded_path.read_text(encoding="utf-8"))
+        (buffer_name, pointer), _kw = fake.calls_named("preload_paste")[0]
+        self.assertEqual(buffer_name, "fleet-task-201")
+        self.assertEqual(
+            prompt_pointer.pointer_path(prompt_path).read_text(encoding="utf-8"), pointer
+        )
+        self.assertIn(str(prompt_path.resolve()), pointer)
+        out = buf.getvalue()
+        # Manual-paste instructions come from the backend (tmux: C-b ]).
+        self.assertIn("paste pointer: inside the pane press C-b ], then Enter", out)
+        self.assertIn("or: fleet-agent send-prompt 201", out)
+        self.assertIn("attach:        tmux attach -t fleet-main:201·driver", out)
 
 
 class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
@@ -603,14 +612,9 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
 
         task_id = "multiproject"
         task_dir = self._make_task_dir(task_id)
-        call_order: list[str] = []
-
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-            mock_tmux.kill_task_windows.side_effect = lambda *a, **kw: call_order.append("kill")
-            mock_tmux.new_window.side_effect = lambda *a, **kw: call_order.append("new")
-
+        with use_fake_mux(
+            sessions={"fleet-main": ["leader", f"{task_id}·driver"]}
+        ) as fake:
             result = start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -624,17 +628,18 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertIn("kill", call_order, "kill_task_windows was not called")
-        self.assertIn("new", call_order, "new_window was not called")
+        names = fake.method_names()
+        self.assertIn("kill_window", names, "old task window was not killed")
+        self.assertIn("new_window", names, "new_window was not called")
         # kill must precede new_window
         self.assertLess(
-            call_order.index("kill"),
-            call_order.index("new"),
-            "kill_task_windows must be called before new_window",
+            names.index("kill_window"),
+            names.index("new_window"),
+            "task windows must be killed before new_window",
         )
-        loaded_path = Path(mock_tmux.load_buffer.call_args.args[1])
-        self.assertEqual(loaded_path, prompt_pointer.pointer_path(task_dir / "driver-prompt.md"))
-        pointer = loaded_path.read_text(encoding="utf-8")
+        (_name, pointer), _kw = fake.calls_named("preload_paste")[0]
+        loaded_path = prompt_pointer.pointer_path(task_dir / "driver-prompt.md")
+        self.assertEqual(loaded_path.read_text(encoding="utf-8"), pointer)
         self.assertIn(str((task_dir / "driver-prompt.md").resolve()), pointer)
         self.assertNotIn("prompt content", pointer)
 
@@ -645,10 +650,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_id = "mytask"
         task_dir = self._make_task_dir(task_id)
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake:
             start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -661,10 +663,15 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 prompt_delay=0.0,
             )
 
-        # tmux session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
-        mock_tmux.kill_task_windows.assert_called_once_with("fleet-main", task_id)
-        new_args = mock_tmux.new_window.call_args[0]
-        self.assertEqual(new_args[1], f"{task_id}·implementer")
+        # The session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
+        self.assertEqual(fake.calls_named("list_windows"), [(("fleet-main",), {})])
+        (session, window), kwargs = fake.calls_named("new_window")[0]
+        self.assertEqual((session, window), ("fleet-main", f"{task_id}·implementer"))
+        # argv goes to the backend (no shell quoting at this layer); env + cwd too.
+        self.assertEqual(kwargs["argv"][0], "claude")
+        self.assertEqual(kwargs["cwd"], str(task_dir))
+        self.assertEqual(kwargs["env"]["FLEET_TASK_ID"], task_id)
+        self.assertEqual(kwargs["env"]["FLEET_STATE_DIR"], str(self.state_dir))
 
     def test_codex_launch_disables_update_prompt(self) -> None:
         from fleet.commands import start
@@ -672,10 +679,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_id = "codex-update"
         task_dir = self._make_task_dir(task_id)
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake:
             start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -688,8 +692,8 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 prompt_delay=0.0,
             )
 
-        sent = mock_tmux.send_keys.call_args.args[2]
-        self.assertIn("check_for_update_on_startup=false", sent)
+        argv = fake.calls_named("new_window")[0][1]["argv"]
+        self.assertIn("check_for_update_on_startup=false", argv)
 
     def test_claude_launch_sets_session_name(self) -> None:
         """claude cli gets --name <project>-<task_id>-<role> at launch."""
@@ -698,10 +702,7 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_id = "mytask"
         task_dir = self._make_task_dir(task_id)
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake:
             start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -714,8 +715,8 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
                 prompt_delay=0.0,
             )
 
-        sent = mock_tmux.send_keys.call_args.args[2]
-        self.assertIn("--name demo-mytask-driver", sent)
+        argv = fake.calls_named("new_window")[0][1]["argv"]
+        self.assertEqual(argv[-2:], ["--name", "demo-mytask-driver"])
 
     def test_auto_paste_threads_session_name_to_deliverer(self) -> None:
         """The detached deliverer receives the computed session name."""
@@ -725,15 +726,12 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_dir = self._make_task_dir(task_id)
 
         with (
-            unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
             unittest.mock.patch(
                 "fleet.commands.start.prompt_deliverer.start_detached",
                 return_value=task_dir / "prompt-deliverer.log",
             ) as mock_deliverer,
         ):
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-
             start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -758,14 +756,10 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_id = "stage-transition"
         task_dir = self._make_task_dir(task_id)
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-            # kill_task_windows removes stale windows from previous stages.
-            mock_tmux.kill_task_windows.return_value = None
-            # new_window succeeds cleanly
-            mock_tmux.new_window.return_value = None
-
+        # A stale window from the previous stage is still open.
+        with use_fake_mux(
+            sessions={"fleet-main": ["leader", f"{task_id}·designer"]}
+        ) as fake:
             result = start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -779,9 +773,12 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        # tmux session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
-        mock_tmux.kill_task_windows.assert_called_once_with("fleet-main", task_id)
-        mock_tmux.new_window.assert_called_once()
+        # The session is the OWNER SESSION (fleet-<owner_session>), not fleet-<project>.
+        self.assertEqual(
+            fake.calls_named("kill_window"), [(("fleet-main", f"{task_id}·designer"), {})]
+        )
+        self.assertEqual(len(fake.calls_named("new_window")), 1)
+        self.assertEqual(fake.sessions["fleet-main"], ["leader", f"{task_id}·implementer"])
 
     def test_launch_can_preserve_existing_task_windows(self) -> None:
         from fleet.commands import start
@@ -789,10 +786,9 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
         task_id = "keep-live"
         task_dir = self._make_task_dir(task_id)
 
-        with unittest.mock.patch("fleet.commands.start.tmux_mod") as mock_tmux:
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
-
+        with use_fake_mux(
+            sessions={"fleet-main": ["leader", f"{task_id}·implementer"]}
+        ) as fake:
             result = start.launch_stage_driver(
                 state_dir=self.state_dir,
                 task_id=task_id,
@@ -807,8 +803,9 @@ class LaunchStageDriverWindowCollisionTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        mock_tmux.kill_task_windows.assert_not_called()
-        mock_tmux.new_window.assert_called_once()
+        self.assertEqual(fake.calls_named("kill_window"), [])
+        self.assertEqual(fake.calls_named("list_windows"), [])
+        self.assertEqual(len(fake.calls_named("new_window")), 1)
 
 
 class ResolveOwnerSessionTests(unittest.TestCase):

@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
 from fleet.commands.cleanup import run  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 class CleanupCmdTests(unittest.TestCase):
@@ -133,12 +134,8 @@ class CleanupCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("task.yaml missing", r.stderr)
 
-    @patch("fleet.commands.cleanup.tmux_mod")
-    def test_cleanup_kills_task_windows_by_task_id(self, mock_tmux: MagicMock) -> None:
+    def test_cleanup_kills_task_windows_by_task_id(self) -> None:
         self._save("stage-transition", "completed")
-        mock_tmux.available.return_value = True
-        mock_tmux.session_exists.return_value = True
-        mock_tmux.TmuxError = Exception
         args = MagicMock()
         args.task_id = "stage-transition"
         # "." → resolve via FLEET_STATE_DIR (patched below), not registry name.
@@ -146,15 +143,26 @@ class CleanupCmdTests(unittest.TestCase):
         args.archive = False
         args.force = False
 
-        with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False):
+        windows = ["leader", "stage-transition·designer", "stage-transition·implementer", "other·driver"]
+        with (
+            patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False),
+            use_fake_mux(sessions={"fleet-demo": windows}) as fake,
+        ):
             result = run(args)
 
         self.assertEqual(result, 0)
-        mock_tmux.kill_task_windows.assert_called_once_with(
-            "fleet-demo",
-            "stage-transition",
+        self.assertEqual(
+            [a for a, _k in fake.calls_named("kill_window")],
+            [
+                ("fleet-demo", "stage-transition·designer"),
+                ("fleet-demo", "stage-transition·implementer"),
+            ],
         )
-        mock_tmux.delete_buffer.assert_called_once_with("fleet-task-stage-transition")
+        self.assertEqual(fake.sessions["fleet-demo"], ["leader", "other·driver"])
+        # The manual-paste pointer staged at launch is dropped too.
+        self.assertEqual(
+            fake.calls_named("drop_paste"), [(("fleet-task-stage-transition",), {})]
+        )
 
 
 if __name__ == "__main__":

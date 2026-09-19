@@ -8,7 +8,6 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 FLEET = ROOT / "fleet-agent"
@@ -17,6 +16,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
 from fleet.commands import inbox as inbox_mod  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 from tests._fleet_test_helpers import run_fleet_agent, make_project  # noqa: E402
 
 
@@ -76,7 +76,9 @@ class InboxCmdTests(unittest.TestCase):
 
 
 class InboxDeliveryTests(unittest.TestCase):
-    """Unit tests for _wake_driver_pane — tmux delivery without a real session."""
+    """Unit tests for _wake_driver_pane — pane delivery without a real session."""
+
+    SESSIONS = {"fleet-testproj": ["leader", "42·implementer", "420·driver"]}
 
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
@@ -93,54 +95,39 @@ class InboxDeliveryTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_sends_keys_when_tmux_available(self) -> None:
-        with (
-            patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
-            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
-            patch("fleet.commands.inbox.tmux_mod.send_keys") as mock_send,
-        ):
+        with use_fake_mux(sessions=self.SESSIONS) as fake:
             inbox_mod._wake_driver_pane(self.state_dir, "42")
-            mock_send.assert_called_once()
-            call_args = mock_send.call_args
-            self.assertEqual(call_args[0][0], "fleet-testproj")
-            self.assertEqual(call_args[0][1], "42·implementer")
-            self.assertIn("inbox-read", call_args[0][2])
+        sends = fake.calls_named("send_text")
+        self.assertEqual(len(sends), 1)
+        args, kwargs = sends[0]
+        self.assertEqual(args[0], "fleet-testproj")
+        self.assertEqual(args[1], "42·implementer")
+        self.assertIn("inbox-read", args[2])
+        self.assertTrue(kwargs.get("enter", True))
 
     def test_ping_uses_absolute_fleet_agent_path(self) -> None:
         """Issue #125: the wake ping must call fleet-agent by absolute path so a
         codex pane (no fleet-agent on PATH) can act on a mid-task inbox message."""
         from fleet import driver_prompt
 
-        with (
-            patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
-            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
-            patch("fleet.commands.inbox.tmux_mod.send_keys") as mock_send,
-        ):
+        with use_fake_mux(sessions=self.SESSIONS) as fake:
             inbox_mod._wake_driver_pane(self.state_dir, "42")
-            ping = mock_send.call_args[0][2]
+            ping = fake.calls_named("send_text")[-1][0][2]
             self.assertIn(f"{driver_prompt.fleet_agent_bin()} inbox-read", ping)
             self.assertNotIn("。fleet-agent inbox-read", ping)
 
     def test_skips_when_tmux_unavailable(self) -> None:
-        with (
-            patch("fleet.commands.inbox.tmux_mod.available", return_value=False),
-            patch("fleet.commands.inbox.tmux_mod.send_keys") as mock_send,
-        ):
+        with use_fake_mux(available=False, sessions=self.SESSIONS) as fake:
             inbox_mod._wake_driver_pane(self.state_dir, "42")
-            mock_send.assert_not_called()
+        self.assertEqual(fake.calls_named("send_text"), [])
 
     def test_warns_but_succeeds_when_pane_missing(self) -> None:
-        from fleet.tmux import TmuxError
+        from fleet.mux import MuxError
         import io
         import contextlib
 
-        with (
-            patch("fleet.commands.inbox.tmux_mod.available", return_value=True),
-            patch("fleet.commands.inbox.tmux_mod.task_window_names", return_value=["42·implementer"]),
-            patch(
-                "fleet.commands.inbox.tmux_mod.send_keys",
-                side_effect=TmuxError("no pane"),
-            ),
-        ):
+        with use_fake_mux(sessions=self.SESSIONS) as fake:
+            fake.fail["send_text"] = MuxError("no pane")
             buf = io.StringIO()
             with contextlib.redirect_stderr(buf):
                 inbox_mod._wake_driver_pane(self.state_dir, "42")

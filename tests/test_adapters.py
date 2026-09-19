@@ -21,8 +21,9 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import adapters, agents, prompt_deliverer, state  # noqa: E402
-from fleet.adapters.base import VendorAdapter  # noqa: E402
+from fleet.adapters.base import Key, VendorAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 class FakeAdapter(VendorAdapter):
@@ -68,7 +69,7 @@ class SessionNamingTests(unittest.TestCase):
             [
                 ("/rename", False),
                 ("", True),
-                ("C-u", False),
+                (Key("Ctrl-u"), False),
                 ("x", False),
                 ("", True),
             ],
@@ -99,7 +100,7 @@ class SessionNamingTests(unittest.TestCase):
             [
                 ("/rename", False),
                 ("", True),
-                ("C-u", False),
+                (Key("Ctrl-u"), False),
                 ("n", False),
                 ("", True),
             ],
@@ -257,19 +258,14 @@ class DelivererUsesRegistryTests(unittest.TestCase):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
     def test_fake_adapter_ready_marker_drives_delivery(self) -> None:
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="FAKE-READY\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture="FAKE-READY\n") as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = prompt_deliverer.deliver(
                 state_dir=self.state_dir,
                 task_id=self.task_id,
                 session="fleet-demo",
                 window="1·driver",
                 prompt_path=self.prompt_path,
-                buffer_name="fleet-task-1",
                 agent_spec="fake:m1",
                 timeout=1.0,
                 poll_interval=0.01,

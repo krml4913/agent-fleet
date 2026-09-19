@@ -20,6 +20,7 @@ from fleet import state  # noqa: E402
 from fleet.commands import cleanup as cleanup_mod  # noqa: E402
 from fleet.commands import merge as merge_mod  # noqa: E402
 from tests._fleet_test_helpers import make_project  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 def _ok(*_a, **_k) -> subprocess.CompletedProcess:
@@ -79,8 +80,7 @@ class MergeCmdTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=record), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1"))
 
         self.assertEqual(rc, 0)
@@ -112,8 +112,7 @@ class MergeCmdTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=record), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1", squash=True))
 
         self.assertEqual(rc, 0)
@@ -124,8 +123,7 @@ class MergeCmdTests(unittest.TestCase):
         self._save("1", "completed", branch="demo/task/1")
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1", keep=True))
 
         self.assertEqual(rc, 0)
@@ -141,8 +139,7 @@ class MergeCmdTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=record), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1"))
 
         self.assertEqual(rc, 0)
@@ -203,8 +200,7 @@ class MergeCmdTests(unittest.TestCase):
         self._save("1", "running", branch="demo/task/1")
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.state_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1", force=True))
         self.assertEqual(rc, 0)
 
@@ -257,8 +253,7 @@ class MergeLeaderProjectTests(unittest.TestCase):
     def test_merge_resolves_by_project_over_session_state_dir(self) -> None:
         with patch.dict(os.environ, {"FLEET_STATE_DIR": str(self.session_dir)}, clear=False), \
                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok), \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args())
         self.assertEqual(rc, 0)
         events = [
@@ -292,10 +287,7 @@ class TeardownHelperTests(unittest.TestCase):
 
     def test_teardown_archives_and_kills_window(self) -> None:
         task = state.load_task(self.state_dir, "1")
-        with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = True
-            mock_tmux.session_exists.return_value = True
-            mock_tmux.TmuxError = Exception
+        with use_fake_mux(sessions={"fleet-demo": ["leader", "1·driver"]}) as fake:
             archived = cleanup_mod.teardown(
                 self.state_dir, "1", task, archive=True,
             )
@@ -303,8 +295,8 @@ class TeardownHelperTests(unittest.TestCase):
         self.assertTrue(archived)
         self.assertFalse((self.state_dir / "tasks" / "task-1").exists())
         self.assertTrue((self.state_dir / "tasks" / "_archive" / "task-1").is_dir())
-        mock_tmux.kill_task_windows.assert_called_once_with("fleet-demo", "1")
-        mock_tmux.delete_buffer.assert_called_once_with("fleet-task-1")
+        self.assertEqual(fake.calls_named("kill_window"), [(("fleet-demo", "1·driver"), {})])
+        self.assertEqual(fake.calls_named("drop_paste"), [(("fleet-task-1",), {})])
 
     def test_teardown_archive_collision_uniquifies(self) -> None:
         # Shared by cleanup and merge: archiving a re-spawned id whose archive
@@ -316,8 +308,7 @@ class TeardownHelperTests(unittest.TestCase):
         (archive_root / "task-1" / "marker.txt").write_text("first run", encoding="utf-8")
 
         task = state.load_task(self.state_dir, "1")
-        with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+        with use_fake_mux(available=False):
             archived = cleanup_mod.teardown(
                 self.state_dir, "1", task, archive=True,
             )
@@ -336,8 +327,7 @@ class TeardownHelperTests(unittest.TestCase):
         self.assertNotEqual(self.project, self.state_dir.parent)
         task = state.load_task(self.state_dir, "1")
         with patch("fleet.commands.cleanup.workspace_mod.on_cleanup") as on_cleanup, \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             cleanup_mod.teardown(self.state_dir, "1", task, archive=False)
 
         ctx = on_cleanup.call_args.args[0]
@@ -347,8 +337,7 @@ class TeardownHelperTests(unittest.TestCase):
         other = Path(self._tmp.name) / "elsewhere"
         task = state.load_task(self.state_dir, "1")
         with patch("fleet.commands.cleanup.workspace_mod.on_cleanup") as on_cleanup, \
-                patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+                use_fake_mux(available=False):
             cleanup_mod.teardown(
                 self.state_dir, "1", task, archive=False, project_root=other,
             )
@@ -358,8 +347,7 @@ class TeardownHelperTests(unittest.TestCase):
 
     def test_teardown_without_archive_keeps_dir(self) -> None:
         task = state.load_task(self.state_dir, "1")
-        with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-            mock_tmux.available.return_value = False
+        with use_fake_mux(available=False):
             archived = cleanup_mod.teardown(
                 self.state_dir, "1", task, archive=False,
             )
@@ -386,8 +374,7 @@ class TeardownHelperTests(unittest.TestCase):
                     ),
                 )
             task = state.load_task(self.state_dir, "1")
-            with patch("fleet.commands.cleanup.tmux_mod") as mock_tmux:
-                mock_tmux.available.return_value = False
+            with use_fake_mux(available=False):
                 cleanup_mod.teardown(self.state_dir, "1", task, archive=False)
 
             remaining = leader_notifier.read_queue(session_dir)

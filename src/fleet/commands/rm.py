@@ -5,7 +5,7 @@ import argparse
 import shutil
 import sys
 
-from .. import tmux as tmux_mod
+from .. import mux
 from ..state import load_registry, project_state_dir, unregister_project, list_tasks
 
 
@@ -40,11 +40,12 @@ def run(args: argparse.Namespace) -> int:
     state_dir = project_state_dir(args.name)
     session = f"fleet-{args.name}"
 
-    # Warn about live tmux session.
-    if tmux_mod.available() and tmux_mod.session_exists(session):
+    # Warn about live mux session.
+    m = mux.get()
+    if m.available() and m.session_exists(session):
         print(
-            f"warn: tmux session {session!r} is still running. "
-            f"Kill it first:  tmux kill-session -t {session}",
+            f"warn: {m.name} session {session!r} is still running. "
+            f"Kill it first:  {m.kill_session_hint(session)}",
             file=sys.stderr,
         )
 

@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet import prompt_deliverer, prompt_pointer, state  # noqa: E402
 from fleet.adapters import CodexAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 class PromptDelivererTests(unittest.TestCase):
@@ -57,7 +58,6 @@ class PromptDelivererTests(unittest.TestCase):
             session="fleet-demo",
             window="1·driver",
             prompt_path=self.prompt_path,
-            buffer_name="fleet-task-1",
             agent_spec=agent,
             timeout=timeout,
             poll_interval=0.01,
@@ -76,53 +76,39 @@ class PromptDelivererTests(unittest.TestCase):
         )
 
     def test_ready_marker_pastes_pointer_and_emits_event(self) -> None:
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer") as load_buffer,
-            patch("fleet.prompt_deliverer.tmux.paste_buffer") as paste_buffer,
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
-        ):
+        with use_fake_mux(capture="ready\n›\n") as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
         # The deliverer must paste a pointer to the prompt file, never the
         # prompt body (full-content paste regresses Issue #90).
-        load_buffer.assert_called_once()
-        buf_name, loaded = load_buffer.call_args.args
-        self.assertEqual(buf_name, "fleet-task-1")
-        loaded_path = Path(loaded)
-        self.assertEqual(loaded_path, prompt_pointer.pointer_path(self.prompt_path))
-        pointer = loaded_path.read_text(encoding="utf-8")
+        pastes = fake.calls_named("paste")
+        self.assertEqual(len(pastes), 1)
+        session, window, pointer = pastes[0][0]
+        self.assertEqual((session, window), ("fleet-demo", "1·driver"))
         self.assertIn(str(self.prompt_path.resolve()), pointer)
         self.assertNotIn("FULL-PROMPT-BODY-MARKER", pointer)
-        paste_buffer.assert_called_once_with("fleet-demo", "1·driver", "fleet-task-1")
-        send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
+        # The pointer sidecar file is still written next to the prompt.
+        sidecar = prompt_pointer.pointer_path(self.prompt_path)
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), pointer)
+        # paste, then exactly one submit Enter.
+        self.assertEqual(
+            fake.sent(),
+            [("paste", "1·driver", pointer), ("key", "1·driver", "Enter")],
+        )
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
     def test_codex_session_name_renames_before_paste(self) -> None:
-        calls: list[tuple] = []
-
-        def record(session, window, text, *, enter=True):
-            calls.append(("send_keys", text))
-            self._ack_on_enter()
-
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch(
-                "fleet.prompt_deliverer.tmux.paste_buffer",
-                side_effect=lambda *a, **k: calls.append(("paste", None)),
-            ),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=record),
-        ):
+        with use_fake_mux(capture="ready\n›\n") as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = prompt_deliverer.deliver(
                 state_dir=self.state_dir,
                 task_id=self.task_id,
                 session="fleet-demo",
                 window="1·driver",
                 prompt_path=self.prompt_path,
-                buffer_name="fleet-task-1",
-                agent_spec="codex:o4-mini",
+                    agent_spec="codex:o4-mini",
                 session_name="demo-1-driver",
                 timeout=1.0,
                 poll_interval=0.01,
@@ -131,34 +117,31 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(result, 0)
         # rename keystrokes come first (open popup, clear field, type name,
         # confirm), then the paste, then the submit Enter.
+        # Ctrl-u is an explicit key press (never typed as the text "C-u").
+        sent = [(kind, payload) for kind, _window, payload in fake.sent()]
         self.assertEqual(
-            calls,
+            [(k, p if k != "paste" else None) for k, p in sent],
             [
-                ("send_keys", "/rename"),
-                ("send_keys", ""),
-                ("send_keys", "C-u"),
-                ("send_keys", "demo-1-driver"),
-                ("send_keys", ""),
+                ("text", "/rename"),
+                ("key", "Enter"),
+                ("key", "Ctrl-u"),
+                ("text", "demo-1-driver"),
+                ("key", "Enter"),
                 ("paste", None),
-                ("send_keys", ""),
+                ("key", "Enter"),
             ],
         )
 
     def test_claude_session_name_does_not_send_rename_keys(self) -> None:
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
-        ):
+        with use_fake_mux(capture='status\n❯ Try "help"\n') as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = prompt_deliverer.deliver(
                 state_dir=self.state_dir,
                 task_id=self.task_id,
                 session="fleet-demo",
                 window="1·driver",
                 prompt_path=self.prompt_path,
-                buffer_name="fleet-task-1",
-                agent_spec="claude:opus",
+                    agent_spec="claude:opus",
                 session_name="demo-1-driver",
                 timeout=1.0,
                 poll_interval=0.01,
@@ -166,22 +149,18 @@ class PromptDelivererTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         # claude is named at launch → only the submit Enter, no rename keys.
-        send_keys.assert_called_once_with("fleet-demo", "1·driver", "", enter=True)
+        self.assertEqual(fake.calls_named("send_text"), [])
+        self.assertEqual(fake.calls_named("send_key"), [(("fleet-demo", "1·driver", "Enter"), {})])
 
     def test_submits_once_when_ack_lands_on_first_enter(self) -> None:
         # When the ack arrives on the first submit Enter, no resubmit fires —
         # the retry path is only walked while the ack is still missing.
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter) as send_keys,
-        ):
+        with use_fake_mux(capture="ready\n›\n") as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
-        self.assertEqual(send_keys.call_count, 1)
-        send_keys.assert_called_with("fleet-demo", "1·driver", "", enter=True)
+        self.assertEqual(fake.calls_named("send_key"), [(("fleet-demo", "1·driver", "Enter"), {})])
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
     def test_codex_resubmits_enter_until_ack(self) -> None:
@@ -197,34 +176,29 @@ class PromptDelivererTests(unittest.TestCase):
 
         with (
             patch.object(CodexAdapter, "submit_retry_interval_seconds", 0.0),
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=ack_on_third_enter) as send_keys,
+            use_fake_mux(capture="ready\n›\n") as fake,
         ):
+            fake.on["send_key"] = ack_on_third_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
-        self.assertGreaterEqual(send_keys.call_count, 3)
+        keys = fake.calls_named("send_key")
+        self.assertGreaterEqual(len(keys), 3)
         # Every resubmit is the same bare Enter — never a duplicate paste.
-        for c in send_keys.call_args_list:
-            self.assertEqual(c, call("fleet-demo", "1·driver", "", enter=True))
+        for c in keys:
+            self.assertEqual(c, (("fleet-demo", "1·driver", "Enter"), {}))
+        self.assertEqual(len(fake.calls_named("paste")), 1)
         self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
 
     def test_claude_does_not_resubmit_enter(self) -> None:
         # claude submits with a single reliable Enter (submit_retries=0): a
         # missing ack must never trigger a resubmit (which would inject a stray
         # Enter into a working claude pane).
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
-        ):
+        with use_fake_mux(capture='status\n❯ Try "help"\n') as fake:
             result = self._deliver(agent="claude:opus", timeout=0.05)
 
         self.assertEqual(result, 1)
-        self.assertEqual(send_keys.call_count, 1)
+        self.assertEqual(len(fake.calls_named("send_key")), 1)
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
 
     def test_ack_from_other_task_does_not_confirm_delivery(self) -> None:
@@ -236,31 +210,22 @@ class PromptDelivererTests(unittest.TestCase):
                 watermark=None,
             )
 
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=ack_other_task) as send_keys,
-        ):
+        with use_fake_mux(capture="ready\n›\n") as fake:
+            fake.on["send_key"] = ack_other_task
             result = self._deliver(timeout=0.02)
 
         self.assertEqual(result, 1)
-        self.assertEqual(send_keys.call_count, 1)
+        self.assertEqual(len(fake.calls_named("send_key")), 1)
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
         self.assertEqual(self._events()[-1]["type"], "error")
         self.assertIn("inbox_seen ack", self._events()[-1]["message"])
 
     def test_missing_ack_marks_failed(self) -> None:
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="ready\n›\n"),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys") as send_keys,
-        ):
+        with use_fake_mux(capture="ready\n›\n") as fake:
             result = self._deliver(timeout=0.02)
 
         self.assertEqual(result, 1)
-        self.assertEqual(send_keys.call_count, 1)
+        self.assertEqual(len(fake.calls_named("send_key")), 1)
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
         self.assertEqual(self._events()[-1]["type"], "error")
         self.assertIn("inbox_seen ack", self._events()[-1]["message"])
@@ -324,12 +289,8 @@ class PromptDelivererTests(unittest.TestCase):
 
 ›\u00a0
 """
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value=pane),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=pane) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
@@ -342,15 +303,8 @@ class PromptDelivererTests(unittest.TestCase):
                 "›\n",
             ]
         )
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
@@ -368,15 +322,8 @@ class PromptDelivererTests(unittest.TestCase):
   Press enter to continue
 """
         panes = iter([pane, "› Run /review on my current changes\n"])
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
@@ -386,12 +333,8 @@ class PromptDelivererTests(unittest.TestCase):
         )
 
     def test_claude_ready_marker_matches_current_tui_prompt(self) -> None:
-        with (
-            patch("fleet.prompt_deliverer.tmux.capture_pane", return_value='status\n❯ Try "help"\n'),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture='status\n❯ Try "help"\n') as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver(agent="claude:opus")
 
         self.assertEqual(result, 0)
@@ -404,15 +347,8 @@ class PromptDelivererTests(unittest.TestCase):
                 'status\n❯ Try "help"\n',
             ]
         )
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver(agent="claude:opus")
 
         self.assertEqual(result, 0)
@@ -432,19 +368,13 @@ class PromptDelivererTests(unittest.TestCase):
             "  Enter to confirm · Esc to keep browser tools off\n"
         )
         panes = iter([dialog, dialog, 'status\n❯ Try "help"\n'])
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer") as paste,
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver(agent="claude:opus")
 
         self.assertEqual(result, 0)
-        paste.assert_called_once()  # only once the real prompt appeared
+        # only once the real prompt appeared
+        self.assertEqual(len(fake.calls_named("paste")), 1)
         self.assertEqual(
             [e["type"] for e in self._events()],
             ["awaiting_orders", "inbox_seen", "prompt_delivered"],
@@ -457,15 +387,8 @@ class PromptDelivererTests(unittest.TestCase):
                 "all set\n›\n",
             ]
         )
-        with (
-            patch(
-                "fleet.prompt_deliverer.tmux.capture_pane",
-                side_effect=lambda *_a, **_k: next(panes),
-            ),
-            patch("fleet.prompt_deliverer.tmux.load_buffer"),
-            patch("fleet.prompt_deliverer.tmux.paste_buffer"),
-            patch("fleet.prompt_deliverer.tmux.send_keys", side_effect=self._ack_on_enter),
-        ):
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
             result = self._deliver()
 
         self.assertEqual(result, 0)
@@ -475,7 +398,7 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text(encoding="utf-8"))
 
     def test_timeout_marks_failed_and_emits_error(self) -> None:
-        with patch("fleet.prompt_deliverer.tmux.capture_pane", return_value="booting..."):
+        with use_fake_mux(capture="booting..."):
             result = self._deliver(timeout=0.02)
 
         self.assertEqual(result, 1)

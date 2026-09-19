@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fleet import cli, locking, paths, proc  # noqa: E402
 from fleet.commands import start as start_cmd  # noqa: E402
 from tests._fleet_test_helpers import make_project, run_fleet  # noqa: E402
+from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
 class LockFileTests(unittest.TestCase):
@@ -293,11 +294,9 @@ class DriverPathTests(unittest.TestCase):
                 task_dir.mkdir(parents=True)
                 (task_dir / "driver-prompt.md").write_text("prompt", encoding="utf-8")
                 with (
-                    mock.patch("fleet.commands.start.tmux_mod") as mock_tmux,
+                    use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
                     mock.patch("sys.stdout", new_callable=io.StringIO),
                 ):
-                    mock_tmux.session_exists.return_value = True
-                    mock_tmux.TmuxError = Exception
                     start_cmd.launch_stage_driver(
                         state_dir=state_dir,
                         task_id="p1",
@@ -308,7 +307,7 @@ class DriverPathTests(unittest.TestCase):
                         owner_session="main",
                         auto_paste=False,
                     )
-        env = mock_tmux.new_window.call_args.kwargs["env"]
+        env = fake.calls_named("new_window")[0][1]["env"]
         repo_root = str(start_cmd._fleet_clone_root())
         self.assertTrue(env["PATH"].startswith(repo_root + os.pathsep), env["PATH"])
 

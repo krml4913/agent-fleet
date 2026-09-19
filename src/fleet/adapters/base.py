@@ -1,7 +1,7 @@
 """The vendor adapter interface.
 
 A ``VendorAdapter`` captures everything vendor-specific about launching
-and driving an agent CLI inside a tmux pane. Subclass it once per vendor
+and driving an agent CLI inside a multiplexer pane. Subclass it once per vendor
 in ``<vendor>.py`` and register the class in ``fleet.adapters.REGISTRY``.
 Adding a vendor must mean adding one file plus one registry line — nothing
 scattered across ``agents.py`` / ``prompt_deliverer.py`` / the launchers.
@@ -10,6 +10,13 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
+from ..mux.base import Key
+
+#: One post-ready keystroke step: ``(text, press_enter)``. ``text`` is typed
+#: literally; a :class:`~fleet.mux.base.Key` (e.g. ``Key("Ctrl-u")``) is
+#: pressed as a key, translated to each multiplexer's syntax by the backend.
+KeystrokeStep = tuple[str | Key, bool]
 
 
 class VendorAdapter:
@@ -126,11 +133,13 @@ class VendorAdapter:
         return []
 
     @classmethod
-    def session_rename_keys(cls, name: str) -> list[tuple[str, bool]]:
+    def session_rename_keys(cls, name: str) -> list[KeystrokeStep]:
         """Post-ready keystroke steps to rename the session.
 
         For vendors with no launch-time naming flag. Each step is
-        ``(text, press_enter)``; the driver sends them in order once the
+        ``(text, press_enter)`` where ``text`` is either a string typed
+        literally or a :class:`~fleet.mux.base.Key` pressed as a key
+        (``Key("Ctrl-u")``); the driver sends them in order once the
         pane is ready. ``[]`` when naming happens at launch (see
         :meth:`session_name_launch_args`).
         """

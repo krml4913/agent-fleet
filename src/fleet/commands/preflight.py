@@ -1,7 +1,7 @@
 """``fleet preflight`` — environment dependency check.
 
-Verifies the toolbelt fleet relies on: Python version, tmux, workspace
-dependencies, and the agent CLIs (claude / codex). Required tools
+Verifies the toolbelt fleet relies on: Python version, the multiplexer
+(tmux), workspace dependencies, and the agent CLIs (claude / codex). Required tools
 missing → exit 1; optional tools missing → warn but continue.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .. import agents as agents_mod
+from .. import mux
 from .. import workspace as workspace_mod
 from .. import state as state_mod
 
@@ -60,7 +61,7 @@ def check_all() -> list[CheckResult]:
     git_required = _git_required_for_cwd(Path.cwd())
     return [
         _check_python(),
-        _check_command("tmux", ["tmux", "-V"], required=True),
+        _check_mux(),
         _check_command("git", ["git", "--version"], required=git_required),
         _check_command("claude", ["claude", "--version"], required=False),
         _check_command("codex", ["codex", "--version"], required=False),
@@ -77,6 +78,13 @@ def _check_python() -> CheckResult:
         else f"{sys.version.split()[0]}"
     )
     return CheckResult("python", ok, detail, required=True)
+
+
+def _check_mux() -> CheckResult:
+    """Check the selected multiplexer binary (``FLEET_MUX``, default tmux)."""
+    name = mux.backend_name()
+    version_flag = "-V" if name == "tmux" else "--version"
+    return _check_command(name, [name, version_flag], required=True)
 
 
 def _check_command(name: str, version_argv: list[str], *, required: bool) -> CheckResult:

@@ -22,7 +22,7 @@ from .. import leader_notifier
 from .. import workspace as workspace_mod
 from .. import state as state_mod
 from .. import task_context
-from .. import tmux as tmux_mod
+from .. import mux
 from ..events import append_event
 
 
@@ -66,18 +66,20 @@ def teardown(
     except Exception as e:  # noqa: BLE001 — workspace errors warn, don't block
         print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
 
-    # Drop tmux artefacts. The driver window lives in the task's owner session
+    # Drop multiplexer artefacts. The driver window lives in the task's owner session
     # (``fleet-<owner_session>``, Issue #166 §5.2), not a per-project session.
     label = state_mod.task_owner_session(task)
     session = f"fleet-{label}"
     buffer_name = f"fleet-task-{task_id}"
-    if tmux_mod.available():
-        if tmux_mod.session_exists(session):
+    m = mux.get()
+    if m.available():
+        if m.session_exists(session):
             try:
-                tmux_mod.kill_task_windows(session, task_id)
-            except tmux_mod.TmuxError as e:
+                mux.kill_task_windows(session, task_id, backend=m)
+            except mux.MuxError as e:
                 print(f"warn: kill_window failed: {e}", file=sys.stderr)
-        tmux_mod.delete_buffer(buffer_name)
+        # The manual-paste pointer staged at launch (tmux: named buffer).
+        m.drop_paste(buffer_name)
 
     # Stale-pending guard: evict this task's queued leader notifications so a
     # post-retirement notifier can't inject an "awaiting approval" for a task

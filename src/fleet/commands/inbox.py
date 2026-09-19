@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .. import state as state_mod
 from .. import task_context
-from .. import tmux as tmux_mod
+from .. import mux
 from ..events import append_event, utcnow_iso
 
 
@@ -84,7 +84,8 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
     resolve the session from the task rather than the project. The inbox.md write
     is independent of this — only the live tmux nudge depends on the pane.
     """
-    if not tmux_mod.available():
+    m = mux.get()
+    if not m.available():
         return
     try:
         task = state_mod.load_task(state_dir, task_id)
@@ -95,14 +96,14 @@ def _wake_driver_pane(state_dir: Path, task_id: str) -> None:
 
     fleet_bin = dp.fleet_agent_bin()
     try:
-        windows = tmux_mod.task_window_names(session, task_id)
+        windows = mux.task_window_names(session, task_id, backend=m)
         for window in windows:
-            tmux_mod.send_keys(
+            m.send_text(
                 session,
                 window,
                 f"[fleet] new message in inbox. run {fleet_bin} inbox-read to check",
             )
-    except tmux_mod.TmuxError:
+    except mux.MuxError:
         # Pane not found or session gone — warn and continue.
         print(
             f"warn: could not wake driver pane {session}:{task_id} (not spawned or already done)",
