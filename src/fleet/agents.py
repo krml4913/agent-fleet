@@ -70,16 +70,18 @@ def session_rename_keys(spec: str, name: str) -> list[KeystrokeStep]:
 
 
 def usage_from_session(
-    spec: str, *, cwd, home: Path | None = None
+    spec: str, *, cwd, home: Path | None = None, pointer: str | None = None
 ) -> dict[str, Any] | None:
     """RAW token usage for the agent ``spec`` that ran in ``cwd``, or ``None``.
 
     Bridges to the vendor adapter (parallel to :func:`cli_command`). The
     adapter reads its own already-written session log; ``None`` means the
     vendor reported nothing (no implementation, or a missing/unparseable log).
+    ``pointer`` narrows a shared ``cwd`` to the sessions one task's prompt
+    pointer started (see ``VendorAdapter.usage_from_session``).
     """
     vendor, _model = parse_spec(spec)
-    return REGISTRY[vendor].usage_from_session(cwd=cwd, home=home)
+    return REGISTRY[vendor].usage_from_session(cwd=cwd, home=home, pointer=pointer)
 
 
 def codex_repo_trusted(repo_root, *, config_path=None) -> bool:

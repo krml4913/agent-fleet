@@ -134,10 +134,6 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
 - **#260** optional `shell:` field for verify commands (they run under cmd.exe
   on Windows today).
 - **#261** re-run a live tmux E2E of multi-stage handoff after #253.
-- **#264** token usage is not recorded for workspace=none tasks. Side
-  effect of #262, which opens workspace=none driver panes in the project root
-  instead of the task dir: `state.record_task_usage` finds session logs by the
-  directory the agent ran in.
 
 ## 6. Where to look
 
