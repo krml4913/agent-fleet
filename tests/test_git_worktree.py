@@ -34,6 +34,12 @@ def _template_repo() -> Path:
     ``git init`` + ``add`` + ``commit`` is three process spawns (slow on
     Windows); ``shutil.copytree`` of the result gives each test an identical,
     fully independent repository.
+
+    Auto-maintenance / auto-gc is switched off in the repo config *before* the
+    commit: otherwise ``git commit`` may spawn a detached ``maintenance run
+    --auto`` that creates and removes ``.git/objects/maintenance.lock`` while
+    ``copytree`` walks the tree (#272). The setting lives in the copied config,
+    so every per-test copy stays quiet too.
     """
     global _template
     if _template is None:
@@ -44,6 +50,8 @@ def _template_repo() -> Path:
         env = {**os.environ, **_GIT_ENV_EXTRA}
         for args in (
             ("init", "-q", "-b", "main"),
+            ("config", "maintenance.auto", "false"),
+            ("config", "gc.auto", "0"),
             ("add", "README.md"),
             ("commit", "-q", "-m", "initial"),
         ):
@@ -64,7 +72,10 @@ class WorkspaceWorktreeTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
-        shutil.copytree(_template_repo(), self.project)
+        # Belt and suspenders for #272: never copy a transient lock file that a
+        # stray git process could delete mid-walk.
+        shutil.copytree(_template_repo(), self.project,
+                        ignore=shutil.ignore_patterns("*.lock"))
 
         self.git_env = os.environ.copy()
         self.git_env.update(_GIT_ENV_EXTRA)
