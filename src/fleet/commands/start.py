@@ -149,6 +149,10 @@ def launch_stage_driver(
         driver_env = {
             "FLEET_TASK_ID": task_id,
             "FLEET_STATE_DIR": str(state_dir),
+            # The owner session's label. tmux windows inherit it from the
+            # session env the leader created; zellij panes only see the
+            # server's env, so pass it explicitly (same value either way).
+            "FLEET_SESSION": owner_session,
             "PATH": f"{repo_root}{os.pathsep}{os.environ.get('PATH', '')}",
         }
         # Session display name so the user can tell resumable sessions apart

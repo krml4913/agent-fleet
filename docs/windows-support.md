@@ -548,6 +548,51 @@ and without a client attached; the prompt is delivered (`inbox_seen` ack);
 inbox wake-up and leader-notification injection work; cleanup closes the tab
 and ends the agent process.
 
+> Implemented. Refinements of the plan above:
+>
+> - **Pane env file** lives at `fleet-state/global/pane-env/<session>/<window>.json`
+>   (written by the backend, removed on `kill_window` / `kill_session`), not
+>   `<task_dir>/pane-env.json`: the backend stays mechanism-only and the leader
+>   pane uses the same path. The launcher is started by **file path**
+>   (`<python> -X utf8 <clone>/src/fleet/pane_launch.py --env-file … -- argv`)
+>   and is stdlib-only, so it needs no `PYTHONPATH` from the server env.
+>   Without argv it starts `%COMSPEC%` / `$SHELL`.
+> - **Marker stripping** keeps a short allow-list of user-configuration
+>   `CLAUDE_CODE_*` variables (`CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` /
+>   `_FOUNDRY`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_CODE_OAUTH_TOKEN`, …);
+>   every other `CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PID` is removed.
+> - **Agent CLI resolution** falls back to `~/.local/bin`, `~/.bun/bin`,
+>   `%APPDATA%\npm` and `%LOCALAPPDATA%\Microsoft\WinGet\Links` (that is how the
+>   native claude install is found when the Windows `PATH` lacks it).
+> - **Process exit on close.** The launcher records its own and the agent's
+>   pid next to the env file; `kill_window` waits (≤ 10 s) until both have
+>   exited. Without that, `cleanup` removed the worktree while `claude.exe`
+>   was still exiting, and Windows refused to delete its cwd. `cleanup` /
+>   `merge` teardown now also kills the windows **before** removing the
+>   worktree, and `git worktree remove` is retried briefly on Windows.
+> - **Keys:** zellij rejects `Escape`; the normalized `Escape` maps to `Esc`.
+>   `write-chars` / `paste` pass `--` before the text (text starting with `-`
+>   was parsed as an option). `send_text` waits 0.25 s between the text and
+>   `Enter`.
+> - **Missing session** made `action` exit 1 (not 0) on this machine in PR3
+>   testing; both are treated as failure, as is the `Session '…' not found`
+>   text.
+> - **Temp client** (#5594) is used when no client is attached and zellij is
+>   older than 0.46.0 (assumed fixed there); `FLEET_ZELLIJ_TEMP_CLIENT=0|1`
+>   overrides. The new tab is confirmed by a *new* tab id with a terminal
+>   pane (a pre-existing tab of the same name does not count).
+> - **Console flashes:** every non-attach zellij call uses
+>   `CREATE_NO_WINDOW`, so the console-less deliverer / notifier never pop
+>   a console window.
+> - **"About Zellij"** floating plugin: `attach -b … options
+>   --show-startup-tips false --show-release-notes false` did not suppress it
+>   on 0.45.1, so it is left alone (it only covers the leader tab until the
+>   user presses Esc).
+> - **Test guard:** `FLEET_NO_MUX` is a hard guard for zellij (every call
+>   raises), and the test helpers set it unless `FLEET_LIVE_TMUX` /
+>   `FLEET_LIVE_ZELLIJ` is set. Live zellij tests: `FLEET_LIVE_ZELLIJ=1
+>   python -m unittest tests.test_mux_zellij`.
+
 ### PR4 — Windows UX and docs (`windows-ux`)
 
 - zellij attach (§6.5).

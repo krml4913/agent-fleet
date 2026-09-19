@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import types
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -165,11 +164,9 @@ def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedPro
 
 class MuxBackendCheckTests(unittest.TestCase):
     def _name(self, *, env: dict[str, str], platform: str) -> str:
-        fake_mux = types.SimpleNamespace(BACKENDS=("tmux", "zellij"))
         with (
             unittest.mock.patch.dict(os.environ, env, clear=False),
-            unittest.mock.patch("fleet.commands.preflight.mux", fake_mux),
-            unittest.mock.patch("fleet.commands.preflight.sys.platform", platform),
+            unittest.mock.patch("fleet.mux.sys.platform", platform),
         ):
             if "FLEET_MUX" not in env:
                 os.environ.pop("FLEET_MUX", None)
@@ -184,16 +181,8 @@ class MuxBackendCheckTests(unittest.TestCase):
         self.assertEqual(self._name(env={}, platform="linux"), "tmux")
         self.assertEqual(self._name(env={}, platform="darwin"), "tmux")
 
-    def test_backend_name_prefers_mux_helper(self) -> None:
-        fake_mux = types.SimpleNamespace(
-            BACKENDS=("tmux", "zellij"), default_backend_name=lambda: "zellij"
-        )
-        with (
-            unittest.mock.patch.dict(os.environ, {}, clear=False),
-            unittest.mock.patch("fleet.commands.preflight.mux", fake_mux),
-            unittest.mock.patch("fleet.commands.preflight.sys.platform", "linux"),
-        ):
-            os.environ.pop("FLEET_MUX", None)
+    def test_backend_name_is_mux_backend_name(self) -> None:
+        with unittest.mock.patch("fleet.mux.backend_name", return_value="zellij"):
             self.assertEqual(preflight._mux_backend_name(), "zellij")
 
     def _check_mux(self, backend: str, *, which: str | None, stdout: str = "", rc: int = 0):

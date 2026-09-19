@@ -1,33 +1,43 @@
 """Terminal-multiplexer abstraction.
 
-Every tmux (and, later, zellij) interaction goes through the process-wide
+Every tmux / zellij interaction goes through the process-wide
 backend returned by :func:`get`. The backend is mechanism-only; the helpers in
 this module add the one piece of naming convention fleet needs at this layer —
 a task's windows are named ``<task>`` or ``<task>·<role>`` — on top of
 :meth:`Mux.list_windows`.
 
-Backend selection: ``FLEET_MUX`` (``tmux`` | ``zellij``), default ``tmux``.
+Backend selection: ``FLEET_MUX`` (``tmux`` | ``zellij``) wins; otherwise
+``zellij`` on Windows (``sys.platform == "win32"``) and ``tmux`` elsewhere.
 ``FLEET_NO_MUX`` (alias ``FLEET_NO_TMUX``) makes :meth:`Mux.available` false.
 """
 from __future__ import annotations
 
 import os
+import sys
 from typing import Sequence
 
 from .base import Key, Mux, MuxError, disabled_by_env, parse_key
 
 DEFAULT_BACKEND = "tmux"
+#: Default on native Windows (no tmux there; docs/windows-support.md §6.4).
+WINDOWS_DEFAULT_BACKEND = "zellij"
 BACKENDS: tuple[str, ...] = ("tmux", "zellij")
 
 _backend: Mux | None = None
 
 
+def default_backend_name() -> str:
+    """The platform default: ``zellij`` on Windows, ``tmux`` elsewhere."""
+    return WINDOWS_DEFAULT_BACKEND if sys.platform == "win32" else DEFAULT_BACKEND
+
+
 def backend_name() -> str:
-    """The configured backend name (``FLEET_MUX``, default ``tmux``).
+    """The configured backend name (``FLEET_MUX``, else the platform default).
 
     Does not validate or instantiate anything — :func:`get` does.
     """
-    return (os.environ.get("FLEET_MUX") or DEFAULT_BACKEND).strip().lower()
+    explicit = (os.environ.get("FLEET_MUX") or "").strip().lower()
+    return explicit or default_backend_name()
 
 
 def get() -> Mux:
@@ -56,7 +66,9 @@ def _create(name: str) -> Mux:
 
         return TmuxMux()
     if name == "zellij":
-        raise MuxError("zellij backend not implemented yet (FLEET_MUX=zellij)")
+        from .zellij import ZellijMux
+
+        return ZellijMux()
     raise MuxError(
         f"unknown multiplexer backend: FLEET_MUX={name!r} "
         f"(expected one of: {', '.join(BACKENDS)})"
@@ -121,10 +133,12 @@ def send_step(
 __all__ = [
     "BACKENDS",
     "DEFAULT_BACKEND",
+    "WINDOWS_DEFAULT_BACKEND",
     "Key",
     "Mux",
     "MuxError",
     "backend_name",
+    "default_backend_name",
     "disabled_by_env",
     "get",
     "kill_task_windows",

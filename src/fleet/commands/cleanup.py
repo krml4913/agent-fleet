@@ -39,10 +39,11 @@ def teardown(
 ) -> bool:
     """Physical teardown shared by ``cleanup`` and ``merge``.
 
-    Runs the workspace ``on_cleanup`` hook (worktree remove + local
-    ``branch -D`` when workspace=worktree), kills the task's tmux window,
-    drops its prompt buffer, and—when ``archive`` is set—moves the task dir
-    under ``tasks/_archive/``. Returns whether the dir was archived.
+    Kills the task's multiplexer windows (first: on Windows the running agent
+    would keep its worktree cwd from being deleted), drops its prompt buffer,
+    runs the workspace ``on_cleanup`` hook (worktree remove + local
+    ``branch -D`` when workspace=worktree), and—when ``archive`` is set—moves
+    the task dir under ``tasks/_archive/``. Returns whether the dir was archived.
 
     Does NOT emit an event or rebuild the dashboard; each caller does that
     with its own event type.
@@ -61,12 +62,9 @@ def teardown(
         "task": task,
         "project_root": resolved_root,
     }
-    try:
-        workspace_mod.on_cleanup(ctx)
-    except Exception as e:  # noqa: BLE001 — workspace errors warn, don't block
-        print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
-
-    # Drop multiplexer artefacts. The driver window lives in the task's owner session
+    # Drop multiplexer artefacts FIRST: the agent's cwd is inside the worktree,
+    # and Windows refuses to delete a directory a running process sits in.
+    # The driver window lives in the task's owner session
     # (``fleet-<owner_session>``, Issue #166 §5.2), not a per-project session.
     label = state_mod.task_owner_session(task)
     session = f"fleet-{label}"
@@ -80,6 +78,11 @@ def teardown(
                 print(f"warn: kill_window failed: {e}", file=sys.stderr)
         # The manual-paste pointer staged at launch (tmux: named buffer).
         m.drop_paste(buffer_name)
+
+    try:
+        workspace_mod.on_cleanup(ctx)
+    except Exception as e:  # noqa: BLE001 — workspace errors warn, don't block
+        print(f"warn: workspace on_cleanup failed: {e}", file=sys.stderr)
 
     # Stale-pending guard: evict this task's queued leader notifications so a
     # post-retirement notifier can't inject an "awaiting approval" for a task

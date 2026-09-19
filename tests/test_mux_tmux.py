@@ -499,10 +499,28 @@ class BackendSelectionTests(unittest.TestCase):
             env["FLEET_MUX"] = value
         return unittest.mock.patch.dict(os.environ, env, clear=True)
 
-    def test_default_is_tmux(self) -> None:
-        with self._env(None):
+    def test_default_is_tmux_off_windows(self) -> None:
+        for platform in ("linux", "darwin"):
+            with self._env(None), unittest.mock.patch("fleet.mux.sys.platform", platform):
+                self.assertEqual(mux.default_backend_name(), "tmux")
+                self.assertEqual(mux.backend_name(), "tmux")
+                mux.set_backend(None)
+                self.assertIsInstance(mux.get(), TmuxMux)
+            mux.set_backend(None)
+
+    def test_default_is_zellij_on_windows(self) -> None:
+        from fleet.mux.zellij import ZellijMux
+
+        with self._env(None), unittest.mock.patch("fleet.mux.sys.platform", "win32"):
+            self.assertEqual(mux.default_backend_name(), "zellij")
+            self.assertEqual(mux.backend_name(), "zellij")
+            self.assertIsInstance(mux.get(), ZellijMux)
+
+    def test_env_wins_over_platform_default(self) -> None:
+        with self._env("tmux"), unittest.mock.patch("fleet.mux.sys.platform", "win32"):
             self.assertEqual(mux.backend_name(), "tmux")
-            self.assertIsInstance(mux.get(), TmuxMux)
+        with self._env("zellij"), unittest.mock.patch("fleet.mux.sys.platform", "linux"):
+            self.assertEqual(mux.backend_name(), "zellij")
 
     def test_explicit_tmux(self) -> None:
         with self._env(" TMUX "):
@@ -512,11 +530,11 @@ class BackendSelectionTests(unittest.TestCase):
         with self._env(None):
             self.assertIs(mux.get(), mux.get())
 
-    def test_zellij_not_implemented_yet(self) -> None:
+    def test_explicit_zellij(self) -> None:
+        from fleet.mux.zellij import ZellijMux
+
         with self._env("zellij"):
-            with self.assertRaises(MuxError) as cm:
-                mux.get()
-        self.assertIn("zellij backend not implemented yet", str(cm.exception))
+            self.assertIsInstance(mux.get(), ZellijMux)
 
     def test_unknown_backend(self) -> None:
         with self._env("screen"):

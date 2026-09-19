@@ -117,15 +117,9 @@ def _mux_backend_name() -> str:
     """The configured multiplexer backend name, without importing a backend.
 
     ``FLEET_MUX`` if set, else the platform default (zellij on Windows, tmux
-    elsewhere) — prefers ``fleet.mux.default_backend_name()`` when present.
+    elsewhere) — see :func:`fleet.mux.backend_name`.
     """
-    env = (os.environ.get("FLEET_MUX") or "").strip().lower()
-    if env:
-        return env
-    default = getattr(mux, "default_backend_name", None)
-    if callable(default):
-        return str(default()).strip().lower()
-    return "zellij" if _is_windows() else "tmux"
+    return mux.backend_name()
 
 
 def _check_mux() -> CheckResult:
