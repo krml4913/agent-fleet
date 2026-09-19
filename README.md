@@ -128,7 +128,7 @@ the core of the felt experience:
 
 ```bash
 ~/dev/agent-fleet/fleet attach status-json-flag   # a task's driver pane
-~/dev/agent-fleet/fleet attach                     # the leader (default target)
+~/dev/agent-fleet/fleet attach                     # the leader (default target; --session LABEL for another leader session)
 ```
 
 You land directly in the live agent session — read its output, type into it,
@@ -228,8 +228,8 @@ not killed for you — fleet warns if it spots one still running.
 |---|---|
 | `fleet preflight` | Check Python / multiplexer (tmux or zellij) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
-| `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane (default agent `claude:opus`). |
-| `fleet attach [target] [--project P]` | Attach to the leader (default) or a task driver pane. |
+| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`, default agent `claude:opus`). |
+| `fleet attach [target] [--project P] [--session LABEL]` | Attach to a task's driver pane (in the session that owns the task, `fleet-<owner_session>`; `--project` locates the task) or, by default, to the `leader` pane of `fleet-<LABEL>` (`--session`, default `$FLEET_SESSION`, else `main`). Lists the live sessions if the target one isn't running. |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | Print project info, task list, recent events. With `--all`, filters to the session's scope by default; `--unscoped` shows all projects. |
 | `fleet sessions` | List leader sessions and their in-flight tasks across all projects. |
 | `fleet dashboard [--no-open]` | Render & open the cross-project HTML dashboard (`fleet-state/global/dashboard.html`). |

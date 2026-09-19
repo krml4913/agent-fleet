@@ -134,7 +134,7 @@ driver の肩越しに覗いたり引き継いだりするには、そのペイ�
 
 ```bash
 ~/dev/agent-fleet/fleet attach status-json-flag   # このタスクの driver ペイン
-~/dev/agent-fleet/fleet attach                     # leader（デフォルトターゲット）
+~/dev/agent-fleet/fleet attach                     # leader（デフォルトターゲット。別の leader セッションは --session LABEL）
 ```
 
 ライブのエージェントセッションに直接降り立つ —— 出力を読み、入力し、軌道を修正し、
@@ -234,8 +234,8 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 |---|---|
 | `fleet preflight` | Python / マルチプレクサ（tmux または zellij）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
-| `fleet leader [--project P] [--agent SPEC] [--attach]` | leader ペインを起動 / アタッチする（デフォルトエージェント `claude:opus`）。 |
-| `fleet attach [target] [--project P]` | leader（デフォルト）またはタスク driver ペインにアタッチする。 |
+| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`、デフォルトエージェントは `claude:opus`）。 |
+| `fleet attach [target] [--project P] [--session LABEL]` | タスクの driver ペイン（そのタスクを所有するセッション `fleet-<owner_session>` 内。`--project` でタスクを特定）、またはデフォルトで `fleet-<LABEL>` の `leader` ペインにアタッチする（`--session`、デフォルトは `$FLEET_SESSION`、なければ `main`）。対象セッションが動いていなければ、稼働中のセッションを一覧表示する。 |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | プロジェクト情報、タスク一覧、直近のイベントを表示する。`--all` 時はセッションの scope 内 project のみ表示（`--unscoped` で全件）。 |
 | `fleet sessions` | leader セッションと全 PJ の実行中タスクを一覧表示する。 |
 | `fleet dashboard [--no-open]` | 全 PJ 横断 HTML ダッシュボード（`fleet-state/global/dashboard.html`）を生成してブラウザで開く。 |
