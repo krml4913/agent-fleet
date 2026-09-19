@@ -57,6 +57,8 @@ All merged to `main` with merge commits, CI green (Linux 3.11–3.13 plus a
 | #253 | `zellij-e2e-stages` | `src/fleet/deferred_launch.py` (stage handoff when closing a tab would kill the caller), in-pane tab launch fix, cmd.exe cp932 decoding |
 | #254 | `test-speedup` | In-process CLI in tests (`FLEET_TEST_SUBPROCESS=1` restores subprocesses), `tests/run_parallel.py` (~9 s for about 1000 tests) |
 | #255 | `driver-workdir` | The driver prompt names the working directory (worktree + branch, or the project root) and forbids editing `fleet-state/` directly; the pane launcher also strips `CLAUDE_EFFORT` and `AI_AGENT` |
+| #262 | `none-pane-cwd` | workspace=none driver panes open in the project root, not the task dir under `fleet-state/` (task dir only as a fallback) |
+| #263 | `windows-handoff` | This handoff note; `windows-support.md` §11 links each open item to its issue |
 
 Backend selection: `FLEET_MUX=tmux|zellij` overrides the default (zellij on
 win32, tmux elsewhere). `FLEET_NO_MUX` disables the multiplexer (tests).
@@ -132,10 +134,10 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
 - **#260** optional `shell:` field for verify commands (they run under cmd.exe
   on Windows today).
 - **#261** re-run a live tmux E2E of multi-stage handoff after #253.
-- **Pane working directory for workspace=none**: the driver pane opens in the
-  task dir under `fleet-state/` instead of the project root. This was the last
-  PR in progress at handoff time; check whether it merged
-  (`gh pr list --state all --search none-pane-cwd`).
+- **#264** token usage is not recorded for workspace=none tasks. Side
+  effect of #262, which opens workspace=none driver panes in the project root
+  instead of the task dir: `state.record_task_usage` finds session logs by the
+  directory the agent ran in.
 
 ## 6. Where to look
 

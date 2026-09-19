@@ -727,6 +727,9 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   Today they run under `cmd.exe` on Windows (§5 #12).
 - **Re-check multi-stage handoff on tmux** (#261). #253 changed the handoff
   path for zellij only; tmux is covered by unit tests but was not re-run live.
+- **Token usage is not recorded for workspace=none tasks** (#264), a side
+  effect of #262 (their panes now open in the project root, and
+  `state.record_task_usage` looks up session logs by the task dir).
 
 The `multi_stage` handoff and the verify gate under zellij (§8 steps 6–7)
 were verified end to end and fixed in #253.
