@@ -240,6 +240,7 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet formation seed <name> [--global] [--project P] [--force]` | Copy a shipped formation seed into the project (default) or global tier; refuses to overwrite unless `--force`. |
 | `fleet role seed <name> [--global] [--project P] [--force]` | Copy a shipped role prompt (`docs/prompts/roles/`) into the project (default) or global tier; refuses to overwrite unless `--force`. |
 | `fleet workspace list \| set <mode>` | Show or set the workspace mode (`worktree` / `none`). |
+| `fleet notify [--project P] [on\|off\|status]` | Show (no arg / `status`) or set the opt-in leader-pane push (`notify_leader_on_driver_done` in `project.yaml`, default off): when on, a driver's `done` / approval gate is injected into the owning leader's pane. Takes effect on the next `done`. |
 | `fleet rm <name> [--yes]` | Unregister a project and delete its state. |
 
 ### `fleet-agent` — the agent CLI

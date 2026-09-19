@@ -245,6 +245,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet formation seed <name> [--global] [--project P] [--force]` | 同梱の formation seed を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet role seed <name> [--global] [--project P] [--force]` | 同梱の role プロンプト（`docs/prompts/roles/`）を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet workspace list \| set <mode>` | workspace モード（`worktree` / `none`）を表示または設定する。 |
+| `fleet notify [--project P] [on\|off\|status]` | オプトインの leader ペインへのプッシュ（`project.yaml` の `notify_leader_on_driver_done`、デフォルト off）を表示（引数なし / `status`）または設定する。on の間は driver の `done` / 承認ゲートが担当 leader のペインに注入される。次回の `done` から有効。 |
 | `fleet rm <name> [--yes]` | プロジェクトの登録を解除し、その state を削除する。 |
 
 ### `fleet-agent` — エージェント用 CLI
