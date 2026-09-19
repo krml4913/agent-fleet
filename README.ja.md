@@ -262,7 +262,10 @@ leader 側:
 | `fleet-agent send-prompt <id>` | `driver-prompt.md` のポインタをタスクペインに（再）配信する。 |
 | `fleet-agent approve <id>` | 保留中の `user_approval` ゲートに対するユーザー承認を中継する。 |
 | `fleet-agent reject <id>` | ユーザーの却下を中継する。stage は実装に戻る。 |
-| `fleet-agent cleanup <id> [--archive] [--force]` | 完了したタスクを撤去する。 |
+| `fleet-agent cleanup <id> [--archive] [--force] [--allow-from-driver]` | 完了したタスクを撤去する。 |
+| `fleet-agent merge <id> [--squash] [--keep] [--force] [--allow-from-driver]` | タスクの PR をマージし、撤去とアーカイブまで行う。 |
+
+`merge` / `cleanup` は leader 専用で、driver ペインからは実行を拒否される（`FLEET_TASK_ID` で判定）。`--allow-from-driver` はこのソフトガードを意図的に上書きする（`--force` では上書きされない）。
 
 driver 側（driver ペイン内で実行。`FLEET_TASK_ID` は設定済み）:
 

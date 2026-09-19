@@ -31,6 +31,7 @@ from pathlib import Path
 from . import state as state_mod
 from .events import append_event
 from .proc import spawn_detached
+from .task_context import driver_pane_task_id
 
 #: How long the helper waits for the calling ``done`` process to exit before
 #: launching anyway (the launch stays correct either way; waiting only avoids
@@ -52,7 +53,7 @@ def running_in_task_pane(task_id: str) -> bool:
     Driver panes get ``FLEET_TASK_ID`` from ``launch_stage_driver``; the leader
     pane and a user's own terminal do not.
     """
-    return os.environ.get("FLEET_TASK_ID", "") == str(task_id)
+    return driver_pane_task_id() == str(task_id)
 
 
 def start_detached(

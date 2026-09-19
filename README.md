@@ -257,7 +257,10 @@ Leader-side:
 | `fleet-agent send-prompt <id>` | (Re)deliver the `driver-prompt.md` pointer into the task pane. |
 | `fleet-agent approve <id>` | Relay user approval for a pending `user_approval` gate. |
 | `fleet-agent reject <id>` | Relay user rejection; the stage returns to implementation. |
-| `fleet-agent cleanup <id> [--archive] [--force]` | Tear down a finished task. |
+| `fleet-agent cleanup <id> [--archive] [--force] [--allow-from-driver]` | Tear down a finished task. |
+| `fleet-agent merge <id> [--squash] [--keep] [--force] [--allow-from-driver]` | Merge the task's PR, then tear down and archive. |
+
+`merge` / `cleanup` are leader-only and refuse to run from a driver pane (detected via `FLEET_TASK_ID`); `--allow-from-driver` overrides that soft guard on purpose (`--force` does not).
 
 Driver-side (run inside a driver pane; `FLEET_TASK_ID` is pre-set):
 

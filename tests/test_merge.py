@@ -223,8 +223,10 @@ class MergeCmdTests(unittest.TestCase):
         env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
 
         err = io.StringIO()
-        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run",
-                      side_effect=lambda *a, **k: called.append(a) or _ok()),                 redirect_stderr(err):
+        with patch.dict(os.environ, env, clear=False), \
+                patch("fleet.commands.merge.subprocess.run",
+                      side_effect=lambda *a, **k: called.append(a) or _ok()), \
+                redirect_stderr(err):
             rc = merge_mod.run(self._args("1"))
 
         self.assertEqual(rc, 1)
@@ -238,7 +240,9 @@ class MergeCmdTests(unittest.TestCase):
         # --force means "skip the terminal-status guard", not "I am the leader".
         self._save("1", "running", branch="demo/task/1")
         env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
-        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok) as run_mock,                 redirect_stderr(io.StringIO()):
+        with patch.dict(os.environ, env, clear=False), \
+                patch("fleet.commands.merge.subprocess.run", side_effect=_ok) as run_mock, \
+                redirect_stderr(io.StringIO()):
             rc = merge_mod.run(self._args("1", force=True))
         self.assertEqual(rc, 1)
         run_mock.assert_not_called()
@@ -246,7 +250,9 @@ class MergeCmdTests(unittest.TestCase):
     def test_allow_from_driver_overrides_guard(self) -> None:
         self._save("1", "completed", branch="demo/task/1")
         env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
-        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok),                 use_fake_mux(available=False):
+        with patch.dict(os.environ, env, clear=False), \
+                patch("fleet.commands.merge.subprocess.run", side_effect=_ok), \
+                use_fake_mux(available=False):
             rc = merge_mod.run(self._args("1", allow_from_driver=True))
         self.assertEqual(rc, 0)
         self.assertTrue(any(e["type"] == "merge" for e in self._events()))
