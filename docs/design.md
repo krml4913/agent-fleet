@@ -850,7 +850,9 @@ cross-stage advance launches the next stage's driver fresh.
     stage-completion handling.
   - reject: returns `user_approval.status` to `pending` and sends the stage
     back to implementation. In a peer_review stage, it wakes the existing
-    implementer pane.
+    implementer pane. Every reject first appends a `[fleet reject]` block to the
+    task inbox (with the optional `--reason` / `--reason-file` text, also recorded
+    on the `reject` event) so a relaunched driver can tell it was rejected.
 - `awaiting_orders` is a human-decision pause: only `fleet-agent approve`/`reject`
   settle it; a driver's `done` is a no-op while a task awaits that decision (it
   cannot self-clear a `user_approval` gate or a peer_review escalation).

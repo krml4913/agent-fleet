@@ -715,6 +715,77 @@ class UserApprovalGateTests(unittest.TestCase):
         inbox = state.task_dir(self.sd, "35a") / "inbox.md"
         self.assertIn("role=implementer", inbox.read_text(encoding="utf-8"))
 
+    def test_user_reject_relaunch_without_peer_review_tells_driver_it_was_rejected(self) -> None:
+        # The #285 scenario: no peer_review, so the relaunched driver used to see
+        # only the stale [fleet verify] message and re-submit unchanged work.
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        task = _make_task(self.sd, "rj1", stages, formation="solo")
+        inbox = state.task_dir(self.sd, "rj1") / "inbox.md"
+        inbox.write_text("### t\n\n[fleet verify] old\n\n", encoding="utf-8")
+
+        seen_at_launch: list[str] = []
+
+        def _fake_launch(*args, **kwargs) -> None:
+            seen_at_launch.append(inbox.read_text(encoding="utf-8"))
+
+        with unittest.mock.patch("fleet.orchestrator._launch_driver_for_stage", _fake_launch):
+            orchestrator.reject_user_approval(self.sd, "rj1", task, reason="handle empty input")
+
+        self.assertEqual(len(seen_at_launch), 1)
+        # Appended BEFORE the relaunch, after the stale message.
+        launched_inbox = seen_at_launch[0]
+        self.assertIn("[fleet reject]", launched_inbox)
+        self.assertIn("handle empty input", launched_inbox)
+        self.assertLess(launched_inbox.index("[fleet verify]"), launched_inbox.index("[fleet reject]"))
+        self.assertIn("Do not re-submit unchanged work", launched_inbox)
+
+    def test_user_reject_peer_review_gets_reject_block_before_handoff(self) -> None:
+        stages = [
+            {
+                "role": "implementer",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "peer_review": {"role": "code-reviewer", "phase": "approved", "iteration": 1},
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        task = _make_task(self.sd, "rj2", stages)
+
+        with use_fake_mux(sessions={"fleet-main": ["leader", "rj2·implementer"]}) as fake:
+            orchestrator.reject_user_approval(self.sd, "rj2", task, reason="rename the flag")
+
+        text = (state.task_dir(self.sd, "rj2") / "inbox.md").read_text(encoding="utf-8")
+        self.assertIn("[fleet reject]", text)
+        self.assertIn("rename the flag", text)
+        self.assertIn("[fleet handoff] role=implementer phase=implementing", text)
+        self.assertLess(text.index("[fleet reject]"), text.index("[fleet handoff]"))
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+
+    def test_user_reject_dry_run_without_reason_asks_driver_to_ask(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "user_approval": {"required": True, "status": "asked"},
+            }
+        ]
+        task = _make_task(self.sd, "rj3", stages, formation="solo")
+
+        orchestrator.reject_user_approval(self.sd, "rj3", task, dry_run=True)
+
+        text = (state.task_dir(self.sd, "rj3") / "inbox.md").read_text(encoding="utf-8")
+        self.assertIn("[fleet reject]", text)
+        self.assertIn("No reason was given", text)
+        self.assertIn('ask "<question>"', text)
+
     # ── user_approval.status yaml fields updated correctly ────────────────
 
     def test_user_approval_status_field_in_yaml(self) -> None:

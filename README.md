@@ -256,7 +256,7 @@ Leader-side:
 | `fleet-agent inbox <id> "<msg>"` | Append a timestamped note to a driver's `inbox.md` and wake the pane. |
 | `fleet-agent send-prompt <id>` | (Re)deliver the `driver-prompt.md` pointer into the task pane. |
 | `fleet-agent approve <id>` | Relay user approval for a pending `user_approval` gate. |
-| `fleet-agent reject <id>` | Relay user rejection; the stage returns to implementation. |
+| `fleet-agent reject <id> [--reason TEXT \| --reason-file PATH]` | Relay user rejection; the stage returns to implementation. The driver's inbox gets a `[fleet reject]` note carrying the reason. |
 | `fleet-agent cleanup <id> [--archive] [--force] [--allow-from-driver]` | Tear down a finished task. |
 | `fleet-agent merge <id> [--squash] [--keep] [--force] [--allow-from-driver]` | Merge the task's PR, then tear down and archive. |
 

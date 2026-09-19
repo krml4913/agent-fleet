@@ -261,7 +261,7 @@ leader 側:
 | `fleet-agent inbox <id> "<msg>"` | driver の `inbox.md` にタイムスタンプ付きのメモを追記し、ペインを起こす。 |
 | `fleet-agent send-prompt <id>` | `driver-prompt.md` のポインタをタスクペインに（再）配信する。 |
 | `fleet-agent approve <id>` | 保留中の `user_approval` ゲートに対するユーザー承認を中継する。 |
-| `fleet-agent reject <id>` | ユーザーの却下を中継する。stage は実装に戻る。 |
+| `fleet-agent reject <id> [--reason TEXT \| --reason-file PATH]` | ユーザーの却下を中継する。stage は実装に戻る。driver の inbox に理由付きの `[fleet reject]` が届く。 |
 | `fleet-agent cleanup <id> [--archive] [--force] [--allow-from-driver]` | 完了したタスクを撤去する。 |
 | `fleet-agent merge <id> [--squash] [--keep] [--force] [--allow-from-driver]` | タスクの PR をマージし、撤去とアーカイブまで行う。 |
 

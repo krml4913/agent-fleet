@@ -183,6 +183,8 @@ Behavior:
   policy grants that authority. The decision is relayed via `fleet-agent approve
   <id>` / `fleet-agent reject <id>`.
 - On reject, the stage returns to implementation (if there is a `peer_review`, the implementer pane is woken).
+  Either way a `[fleet reject]` note (with the `--reason` / `--reason-file` text when given) is appended to the
+  driver's inbox first, so the driver knows it was rejected and does not re-submit unchanged work.
 
 The approval call belongs to the approver — user by default, delegated leader
 only when project policy says so. A driver calling `fleet-agent done` at the gate
@@ -418,7 +420,7 @@ approval/review/check boundaries cannot silently disappear through a typo
 | `fleet role seed <name> [--global] [--project P] [--force]` | Copy a shipped role prompt into the project (default) or global tier (same overwrite rule). |
 | `fleet-agent start <task-id> --formation <name>` | Resolve the formation and launch the task. |
 | `fleet-agent approve <task-id>` | Relay user approval for the current `user_approval` gate. |
-| `fleet-agent reject <task-id>` | Relay user rejection; the stage returns to implementation. |
+| `fleet-agent reject <task-id> [--reason TEXT \| --reason-file PATH]` | Relay user rejection; the stage returns to implementation. |
 
 For full flags, see `fleet formation --help` and `fleet-agent start --help`.
 

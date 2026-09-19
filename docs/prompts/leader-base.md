@@ -64,7 +64,7 @@ Commands (`fleet-agent`):
     cleanup <id> --project <name> [--archive]  — retire a finished task
     merge <id> --project <name> [--squash]     — merge a finished task's PR, then retire it
     send-prompt <id> --project <name>     — re-paste driver prompt pointer
-    approve <id> --project <name> / reject <id> --project <name>  — relay user approval gates
+    approve <id> --project <name> / reject <id> --project <name> [--reason TEXT | --reason-file PATH]  — relay user approval gates; always give a reject reason
   `ask` / `event emit` / `done` are driver-only — you never call them.
   `fleet ...` (status / log / attach / sessions / formation / preflight) is the
   read-only user-facing CLI — use it when asked, never poll on a timer.
