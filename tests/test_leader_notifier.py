@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import leader_notifier, state  # noqa: E402
+from fleet import leader_notifier, mux, state  # noqa: E402
 from fleet.commands import ask as ask_cmd  # noqa: E402
 from fleet.commands import done as done_cmd  # noqa: E402
 from tests import _pane_fixtures as pane_fx  # noqa: E402
@@ -673,6 +673,244 @@ class LeaderNotifierTests(unittest.TestCase):
         finally:
             leader_notifier._release_lock(fp)
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+        self.assertIn("lock held by another notifier", self._log())
+
+    # -- transient mux errors (Issue #292) ---------------------------------
+
+    def _log(self) -> str:
+        path = leader_notifier.log_path(self.session_dir)
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def _notify(self, *, timeout: float = 5.0) -> int:
+        return leader_notifier.notify(
+            session_dir=self.session_dir,
+            session="fleet-main",
+            window="leader",
+            agent_spec="claude:opus",
+            timeout=timeout,
+            poll_interval=0.001,
+        )
+
+    def test_transient_capture_error_does_not_strand_the_queue(self) -> None:
+        # #292: one "tab not found" from capture used to end the poller with the
+        # record left queued. It must keep polling and flush at the next idle.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            fake.fail_next("capture", mux.MuxError("zellij tab not found"), times=3)
+            rc = self._notify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        log = self._log()
+        self.assertEqual(log.count("capture failed (transient"), 1)  # low volume: once, not per poll
+        self.assertIn("zellij tab not found", log)
+        self.assertIn("flushed 1 record(s)", log)
+
+    def test_persistent_capture_error_rearms_like_the_busy_case(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            fake.fail["capture"] = mux.MuxError("zellij tab not found")
+            rc = self._notify(timeout=0.05)
+        self.assertEqual(rc, 0)
+        self.assertGreater(len(fake.calls_named("capture")), 1)  # kept polling
+        self.assertEqual(fake.calls_named("send_text"), [])
+        rearm.assert_called_once()  # handed to a successor, not abandoned
+        self.assertEqual(rearm.call_args.kwargs["reason"], "re-arm")
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+        self.assertIn("re-arming a successor", self._log())
+
+    def test_single_false_session_exists_is_transient(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        checks = {"n": 0}
+        with (
+            use_fake_mux(capture=READY_PANE) as fake,  # session not listed at first
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+
+            def session_back_on_second_check(*_a, **_k) -> None:
+                checks["n"] += 1
+                if checks["n"] >= 2:
+                    fake.sessions["fleet-main"] = ["leader"]
+
+            fake.on["session_exists"] = session_back_on_second_check
+            rc = self._notify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(fake.calls_named("send_text")), 1)  # did not give up on the first False
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        self.assertIn("was False once but is back", self._log())
+
+    def test_session_confirmed_gone_gives_up_without_rearm(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={}) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            rc = self._notify(timeout=0.05)
+        self.assertEqual(rc, 0)
+        rearm.assert_not_called()
+        # confirmed by SESSION_RECHECKS consecutive checks, not by the first False
+        self.assertEqual(
+            len(fake.calls_named("session_exists")), leader_notifier.SESSION_RECHECKS + 1
+        )
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+        self.assertIn("confirmed gone", self._log())
+
+    def test_session_gone_at_the_deadline_is_not_rearmed(self) -> None:
+        # The leader went away while busy: no successor, the record stays queued.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=BUSY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            calls = {"n": 0}
+
+            def vanish_after_first_poll(*_a, **_k) -> None:
+                calls["n"] += 1
+                if calls["n"] >= 2:
+                    fake.sessions.pop("fleet-main", None)
+
+            fake.on["session_exists"] = vanish_after_first_poll
+            self._notify(timeout=0.05)
+        rearm.assert_not_called()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+    def test_confirming_capture_error_is_transient_and_types_nothing(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            # 1st capture (poll) fine, 2nd (the confirming one) fails, then all fine.
+            calls = {"n": 0}
+
+            def fail_confirming_capture(*_a, **_k) -> None:
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    raise mux.MuxError("zellij tab not found")
+
+            fake.on["capture"] = fail_confirming_capture
+            rc = self._notify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(fake.calls_named("send_text")), 1)  # exactly one injection
+        # ...and it happened after the failed confirming capture, never before.
+        names = fake.method_names()
+        self.assertGreaterEqual(names[: names.index("send_text")].count("capture"), 3)
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        self.assertIn("confirming capture failed", self._log())
+
+    def test_send_failure_still_leaves_the_record_queued(self) -> None:
+        # #290 behaviour kept: a failed send may have half typed the text, so it
+        # is not retried blindly (that could double-inject).
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            fake.fail["send_text"] = mux.MuxError("boom")
+            rc = self._notify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+        rearm.assert_not_called()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+        self.assertIn("send_text failed on the mux", self._log())
+
+    # -- leader-notifier.log ------------------------------------------------
+
+    def test_log_records_start_busy_wait_and_deadline_rearm(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=BUSY_PANE),
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            self._notify(timeout=0.05)
+        log = self._log()
+        self.assertIn("started: session=fleet-main window=leader agent=claude:opus timeout=0.05s", log)
+        self.assertEqual(log.count("leader not idle"), 1)  # once, not once per poll
+        self.assertIn("deadline 0.05s reached: 1 record(s) pending; re-arming a successor", log)
+        self.assertRegex(log.splitlines()[0], r"^\d{4}-\d\d-\d\dT[\d:]+Z? \[pid \d+\] started")
+
+    def test_log_records_flush_and_empty_queue_exit(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("2"))
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE):
+            self._notify()
+        log = self._log()
+        self.assertIn("flushed 2 record(s) ['1', '2']: submit_confirmed=", log)
+        self.assertIn("exit: queue empty", log)
+
+    def test_start_detached_logs_spawn_pid_and_timeout(self) -> None:
+        proc = type("Proc", (), {"pid": 4242})()
+        with patch("fleet.leader_notifier.spawn_detached", return_value=proc) as spawn:
+            path = leader_notifier.start_detached(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=30.0,
+                reason="re-arm",
+            )
+        self.assertEqual(path, leader_notifier.log_path(self.session_dir))
+        self.assertEqual(spawn.call_args.kwargs["log_path"], path)
+        self.assertIn("spawn (re-arm): notifier pid=4242 session=fleet-main timeout=30s", self._log())
+
+    # -- delivery-failed records (Issue #289) -------------------------------
+
+    def _failed_record(self, task_id: str, **over) -> dict:
+        return self._record(
+            task_id,
+            status="failed",
+            kind=leader_notifier.KIND_DELIVERY_FAILED,
+            summary="prompt deliverer cannot paste prompt: zellij tab not found",
+            project="demo",
+            **over,
+        )
+
+    def test_delivery_failed_record_skips_pr_lookup_and_names_send_prompt(self) -> None:
+        self._seed_task("5", pr_url="https://github.com/o/r/pull/1")
+        rec = self._failed_record("5")
+        self.assertEqual(rec["kind"], "delivery_failed")
+        self.assertIsNone(rec["pr_url"])  # not scanned even though the outbox has one
+        text = leader_notifier.render_block([rec])
+        self.assertNotIn("\n", text)
+        self.assertIn("task-5 [delivery failed] prompt deliverer cannot paste prompt", text)
+        self.assertIn("retry with: fleet-agent send-prompt 5 --project demo", text)
+        self.assertNotIn("pull the diff", text)  # not a gate
+
+    def test_delivery_failed_never_triggers_a_pr_refill(self) -> None:
+        rec = self._failed_record("5")
+        with patch.object(leader_notifier, "scan_pr_url") as scan:
+            leader_notifier._refill_pr_urls([rec])
+        scan.assert_not_called()
+
+    def test_mixed_batch_keeps_each_instruction(self) -> None:
+        text = leader_notifier.render_block(
+            [self._record("1"), self._failed_record("2")]
+        )
+        self.assertIn("NOT marked [ask] or [delivery failed]: pull the diff", text)
+        self.assertIn("[delivery failed] entry:", text)
+        self.assertNotIn("[ask] entry", text)
+        text = leader_notifier.render_block(
+            [self._record("1"), self._failed_record("2"), self._record("3", kind="ask", question="q?")]
+        )
+        self.assertIn("For each [ask] entry:", text)
+        self.assertIn("For each [delivery failed] entry:", text)
+
+    def test_delivery_failed_record_is_flushed_to_the_leader(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._failed_record("2"))
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake:
+            self._notify()
+        (kind, _window, payload) = [e for e in fake.sent() if e[0] == "text"][0]
+        self.assertIn("fleet-agent send-prompt 2 --project demo", payload)
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
 
 
 class PrUrlLookupTests(unittest.TestCase):

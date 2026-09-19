@@ -41,6 +41,16 @@ keeps watching for the next idle boundary. Each poller stays short-lived (daemon
 less), but the chain guarantees a busy leader is eventually caught — the queue is
 only dropped from a *retirement* path (``merge`` / ``cleanup`` call
 :func:`clear_task_records`), never silently on timeout.
+
+A single multiplexer hiccup must not strand the queue either (Issue #292): a
+``MuxError`` from ``capture`` and one ``session_exists() == False`` are transient
+(zellij briefly lists panes inconsistently while another tab is closed, see
+docs/windows-support.md §4.8). The poller keeps going until the deadline and
+re-arms like the busy case; it gives up only once the session is *confirmed*
+gone by :data:`SESSION_RECHECKS` checks in a row. Its decisions (spawn, lock
+contention, non-idle reasons, flush result, deadline / re-arm, exit reason) are
+appended at low volume to ``leader-notifier.log`` next to the queue so a delayed
+notification can be explained after the fact.
 """
 from __future__ import annotations
 
@@ -73,9 +83,14 @@ INJECT_SETTLE_SECONDS = 0.5
 # prompt deliverer's ``submit_retries``.
 SUBMIT_VERIFY_SECONDS = 0.5
 SUBMIT_ENTER_RETRIES = 1
+# A missing session is only believed after this many ``session_exists`` checks in
+# a row (``SESSION_RECHECK_SECONDS`` apart) all say so: one False is transient.
+SESSION_RECHECKS = 3
+SESSION_RECHECK_SECONDS = 0.5
 
 QUEUE_NAME = "leader-pending.jsonl"
 LOCK_NAME = "leader-notifier.lock"
+LOG_NAME = "leader-notifier.log"
 
 # Best-effort PR-URL scrape from a task's outbox.md.
 PR_URL_RE = re.compile(r"https://github\.com/[^\s)\]]+/pull/\d+")
@@ -88,6 +103,39 @@ _GITHUB_REMOTE_RE = re.compile(
 # git / gh lookups are best-effort: keep them short so they can never stall a caller.
 LOOKUP_TIMEOUT_SECONDS = 5.0
 _ORIGIN_CACHE: dict[str, str] = {}
+
+
+# ---------------------------------------------------------------------------
+# Decision log (leader-notifier.log)
+# ---------------------------------------------------------------------------
+
+
+def log_path(session_dir: Path) -> Path:
+    """The session's notifier log; also the detached notifier's stdout/stderr."""
+    return Path(session_dir) / LOG_NAME
+
+
+def _log(session_dir: Path, message: str) -> None:
+    """Append one timestamped line to ``leader-notifier.log``. Never raises."""
+    line = f"{utcnow_iso()} [pid {os.getpid()}] {message}\n"
+    try:
+        with log_path(session_dir).open("a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        pass
+
+
+class _ReasonLog:
+    """Logs a poll-loop reason only when it changes, so a long wait stays quiet."""
+
+    def __init__(self, session_dir: Path) -> None:
+        self._session_dir = session_dir
+        self._last: str | None = None
+
+    def note(self, reason: str) -> None:
+        if reason != self._last:
+            self._last = reason
+            _log(self._session_dir, reason)
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +285,10 @@ def _scan_pr_url(state_dir: Path, task_id: str, branch: str | None, use_gh: bool
 
 KIND_DONE = "done"
 KIND_ASK = "ask"
+# The prompt deliverer gave up (Issue #289): the driver never got its prompt.
+KIND_DELIVERY_FAILED = "delivery_failed"
+# Kinds that carry no PR: never pay for a PR lookup.
+_NO_PR_KINDS = (KIND_ASK, KIND_DELIVERY_FAILED)
 
 
 def build_record(
@@ -257,7 +309,8 @@ def build_record(
     Carries everything the leader needs to no-op an already-handled task and,
     otherwise, to make its first move: "pull the diff and run the gate" for a
     ``done`` record, "answer the question via ``fleet-agent inbox``" for an
-    ``ask`` record (``kind="ask"``, carrying the driver's ``question``).
+    ``ask`` record (``kind="ask"``, carrying the driver's ``question``), "resend
+    the prompt with ``fleet-agent send-prompt``" for a ``delivery_failed`` record.
 
     Records are independent: the only identity is the per-record ``nonce``, so an
     ask and a later done (or gate) for the same task are both delivered.
@@ -278,8 +331,8 @@ def build_record(
         "branch": branch,
         "worktree": worktree,
         "state_dir": str(state_dir),
-        # An ask needs no diff, so it never pays for the PR lookup.
-        "pr_url": None if kind == KIND_ASK else scan_pr_url(state_dir, task_id),
+        # An ask / delivery failure needs no diff, so it never pays for the PR lookup.
+        "pr_url": None if kind in _NO_PR_KINDS else scan_pr_url(state_dir, task_id),
         "summary": summary,
     }
     if project:
@@ -407,8 +460,9 @@ def push_to_leader(
 ) -> None:
     """Opt-in leader-pane push, routed by the task's ``owner_session``.
 
-    Shared by ``fleet-agent done`` (``kind="done"``) and ``fleet-agent ask``
-    (``kind="ask"``). Default OFF (``notify_leader_on_driver_done``) → zero
+    Shared by ``fleet-agent done`` (``kind="done"``), ``fleet-agent ask``
+    (``kind="ask"``) and the prompt deliverer's failure report
+    (``kind="delivery_failed"``). Default OFF (``notify_leader_on_driver_done``) → zero
     behaviour change. Always enqueues a persisted record (never dropped) into the
     owner session's queue when the feature is on, then best-effort spawns the
     detached notifier against the ``fleet-<label>`` pane. multiplexer/leader
@@ -459,6 +513,7 @@ def push_to_leader(
             session=session,
             window="leader",
             agent_spec=leader_session["agent"],
+            reason="enqueue",
         )
     except Exception:
         return
@@ -485,6 +540,22 @@ def _render_ask(record: dict) -> str:
     )
 
 
+def _is_delivery_failed(record: dict) -> bool:
+    return record.get("kind") == KIND_DELIVERY_FAILED
+
+
+def _render_delivery_failed(record: dict) -> str:
+    """One delivery-failed record: what happened plus the command that retries it."""
+    task_id = record.get("task_id", "?")
+    summary = " ".join(str(record.get("summary") or "").split())  # keep it single-line
+    project = record.get("project")
+    project_flag = f" --project {project}" if project else ""
+    return (
+        f"task-{task_id} [delivery failed] {summary or 'the driver prompt was not delivered'}"
+        f" | retry with: fleet-agent send-prompt {task_id}{project_flag}"
+    )
+
+
 def _render_done(record: dict) -> str:
     parts = [f"task-{record.get('task_id', '?')} [{record.get('status', '?')}]"]
     summary = (record.get("summary") or "").strip()
@@ -505,6 +576,10 @@ _ASK_INSTRUCTION = (
     "answer the driver's question with the fleet-agent inbox command shown, or relay it "
     "to the user if it is not yours to decide. Skip any task no longer awaiting_orders."
 )
+_DELIVERY_FAILED_INSTRUCTION = (
+    "the driver never got its prompt; check its pane and retry with the fleet-agent "
+    "send-prompt command shown, or relay to the user. Skip any task no longer failed."
+)
 
 
 def render_block(records: list[dict]) -> str:
@@ -516,22 +591,45 @@ def render_block(records: list[dict]) -> str:
 
     The lead-in instruction follows the record kinds: a done / gate entry says to
     pull the diff and run the gate; an ``[ask]`` entry says to answer it (never
-    "run the gate", which makes no sense for a question).
+    "run the gate", which makes no sense for a question); a ``[delivery failed]``
+    entry says to retry with ``fleet-agent send-prompt``.
     """
     n = len(records)
     asks = sum(1 for r in records if _is_ask(r))
-    if asks == 0:
-        instruction = f"for each: {_GATE_INSTRUCTION}"
-    elif asks == n:
-        instruction = f"for each: {_ASK_INSTRUCTION}"
+    fails = sum(1 for r in records if _is_delivery_failed(r))
+    if fails == 0:
+        if asks == 0:
+            instruction = f"for each: {_GATE_INSTRUCTION}"
+        elif asks == n:
+            instruction = f"for each: {_ASK_INSTRUCTION}"
+        else:
+            instruction = (
+                f"for each entry NOT marked [ask]: {_GATE_INSTRUCTION} "
+                f"For each [ask] entry: {_ASK_INSTRUCTION}"
+            )
+    elif fails == n:
+        instruction = f"for each: {_DELIVERY_FAILED_INSTRUCTION}"
     else:
-        instruction = (
-            f"for each entry NOT marked [ask]: {_GATE_INSTRUCTION} "
-            f"For each [ask] entry: {_ASK_INSTRUCTION}"
-        )
+        parts = []
+        if n - asks - fails:
+            parts.append(
+                f"for each entry NOT marked [ask] or [delivery failed]: {_GATE_INSTRUCTION}"
+            )
+        if asks:
+            parts.append(f"For each [ask] entry: {_ASK_INSTRUCTION}")
+        parts.append(f"For each [delivery failed] entry: {_DELIVERY_FAILED_INSTRUCTION}")
+        instruction = " ".join(parts)
     head = f"[fleet] {n} driver notification(s) — {instruction}"
-    segs = [_render_ask(r) if _is_ask(r) else _render_done(r) for r in records]
+    segs = [_render_record(r) for r in records]
     return head + " :: " + " || ".join(segs)
+
+
+def _render_record(record: dict) -> str:
+    if _is_ask(record):
+        return _render_ask(record)
+    if _is_delivery_failed(record):
+        return _render_delivery_failed(record)
+    return _render_done(record)
 
 
 # ---------------------------------------------------------------------------
@@ -555,13 +653,15 @@ def start_detached(
     agent_spec: str,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    reason: str = "enqueue",
 ) -> Path:
     """Spawn a detached notifier that flushes the session's queue into its pane.
 
     Defensive: callers should already have enqueued the record. If a notifier
     is already running it will no-op (lock), so spawning is always safe.
+    ``reason`` (``enqueue`` / ``re-arm``) only labels the spawn in the log.
     """
-    log_path = Path(session_dir) / "leader-notifier.log"
+    log_file = log_path(session_dir)
     repo_root = _fleet_clone_root()
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
@@ -588,8 +688,13 @@ def start_detached(
         "--poll-interval",
         str(poll_interval),
     ]
-    spawn_detached(args, cwd=repo_root, env=env, log_path=log_path)
-    return log_path
+    proc = spawn_detached(args, cwd=repo_root, env=env, log_path=log_file)
+    _log(
+        session_dir,
+        f"spawn ({reason}): notifier pid={getattr(proc, 'pid', '?')} "
+        f"session={session} timeout={timeout:g}s",
+    )
+    return log_file
 
 
 # ---------------------------------------------------------------------------
@@ -618,8 +723,14 @@ def notify(
     lock_fp = _acquire_lock(session_dir)
     if lock_fp is None:
         # Another notifier holds the queue; it will flush what we enqueued.
+        _log(session_dir, "lock held by another notifier; exiting (it will flush the queue)")
         return 0
 
+    _log(
+        session_dir,
+        f"started: session={session} window={window} agent={agent_spec} "
+        f"timeout={timeout:g}s poll={poll_interval:g}s",
+    )
     try:
         rearm = _poll_until_idle(
             session_dir=session_dir,
@@ -644,9 +755,10 @@ def notify(
                 agent_spec=agent_spec,
                 timeout=timeout,
                 poll_interval=poll_interval,
+                reason="re-arm",
             )
-        except Exception:  # noqa: BLE001 - re-arm is best-effort; queue persists
-            pass
+        except Exception as e:  # noqa: BLE001 - re-arm is best-effort; queue persists
+            _log(session_dir, f"re-arm failed ({e}); queue stays pending for the next spawn")
     return 0
 
 
@@ -662,41 +774,82 @@ def _poll_until_idle(
     """Poll until the queue drains, the leader goes away, or the deadline expires.
 
     Returns ``True`` iff the deadline expired with records still pending and the
-    leader session still alive — i.e. the leader was busy the whole time and the
-    caller should re-arm a successor. Returns ``False`` on every other terminal:
-    queue drained, leader detached, window gone, or a flush that failed on the mux
-    (left queued for the next ``done`` to re-spawn). Holds no lock itself; the
-    caller owns the session lock for our lifetime.
+    leader session not confirmed gone — i.e. the leader was busy (or the mux was
+    flaky) the whole time and the caller should re-arm a successor. Returns
+    ``False`` on every other terminal: queue drained, session confirmed gone, or a
+    send that failed on the mux (left queued for the next ``done`` to re-spawn).
+
+    A ``MuxError`` from ``capture`` and a single ``session_exists() == False`` are
+    transient (Issue #292): they are retried on the next poll, never read as "the
+    leader went away". Holds no lock itself; the caller owns the session lock for
+    our lifetime.
     """
     vendor, _model = agents.parse_spec(agent_spec)
     adapter = REGISTRY[vendor]
     deadline = time.monotonic() + max(0.0, timeout)
+    reasons = _ReasonLog(session_dir)
 
     while time.monotonic() <= deadline:
         if not read_queue(session_dir):
+            _log(session_dir, "exit: queue empty")
             return False  # nothing pending → done
-        if not mux.get().session_exists(session):
-            return False  # leader detached → leave queued, re-spawn later
+        backend = mux.get()
+        if not backend.session_exists(session):
+            if session_confirmed_gone(backend, session):
+                _log(session_dir, f"exit: session {session} confirmed gone; records stay queued")
+                return False  # leader detached → leave queued, re-spawn later
+            reasons.note(f"session_exists({session}) was False once but is back; keep polling")
         try:
-            pane = mux.get().capture(session, window)
-        except mux.MuxError:
-            return False  # window gone → leave queued
+            pane = backend.capture(session, window)
+        except mux.MuxError as e:
+            reasons.note(f"capture failed (transient, retrying until the deadline): {e}")
+            time.sleep(max(0.1, poll_interval))
+            continue
 
         if adapter.is_idle(pane):
-            flushed = _flush_once(session_dir, session, window, adapter)
+            flushed = _flush_once(session_dir, session, window, adapter, reasons)
             if flushed is None:
                 pass  # not stably idle: keep polling
             elif flushed:
                 # Loop again: a record may have been enqueued mid-flush.
                 continue
             else:
-                return False  # flush failed (mux) → leave queued
+                _log(session_dir, "exit: send failed on the mux; records stay queued")
+                return False  # send failed (mux) → leave queued
+        else:
+            reasons.note("leader not idle (busy or dialog); waiting")
         time.sleep(max(0.1, poll_interval))
 
     # Deadline hit while still busy. Re-arm only if there is pending work AND the
-    # leader session is still alive: a dead session needs no successor (the next
-    # done / re-attach re-spawns) and an empty queue is already delivered.
-    return bool(read_queue(session_dir)) and mux.get().session_exists(session)
+    # leader session is not confirmed gone: a dead session needs no successor (the
+    # next done / re-attach re-spawns) and an empty queue is already delivered.
+    pending = len(read_queue(session_dir))
+    rearm = bool(pending) and not session_confirmed_gone(mux.get(), session)
+    _log(
+        session_dir,
+        f"deadline {timeout:g}s reached: {pending} record(s) pending; "
+        + ("re-arming a successor" if rearm else "not re-arming"),
+    )
+    return rearm
+
+
+def session_confirmed_gone(backend, session: str) -> bool:
+    """True only if ``session_exists`` says no :data:`SESSION_RECHECKS` times in a row.
+
+    One False is not enough: a multiplexer that is briefly inconsistent (zellij
+    while another tab closes; its ``session_exists`` folds errors into False) must
+    not make the poller give up. A ``MuxError`` from the check itself means
+    "unknown", not "gone".
+    """
+    for attempt in range(SESSION_RECHECKS):
+        try:
+            if backend.session_exists(session):
+                return False
+        except mux.MuxError:
+            return False
+        if attempt < SESSION_RECHECKS - 1:
+            time.sleep(SESSION_RECHECK_SECONDS)
+    return True
 
 
 def _refill_pr_urls(records: list[dict]) -> None:
@@ -713,7 +866,7 @@ def _refill_pr_urls(records: list[dict]) -> None:
     block the injection.
     """
     for rec in records:
-        if rec.get("pr_url") or _is_ask(rec):
+        if rec.get("pr_url") or rec.get("kind") in _NO_PR_KINDS:
             continue
         task_id = rec.get("task_id")
         state_dir = rec.get("state_dir")
@@ -730,7 +883,11 @@ def _refill_pr_urls(records: list[dict]) -> None:
 
 
 def _flush_once(
-    session_dir: Path, session: str, window: str, adapter: type[VendorAdapter]
+    session_dir: Path,
+    session: str,
+    window: str,
+    adapter: type[VendorAdapter],
+    reasons: _ReasonLog | None = None,
 ) -> bool | None:
     """Inject the current queue once and clear exactly what was flushed.
 
@@ -740,22 +897,32 @@ def _flush_once(
     text left the composer.
 
     Returns True on a successful injection (or empty queue), False if the mux
-    failed before submit — in which case records are left untouched/queued —
-    and None if the leader was no longer idle on the confirming capture (nothing
-    was typed; records stay queued for the next idle boundary).
+    failed while sending — in which case records are left untouched/queued (the
+    text may be half typed, so no retry that could double-inject) — and None if
+    nothing was typed and the caller should keep polling: the leader was no longer
+    idle on the confirming capture, or that capture failed on the mux (transient,
+    Issue #292). Records stay queued for the next idle boundary.
     """
     records = read_queue(session_dir)
     if not records:
         return True
+    reasons = reasons or _ReasonLog(session_dir)
     _refill_pr_urls(records)
     text = render_block(records)
     backend = mux.get()
+    time.sleep(INJECT_SETTLE_SECONDS)
     try:
-        time.sleep(INJECT_SETTLE_SECONDS)
-        if not adapter.is_idle(backend.capture(session, window)):
-            return None
+        still_idle = adapter.is_idle(backend.capture(session, window))
+    except mux.MuxError as e:
+        reasons.note(f"confirming capture failed (transient, nothing typed): {e}")
+        return None
+    if not still_idle:
+        reasons.note("leader idle on the first capture only; nothing typed, waiting")
+        return None
+    try:
         backend.send_text(session, window, text, enter=True)
-    except mux.MuxError:
+    except mux.MuxError as e:
+        _log(session_dir, f"send_text failed on the mux ({e}); {len(records)} record(s) left queued")
         return False
     enter_retries, submitted = _ensure_submitted(backend, session, window, adapter, text)
     nonces = {r.get("nonce") for r in records if r.get("nonce")}
@@ -768,6 +935,11 @@ def _flush_once(
         task_ids=[r.get("task_id") for r in records],
         submit_confirmed=submitted,
         enter_retries=enter_retries,
+    )
+    _log(
+        session_dir,
+        f"flushed {len(records)} record(s) {[r.get('task_id') for r in records]}: "
+        f"submit_confirmed={submitted} enter_retries={enter_retries}",
     )
     return True
 

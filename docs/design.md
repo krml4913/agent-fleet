@@ -1157,6 +1157,34 @@ independent of the opt-in. The key keeps its name; it now covers asks too.
   records, both delivered (in one block if the leader was busy for both), and
   `clear_task_records` evicts all of a task's records on retirement.
 
+**Delivery failures ride it too, and one mux hiccup is not a failure (Issues #289,
+#292).** Both detached pollers (the prompt deliverer and the leader notifier) used to
+give up on a single `MuxError`; on zellij that is just a momentary inconsistent pane
+listing while another tab is closed (windows-support.md §4.8), so it is now transient:
+
+- **Prompt deliverer.** A `MuxError` from `capture` / rename / paste / submit Enter is
+  retried with a doubling backoff (0.5 s → 8 s) until the delivery deadline. It fails
+  the task only if the error persists to the deadline or the session is *confirmed*
+  gone (`session_exists` False on several checks in a row). Steps already done are
+  never repeated (a failed Enter does not re-paste). A later successful delivery —
+  including `fleet-agent send-prompt` — of a task the deliverer itself had marked
+  `failed` derives its status from the stages again and emits
+  `prompt_delivery_recovered`.
+- **Failure push.** With the opt-in on, a deliverer failure also enqueues a
+  `kind: "delivery_failed"` record (status `failed`, no PR lookup). Its line reads
+  `task-<id> [delivery failed] <reason> | retry with: fleet-agent send-prompt <id>
+  --project <P>`; the lead-in tells the leader to check the pane, retry, or relay,
+  and to skip a task that is no longer `failed`.
+- **Leader notifier.** A `MuxError` from `capture` (poll or confirming) and a single
+  `session_exists() == False` keep polling until the deadline, then re-arm like the
+  busy case. It gives up only when the session is confirmed gone. #290's
+  idle/confirm/submit logic is unchanged; a failed *send* still leaves the record
+  queued without a blind retry (the text may be half typed).
+- **`leader-notifier.log`.** Decisions are appended to
+  `global/sessions/<label>/leader-notifier.log`, deliberately low volume: spawn (pid,
+  timeout, reason), lock contention, start, each *change* of wait reason (busy /
+  transient error / session blip), flush result, deadline and re-arm, exit reason.
+
 **`fleet sessions`** is the cross-session CLI view: live leader sessions (label →
 pane, agent) and each session's in-flight tasks (task.yaml across projects where
 `owner_session == label` and status is non-terminal). It reads state on demand

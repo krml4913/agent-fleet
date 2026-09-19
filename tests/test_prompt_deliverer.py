@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -13,7 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import prompt_deliverer, prompt_pointer, state  # noqa: E402
+from fleet import leader_notifier, mux, prompt_deliverer, prompt_pointer, state  # noqa: E402
 from fleet.adapters import CodexAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
@@ -406,6 +408,292 @@ class PromptDelivererTests(unittest.TestCase):
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "failed")
         self.assertEqual(self._events()[-1]["type"], "error")
         self.assertIn("timed out", self._events()[-1]["message"])
+
+
+READY_PANE = 'status\n❯ Try "help"\n'  # claude ready prompt
+SESSIONS = {"fleet-demo": ["1·driver"]}
+TAB_GONE = mux.MuxError("zellij tab not found (or has no terminal pane): fleet-demo:1·driver")
+
+
+class TransientMuxErrorTests(unittest.TestCase):
+    """Issue #289: one transient MuxError must not fail the delivery."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo")
+        self.task_id = "1"
+        self.task_dir = state.task_dir(self.state_dir, self.task_id)
+        self.task_dir.mkdir(parents=True)
+        self.prompt_path = self.task_dir / "driver-prompt.md"
+        self.prompt_path.write_text("FULL-PROMPT-BODY-MARKER\n", encoding="utf-8")
+        self._save_task("spawning")
+        self._old_env = {k: os.environ.get(k) for k in ("FLEET_NO_NOTIFY", "FLEET_HOME")}
+        os.environ["FLEET_NO_NOTIFY"] = "1"
+        os.environ["FLEET_HOME"] = str(Path(self._tmp.name) / "fleet-home")
+        self._sleep_patch = patch("fleet.prompt_deliverer.time.sleep", return_value=None)
+        self._sleep_patch.start()
+        self._stderr = contextlib.redirect_stderr(io.StringIO())
+        self.log = self._stderr.__enter__()
+
+    def tearDown(self) -> None:
+        self._stderr.__exit__(None, None, None)
+        self._sleep_patch.stop()
+        for key, value in self._old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._tmp.cleanup()
+
+    def _save_task(self, status: str) -> None:
+        state.save_task(
+            self.state_dir,
+            self.task_id,
+            {
+                "id": self.task_id,
+                "status": status,
+                "current_stage": 0,
+                "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+            },
+        )
+
+    def _deliver(self, timeout: float = 5.0) -> int:
+        return prompt_deliverer.deliver(
+            state_dir=self.state_dir,
+            task_id=self.task_id,
+            session="fleet-demo",
+            window="1·driver",
+            prompt_path=self.prompt_path,
+            agent_spec="claude:opus",
+            timeout=timeout,
+            poll_interval=0.01,
+        )
+
+    def _events(self) -> list[dict]:
+        path = self.state_dir / "events.jsonl"
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+    def _ack_on_enter(self, *_args, **_kwargs) -> None:
+        append_event(self.state_dir / "events.jsonl", "inbox_seen", task_id=self.task_id, watermark=None)
+
+    def _status(self) -> str:
+        return state.load_task(self.state_dir, self.task_id)["status"]
+
+    def _enable_leader_push(self) -> None:
+        project = state.load_project(self.state_dir)
+        project["notify_leader_on_driver_done"] = "true"
+        state.save_project(self.state_dir, project)
+
+    # -- transient errors are retried -------------------------------------
+
+    def test_transient_capture_error_is_retried_until_ready(self) -> None:
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.fail_next("capture", TAB_GONE, times=3)
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(fake.calls_named("capture")), 4)  # 3 failures + 1 success
+        self.assertEqual(len(fake.calls_named("paste")), 1)
+        self.assertEqual([e["type"] for e in self._events()], ["inbox_seen", "prompt_delivered"])
+        self.assertEqual(self._status(), "spawning")  # never marked failed
+        self.assertIn("retrying with backoff", self.log.getvalue())
+        self.assertIn("capture recovered", self.log.getvalue())
+
+    def test_transient_paste_error_is_retried(self) -> None:
+        # The exact #289 failure: capture fine (is_ready), then paste hits
+        # "tab not found". The paste is retried; the submit Enter is pressed once.
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.fail_next("paste", TAB_GONE, times=2)
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(fake.calls_named("paste")), 3)  # 2 failures + 1 success
+        self.assertEqual(len(fake.calls_named("send_key")), 1)  # a single submit Enter
+        self.assertEqual([e["type"] for e in self._events()], ["inbox_seen", "prompt_delivered"])
+        self.assertNotEqual(self._status(), "failed")
+
+    def test_transient_submit_enter_error_is_retried_without_repasting(self) -> None:
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.fail_next("send_key", TAB_GONE, times=1)
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(fake.calls_named("paste")), 1)  # the pointer is never re-pasted
+        self.assertEqual(len(fake.calls_named("send_key")), 2)
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    def test_transient_error_with_one_false_session_check_is_still_retried(self) -> None:
+        # zellij session_exists folds its own errors into False: a single False
+        # while the mux is inconsistent must not be read as "session gone".
+        checks = {"n": 0}
+
+        with use_fake_mux(capture=READY_PANE) as fake:  # session not listed at first
+
+            def flaky_session_exists(*_a, **_k) -> None:
+                checks["n"] += 1
+                if checks["n"] >= 2:
+                    fake.sessions["fleet-demo"] = ["1·driver"]
+
+            fake.on["session_exists"] = flaky_session_exists
+            fake.fail_next("capture", TAB_GONE, times=1)
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertGreaterEqual(checks["n"], 2)
+        self.assertEqual(self._events()[-1]["type"], "prompt_delivered")
+
+    # -- ... but not forever ---------------------------------------------
+
+    def test_persistent_capture_error_fails_at_the_deadline(self) -> None:
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.fail["capture"] = TAB_GONE
+            result = self._deliver(timeout=0.05)
+
+        self.assertEqual(result, 1)
+        self.assertGreater(len(fake.calls_named("capture")), 1)  # it did retry
+        self.assertEqual(self._status(), "failed")
+        error = self._events()[-1]
+        self.assertEqual(error["type"], "error")
+        self.assertIn("still failing", error["message"])
+        self.assertIn("tab not found", error["message"])
+
+    def test_persistent_paste_error_fails_at_the_deadline(self) -> None:
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.fail["paste"] = TAB_GONE
+            result = self._deliver(timeout=0.05)
+
+        self.assertEqual(result, 1)
+        self.assertGreater(len(fake.calls_named("paste")), 1)
+        self.assertEqual(self._status(), "failed")
+        error = self._events()[-1]
+        self.assertIn("cannot paste prompt", error["message"])
+        self.assertIn("still failing", error["message"])
+
+    def test_session_really_gone_fails_immediately(self) -> None:
+        with use_fake_mux(sessions={}, capture=READY_PANE) as fake:
+            fake.fail["capture"] = TAB_GONE
+            result = self._deliver(timeout=60.0)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(len(fake.calls_named("capture")), 1)  # no retry loop
+        self.assertEqual(self._status(), "failed")
+        self.assertIn("is gone", self._events()[-1]["message"])
+
+    def test_session_gone_during_paste_fails_immediately(self) -> None:
+        with use_fake_mux(sessions={}, capture=READY_PANE) as fake:
+            fake.fail["paste"] = TAB_GONE
+            result = self._deliver(timeout=60.0)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(len(fake.calls_named("paste")), 1)
+        self.assertIn("cannot paste prompt", self._events()[-1]["message"])
+        self.assertIn("is gone", self._events()[-1]["message"])
+
+    # -- recovery of a task the deliverer itself failed ------------------
+
+    def _fail_via_deliverer(self) -> None:
+        prompt_deliverer._fail(
+            self.state_dir, self.task_id, "prompt deliverer cannot paste prompt: x", "1·driver"
+        )
+
+    def test_successful_delivery_revives_a_task_the_deliverer_failed(self) -> None:
+        self._fail_via_deliverer()
+        self.assertEqual(self._status(), "failed")
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        # Derived from the stages (a running stage), not blindly "running".
+        self.assertEqual(self._status(), "running")
+        types = [e["type"] for e in self._events()]
+        self.assertEqual(types[-3:], ["inbox_seen", "prompt_delivery_recovered", "prompt_delivered"])
+        recovered = [e for e in self._events() if e["type"] == "prompt_delivery_recovered"][0]
+        self.assertEqual(recovered["previous_status"], "failed")
+        self.assertEqual(recovered["status"], "running")
+
+    def test_failed_status_from_another_cause_is_not_revived(self) -> None:
+        self._save_task("failed")
+        append_event(
+            self.state_dir / "events.jsonl",
+            "error",
+            task_id=self.task_id,
+            source="somewhere-else",
+            message="x",
+        )
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(self._status(), "failed")
+        self.assertNotIn("prompt_delivery_recovered", [e["type"] for e in self._events()])
+
+    def test_delivery_without_a_prior_failure_emits_no_recovery_event(self) -> None:
+        with use_fake_mux(sessions=SESSIONS, capture=READY_PANE) as fake:
+            fake.on["send_key"] = self._ack_on_enter
+            self._deliver()
+
+        self.assertNotIn("prompt_delivery_recovered", [e["type"] for e in self._events()])
+
+    # -- failure reaches the owning leader --------------------------------
+
+    def _queue(self) -> list[dict]:
+        return leader_notifier.read_queue(state.session_dir("main"))
+
+    def test_failure_is_pushed_to_the_leader_when_push_is_on(self) -> None:
+        self._enable_leader_push()
+        with (
+            use_fake_mux(sessions=SESSIONS | {"fleet-main": ["leader"]}, capture="booting..."),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+            patch.object(
+                leader_notifier.formation,
+                "read_leader_session",
+                return_value={"agent": "claude:opus"},
+            ),
+        ):
+            result = self._deliver(timeout=0.02)
+
+        self.assertEqual(result, 1)
+        spawn.assert_called_once()
+        (rec,) = self._queue()
+        self.assertEqual(rec["kind"], leader_notifier.KIND_DELIVERY_FAILED)
+        self.assertEqual(rec["status"], "failed")
+        self.assertEqual(rec["task_id"], self.task_id)
+        self.assertIn("timed out", rec["summary"])
+        self.assertIsNone(rec["pr_url"])  # no PR lookup for a delivery failure
+        block = leader_notifier.render_block([rec])
+        self.assertIn("[delivery failed]", block)
+        self.assertIn("fleet-agent send-prompt 1 --project demo", block)
+
+    def test_failure_is_not_pushed_when_push_is_off(self) -> None:
+        with (
+            use_fake_mux(sessions=SESSIONS, capture="booting..."),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            result = self._deliver(timeout=0.02)
+
+        self.assertEqual(result, 1)
+        spawn.assert_not_called()
+        self.assertEqual(self._queue(), [])
+        self.assertEqual(self._status(), "failed")  # the failure itself is unchanged
+
+    def test_push_trouble_never_breaks_the_failure_report(self) -> None:
+        self._enable_leader_push()
+        with (
+            use_fake_mux(sessions=SESSIONS, capture="booting..."),
+            patch("fleet.leader_notifier.push_to_leader", side_effect=RuntimeError("boom")),
+        ):
+            result = self._deliver(timeout=0.02)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(self._status(), "failed")
+        self.assertEqual(self._events()[-1]["type"], "error")
 
 
 if __name__ == "__main__":
