@@ -1,6 +1,8 @@
 """Tests for :mod:`fleet.orchestrator`."""
 from __future__ import annotations
 
+import contextlib
+import io
 import shlex
 import subprocess
 import sys
@@ -1084,7 +1086,9 @@ class WindowCwdTests(unittest.TestCase):
         self.assertEqual(kwargs["window_cwd"], Path(worktree_path))
         mock_render.assert_called_once()
 
-    def test_no_worktree_task_passes_window_cwd_none(self) -> None:
+    def test_no_worktree_task_leaves_window_cwd_to_launcher(self) -> None:
+        """No worktree → window_cwd=None; launch_stage_driver then resolves the
+        project root (see the ``*_pane_opens_in_*`` tests below)."""
         task = self._make_task("wt2", worktree=None)
         stage = task["stages"][0]
 
@@ -1099,6 +1103,49 @@ class WindowCwdTests(unittest.TestCase):
         kwargs = mock_launch.call_args.kwargs
         self.assertIsNone(kwargs.get("window_cwd"))
         mock_render.assert_called_once()
+
+    def _launch_through_fake_mux(self, task_id: str, task: dict) -> dict:
+        """Run _launch_driver_for_stage down to the (fake) Mux; return new_window kwargs."""
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}) as fake,
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="p"),
+            unittest.mock.patch(
+                "fleet.commands.start.prompt_deliverer.start_detached",
+                return_value=state.task_dir(self.sd, task_id) / "prompt-deliverer.log",
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            orchestrator._launch_driver_for_stage(
+                self.sd, task_id, task, 0, task["stages"][0]
+            )
+        calls = fake.calls_named("new_window")
+        self.assertEqual(len(calls), 1)
+        return calls[0][1]
+
+    def _set_repo(self, repo: Path) -> None:
+        project = state.load_project(self.sd)
+        project["repo"] = str(repo)
+        state.save_project(self.sd, project)
+
+    def test_no_worktree_pane_opens_in_project_root(self) -> None:
+        self._set_repo(self.project)
+        task = self._make_task("wt5", worktree=None)
+        kwargs = self._launch_through_fake_mux("wt5", task)
+        self.assertEqual(kwargs["cwd"], str(self.project))
+
+    def test_no_worktree_without_repo_pane_opens_in_task_dir(self) -> None:
+        # setUp's project.yaml has no ``repo``: last-resort task-dir fallback.
+        task = self._make_task("wt6", worktree=None)
+        kwargs = self._launch_through_fake_mux("wt6", task)
+        self.assertEqual(kwargs["cwd"], str(state.task_dir(self.sd, "wt6")))
+
+    def test_worktree_pane_opens_in_worktree(self) -> None:
+        self._set_repo(self.project)
+        worktree = self.project / "wt"
+        worktree.mkdir()
+        task = self._make_task("wt7", worktree=str(worktree))
+        kwargs = self._launch_through_fake_mux("wt7", task)
+        self.assertEqual(kwargs["cwd"], str(worktree))
 
     def test_render_receives_worktree_branch_and_project_root(self) -> None:
         task = self._make_task("wt4", worktree="/tmp/fake-worktree-wt4")

@@ -751,6 +751,8 @@ def _launch_driver_for_stage(
         stage=stage,
         project_name=project_name,
         owner_session=state_mod.task_owner_session(task),
+        # No worktree → None: launch_stage_driver opens the pane in the
+        # project root (task-dir fallback only without a usable repo).
         window_cwd=Path(worktree) if worktree else None,
         replace_task_windows=replace_task_windows,
     )

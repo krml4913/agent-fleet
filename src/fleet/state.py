@@ -647,6 +647,12 @@ def record_task_usage(
     to the task's state dir when there is no worktree). ``home`` overrides the
     home directory for tests (``None`` means the adapter uses ``Path.home``).
 
+    A workspace=none driver runs in the shared project root, whose session
+    logs cannot be attributed to one task (the leader and other tasks may run
+    there too), so its usage is deliberately not looked up there: the task-dir
+    lookup only matches panes that really ran in the task dir (the fallback
+    when the project has no usable ``repo``), and otherwise degrades to absent.
+
     Any problem — unknown/unparseable agent spec, no adapter usage, missing or
     malformed log — leaves ``task['usage']`` unset. A terminal transition must
     never error on accounting (Issue #209): usage degrades to absent.
