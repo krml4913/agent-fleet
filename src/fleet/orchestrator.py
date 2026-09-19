@@ -739,7 +739,7 @@ def _launch_driver_for_stage(
         state_dir=state_dir,
         worktree=worktree,
         branch=task.get("branch"),
-        project_root=project.get("repo") or state_dir.parent,
+        project_root=project.get("repo"),
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 

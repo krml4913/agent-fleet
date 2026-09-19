@@ -1115,7 +1115,10 @@ class WindowCwdTests(unittest.TestCase):
         kwargs = mock_render.call_args.kwargs
         self.assertEqual(kwargs["worktree"], "/tmp/fake-worktree-wt4")
         self.assertEqual(kwargs["branch"], "demo/task/wt4")
-        self.assertIsNotNone(kwargs["project_root"])
+        self.assertEqual(
+            kwargs["project_root"],
+            orchestrator.state_mod.load_project(self.sd).get("repo"),
+        )
 
     def test_tmux_unavailable_skips_launch(self) -> None:
         task = self._make_task("wt3", worktree="/tmp/fake-worktree-wt3")

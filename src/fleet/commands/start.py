@@ -578,7 +578,7 @@ def run(args: argparse.Namespace) -> int:
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
-    project_name =(_pre_project or {}).get("name", "?")
+    project_name = (_pre_project or {}).get("name", "?")
     append_event(
         state_dir / "events.jsonl",
         "start",
