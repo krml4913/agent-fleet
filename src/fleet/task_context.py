@@ -40,14 +40,19 @@ class _Unresolved(Exception):
     """Internal: raised by _resolve_state_dir_core when state-dir resolution fails."""
 
 
-def in_driver_pane() -> bool:
-    """True when this process runs inside a driver pane.
+def driver_pane_task_id() -> str:
+    """The task id this process's pane was launched for, or ``""`` outside one.
 
     ``launch_stage_driver`` puts ``FLEET_TASK_ID`` in every driver pane's env
     (tmux window env / zellij pane-env file alike); the leader pane and a
     user's own terminal never carry it.
     """
-    return bool(os.environ.get("FLEET_TASK_ID"))
+    return os.environ.get("FLEET_TASK_ID", "")
+
+
+def in_driver_pane() -> bool:
+    """True when this process runs inside a driver pane."""
+    return bool(driver_pane_task_id())
 
 
 def leader_only_refusal(command: str, *, allowed: bool) -> str | None:
