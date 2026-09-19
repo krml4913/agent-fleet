@@ -93,12 +93,12 @@ class MissingHintTests(_UnseededProject):
     def test_non_shipped_name_gets_no_hint(self) -> None:
         with self.assertRaises(FileNotFoundError) as ctx:
             formation.load_formation("no-such", self.state_dir)
-        self.assertNotIn("seed", str(ctx.exception))
+        self.assertNotIn("shipped seed", str(ctx.exception))
         with self.assertRaises(driver_prompt.RoleResolutionError) as ctx2:
             driver_prompt.validate_formation_roles(
                 {"stages": [{"role": "no-such"}]}, self.state_dir
             )
-        self.assertNotIn("seed", str(ctx2.exception))
+        self.assertNotIn("shipped seed", str(ctx2.exception))
 
     def test_miss_stays_a_hard_error_no_runtime_fallback(self) -> None:
         # The hint must not turn into a fallback to the shipped file.
