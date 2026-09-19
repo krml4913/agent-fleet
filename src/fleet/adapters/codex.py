@@ -18,6 +18,11 @@ class CodexAdapter(VendorAdapter):
 
     ready = re.compile(r"(?m)^\s*›(?!\s*\d+\.)")
     menu_cursor = "›"
+
+    # codex draws ``Working (12s • esc to interrupt)`` while a turn runs. Not
+    # verified against a live pane here; if the wording differs the pattern
+    # simply never matches, which is the same as the pre-``is_busy`` behaviour.
+    busy = re.compile(r"(?im)(?:^\s*|[(•·]\s*)esc to interrupt\b")
     gate = re.compile(
         r"(?im)"
         r"(?:^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"

@@ -6,6 +6,22 @@ module waits for the *leader* pane to go idle (vendor ``ready`` regex) and
 injects a coalesced, idempotent summary of finished/gated tasks so the leader
 can review without polling.
 
+"Idle" means a real turn boundary — :meth:`VendorAdapter.is_idle` (input prompt
+visible, no dialog, AND no running-turn indicator), seen on two captures
+:data:`INJECT_SETTLE_SECONDS` apart with the second taken right before the
+keystrokes. The prompt visible alone is not enough: claude keeps its ``❯``
+composer on screen while working, so typing then either surfaces mid-turn or
+sits unsubmitted in the composer (Issue #288). After the submit Enter the pane is
+re-captured and, if the text is still in the composer, Enter is pressed again
+(bounded by :data:`SUBMIT_ENTER_RETRIES`).
+
+The prompt deliverer and the inbox wake-up deliberately keep their own bars. The
+deliverer pastes into a freshly booted driver pane that is never mid-turn, so
+``is_ready`` is the right test and a busy false-positive there would fail the
+task. The inbox nudge (``fleet send`` / handoff) is a one-shot, non-polling write
+whose whole purpose is to reach a driver that may be working; the message itself
+is durable in ``inbox.md``.
+
 fleet is daemon-less, so there is nothing watching for the leader to become
 idle. ``done`` resolves the task's ``owner_session`` and enqueues a persisted
 record into that session's queue (`global/sessions/<label>/leader-pending.jsonl`),
@@ -39,16 +55,23 @@ import uuid
 from pathlib import Path
 
 from . import agents, mux, state as state_mod
-from .adapters import REGISTRY
+from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 from .locking import atomic_update, lock_file, unlock_file
 from .proc import spawn_detached
 
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 2.0
-# Let the composer settle after the leader goes idle before submitting, so a
-# just-finished turn's trailing render does not eat the injected keystrokes.
+# Gap between the first idle capture and the confirming capture taken right
+# before the keystrokes: a leader must look idle on both, so a turn boundary
+# that is only a momentary gap between tool calls, or a just-finished turn's
+# trailing render, does not get the injected keystrokes.
 INJECT_SETTLE_SECONDS = 0.5
+# After the submit Enter, wait this long, re-capture, and if the text is still
+# in the composer press Enter again (at most this many times), mirroring the
+# prompt deliverer's ``submit_retries``.
+SUBMIT_VERIFY_SECONDS = 0.5
+SUBMIT_ENTER_RETRIES = 1
 
 QUEUE_NAME = "leader-pending.jsonl"
 LOCK_NAME = "leader-notifier.lock"
@@ -520,11 +543,15 @@ def _poll_until_idle(
         except mux.MuxError:
             return False  # window gone → leave queued
 
-        if adapter.is_ready(pane):
-            if _flush_once(session_dir, session, window):
+        if adapter.is_idle(pane):
+            flushed = _flush_once(session_dir, session, window, adapter)
+            if flushed is None:
+                pass  # not stably idle: keep polling
+            elif flushed:
                 # Loop again: a record may have been enqueued mid-flush.
                 continue
-            return False  # flush failed (mux) → leave queued
+            else:
+                return False  # flush failed (mux) → leave queued
         time.sleep(max(0.1, poll_interval))
 
     # Deadline hit while still busy. Re-arm only if there is pending work AND the
@@ -563,22 +590,35 @@ def _refill_pr_urls(records: list[dict]) -> None:
             rec["pr_url"] = url
 
 
-def _flush_once(session_dir: Path, session: str, window: str) -> bool:
+def _flush_once(
+    session_dir: Path, session: str, window: str, adapter: type[VendorAdapter]
+) -> bool | None:
     """Inject the current queue once and clear exactly what was flushed.
 
+    The caller saw the pane idle; after the (slow) PR re-scan and the settle
+    delay the pane is captured again and must still be idle, right before the
+    keystrokes. After the submit Enter, :func:`_ensure_submitted` checks the
+    text left the composer.
+
     Returns True on a successful injection (or empty queue), False if the mux
-    failed before submit — in which case records are left untouched/queued.
+    failed before submit — in which case records are left untouched/queued —
+    and None if the leader was no longer idle on the confirming capture (nothing
+    was typed; records stay queued for the next idle boundary).
     """
     records = read_queue(session_dir)
     if not records:
         return True
     _refill_pr_urls(records)
     text = render_block(records)
+    backend = mux.get()
     try:
         time.sleep(INJECT_SETTLE_SECONDS)
-        mux.get().send_text(session, window, text, enter=True)
+        if not adapter.is_idle(backend.capture(session, window)):
+            return None
+        backend.send_text(session, window, text, enter=True)
     except mux.MuxError:
         return False
+    enter_retries, submitted = _ensure_submitted(backend, session, window, adapter, text)
     nonces = {r.get("nonce") for r in records if r.get("nonce")}
     clear_records(session_dir, nonces)
     append_event(
@@ -587,8 +627,35 @@ def _flush_once(session_dir: Path, session: str, window: str) -> bool:
         window=window,
         count=len(records),
         task_ids=[r.get("task_id") for r in records],
+        submit_confirmed=submitted,
+        enter_retries=enter_retries,
     )
     return True
+
+
+def _ensure_submitted(
+    backend, session: str, window: str, adapter: type[VendorAdapter], text: str
+) -> tuple[int, bool]:
+    """After the submit Enter, re-press it (bounded) while ``text`` is still in the composer.
+
+    Returns ``(enter_retries_used, submitted)``. A busy claude can swallow the
+    Enter, leaving the injected text typed but unsent (Issue #288); a human then
+    submits it by hand and the leader sees it twice. A mux failure while
+    verifying is not fatal — the text is already typed and submitted once — so
+    it reports what is known and stops.
+    """
+    retries = 0
+    try:
+        while True:
+            time.sleep(SUBMIT_VERIFY_SECONDS)
+            if not adapter.composer_holds(backend.capture(session, window), text):
+                return retries, True
+            if retries >= SUBMIT_ENTER_RETRIES:
+                return retries, False
+            backend.send_key(session, window, "Enter")
+            retries += 1
+    except mux.MuxError:
+        return retries, False
 
 
 def _acquire_lock(session_dir: Path):
