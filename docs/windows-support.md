@@ -1,17 +1,21 @@
-# Windows Support Plan (zellij backend)
+# Windows Support (zellij backend)
 
-> **Status: plan — not implemented.** Records the feasibility investigation
-> and the implementation plan for running fleet natively on Windows, using
+> **Status: implemented.** fleet runs natively on Windows with
 > [zellij](https://zellij.dev/) in place of tmux as the terminal multiplexer.
+> Landed in #247 (`windows-base`: portable locking, UTF-8, `fleet.cmd` /
+> `fleet-agent.cmd`, `proc.spawn_detached`), #248 (`mux-abstraction`:
+> `fleet/mux/`), #249 (`windows-toast`), #250 (`windows-preflight`) and #251
+> (`zellij-backend`: `fleet/mux/zellij.py`, `fleet/pane_launch.py`, zellij as
+> the Windows default). User-facing setup is in the README's "Windows"
+> section. This document stays as the record of the feasibility
+> investigation and the plan; the implementation notes under §7 say where the
+> code differs from the plan. Open items are in §11.
 >
 > Investigated 2026-09-19 on Windows 10 Pro 19045, Python 3.13, zellij 0.45.1
 > (native Windows build), claude CLI (native). codex was not installed and is
 > not yet verified. Every zellij behavior marked "verified" below was observed
 > on that machine, not taken from documentation. Phase 0 (§7) re-ran the open
 > items on the same machine the same day; its results are folded in below.
->
-> When the plan lands, update `docs/design.md` (§3, §8.6, §11.2, §11.5 still
-> say "tmux") and turn this doc into a record of the result or delete it.
 
 ---
 
@@ -595,6 +599,13 @@ and ends the agent process.
 
 ### PR4 — Windows UX and docs (`windows-ux`)
 
+> Implemented, split across tasks: zellij attach (§6.5) shipped with the
+> backend in #251, preflight in #250, and the docs in `windows-docs`
+> (README / README.ja "Windows" section; `docs/design.md` now says
+> "terminal multiplexer (tmux on macOS/Linux, zellij on Windows)" and
+> points at `fleet/mux/`). The §8 checklist has not yet been run end to end
+> on a fresh machine (§11).
+
 - zellij attach (§6.5).
 - `fleet preflight`, per backend:
   - multiplexer presence and version (fail below 0.45.0; flag 0.45.0–0.45.1);
@@ -689,6 +700,28 @@ straight to the input prompt (verified). Adding it to
 `ClaudeAdapter.cli_command` would remove the boot-gate notification for users
 with the extension. That is optional, because #245 already keeps the
 deliverer from pasting into the dialog.
+
+---
+
+## 11. Remaining follow-ups
+
+- **codex under zellij is unverified** (§5 #15, §7 Phase 0 item 7, §8 step
+  10): ready / gate regexes against `dump-screen`, the `/rename` flow with
+  `Ctrl u`, and the `config.toml` trust-key format on Windows.
+- **`multi_stage` handoff and the verify gate under zellij** (§8 steps 6–7):
+  end-to-end runs are in progress by a teammate.
+- **Visible-terminal attach is not exercised by automation.** Phase 0
+  checked attach focus with hidden clients only; `fleet attach <task>` with and without another
+  client in a real, visible terminal (§8 step 8) is manual only.
+- **zellij on macOS / Linux is untested.** `FLEET_MUX=zellij` may work there,
+  but only Windows was tried.
+- **claude's workspace-trust dialog.** claude's first run in a fresh
+  worktree asks whether to trust the folder. The adapter's `gate` regex
+  catches it, so the deliverer holds back and the task is surfaced as a boot
+  gate (`awaiting_orders` + notification), but a human still has to attach
+  and confirm it once per worktree.
+- From §7 PR5: an optional `shell:` field for verify commands (today they run
+  under `cmd.exe` on Windows, §5 #12).
 
 ---
 

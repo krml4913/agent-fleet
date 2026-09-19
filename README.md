@@ -3,16 +3,19 @@
 *[日本語版 README](README.ja.md)*
 
 **agent-fleet** is a hierarchical, multi-vendor agent orchestrator that runs
-driver agents (claude / codex) inside tmux panes. You talk to a single
+driver agents (claude / codex) inside terminal-multiplexer panes (tmux on
+macOS/Linux, zellij on Windows). You talk to a single
 **leader** agent and lightly toss it tasks; the leader spins up **driver**
 agents to do the work, each in its own pane, following a per-project **team
 formation** defined in YAML. Many tasks run concurrently. Everything is
-keyboard-only over tmux, and at any moment you can attach into a driver's pane
+keyboard-only inside the multiplexer, and at any moment you can attach into a driver's pane
 to read what it's doing, nudge it, or take over mid-task. It is built for
 humans-in-the-loop coding work, not lights-out autonomy.
 
-Requires **Python ≥ 3.11** and **tmux**. There is **no `pip install`** — clone
-the repo and run `./fleet`. Any Python dependency is vendored under `vendor/`.
+Requires **Python ≥ 3.11** and a terminal multiplexer: **tmux** on
+macOS/Linux, **zellij ≥ 0.45.0** on Windows (see [Windows](#windows)). There is
+**no `pip install`** — clone the repo and run `./fleet` (`fleet.cmd` on
+Windows). Any Python dependency is vendored under `vendor/`.
 
 ---
 
@@ -53,8 +56,8 @@ cd agent-fleet
 ./fleet preflight
 ```
 
-`preflight` checks Python, tmux, git, and the agent CLIs (`claude`, `codex`)
-on your `PATH`. It also warns if your Codex CLI is out of date or if its
+`preflight` checks Python, the terminal multiplexer (tmux, or zellij on
+Windows), git, and the agent CLIs (`claude`, `codex`) on your `PATH`. It also warns if your Codex CLI is out of date or if its
 directory trust is not set up. Resolve anything it flags before continuing.
 
 ### 2. Initialize a project
@@ -223,7 +226,7 @@ not killed for you — fleet warns if it spots one still running.
 
 | Command | Purpose |
 |---|---|
-| `fleet preflight` | Check Python / tmux / git / agent CLIs (incl. Codex trust + update warnings). |
+| `fleet preflight` | Check Python / multiplexer (tmux or zellij) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | Launch / attach the leader pane (default agent `claude:opus`). |
 | `fleet attach [target] [--project P]` | Attach to the leader (default) or a task driver pane. |
@@ -301,6 +304,94 @@ agent-fleet/fleet-state/
         questions.md            # `fleet-agent ask` records here
       _archive/                 # cleanup --archive lands here
 ```
+
+---
+
+## Windows
+
+fleet runs natively on Windows (no WSL), using
+[zellij](https://zellij.dev/) instead of tmux. Leader and driver panes live in
+a zellij session named `fleet-<label>`, and each driver window is a zellij
+**tab**. Everything else — formations, state files, the `fleet` /
+`fleet-agent` commands — is the same as on macOS/Linux.
+
+### Requirements
+
+- **Python ≥ 3.11** (the `py` launcher or `python` on `PATH`).
+- **zellij ≥ 0.45.0**, the native Windows build. Older versions are rejected
+  (0.44.x lacks `new-tab --no-focus`).
+- **Git for Windows.**
+- The agent CLIs you use (`claude`, `codex`), **on `PATH`** (see below).
+
+Install zellij with `winget install Zellij.Zellij`, or unzip a Windows build
+from the [zellij releases](https://github.com/zellij-org/zellij/releases) into
+a directory on `PATH`.
+
+### Setup
+
+```powershell
+git clone <this-repo-url> D:\dev\agent-fleet     # a path WITHOUT spaces
+git config --global core.longpaths true
+D:\dev\agent-fleet\fleet.cmd preflight
+```
+
+- **Run fleet through `fleet.cmd` / `fleet-agent.cmd`** (from PowerShell or
+  cmd), or as `python fleet …`. The extensionless `fleet` / `fleet-agent`
+  scripts are not directly executable on Windows. The `.cmd` shims prefer
+  `py -3`, fall back to `python`, and set `PYTHONUTF8=1`. Agents call
+  `fleet-agent.cmd` themselves: fleet embeds its path in their prompts.
+- **Clone to a path without spaces.** The `fleet-agent` path is embedded
+  unquoted in prompts, so a space breaks the agents' calls.
+- **`core.longpaths`** keeps deep worktree paths under
+  `fleet-state/projects/<p>/worktrees/` from hitting `MAX_PATH`.
+- **Agent CLIs must be on `PATH`.** Windows does not expand `~` in `PATH`, so
+  an entry like `~/.local/bin` works in Git Bash but not in PowerShell, cmd,
+  or a zellij pane. Add the real directory (e.g. `%USERPROFILE%\.local\bin`)
+  instead.
+- **`FLEET_MUX=tmux|zellij`** overrides the backend. The default is zellij on
+  Windows and tmux everywhere else.
+
+### What `fleet preflight` checks on Windows
+
+On top of the usual checks: the zellij version (fails below 0.45.0; ⚠ on
+0.45.0–0.45.1, where the zellij#5594 workaround is active), a clone path
+without spaces, `core.longpaths` (with the fix command), and that
+`fleet-agent.cmd` exists. `claude` / `codex` are shown with their resolved
+absolute paths. A CLI found only outside `PATH` (in `%USERPROFILE%\.local\bin`
+or via a `~`-prefixed `PATH` entry) is flagged ⚠, because agent panes may not
+find it.
+
+### Attaching under zellij
+
+`fleet leader --attach` and `fleet attach [<task>]` run `zellij attach
+fleet-<label>`. Detach with zellij's `Ctrl o`, then `d`. Every zellij client
+has its own focus, so attaching never moves anyone else's view. But fleet can
+steer a client to a tab only while that client is the only one attached:
+
+- If no other client is attached, `fleet attach <task>` lands on the task's
+  tab.
+- If another client is attached (e.g. you are already watching the leader in
+  another terminal), fleet prints the task's tab number instead, and you
+  switch yourself: `Ctrl t`, then the number.
+
+### Known limitations
+
+- **zellij 0.45.0–0.45.1:** tabs created while no client is attached are
+  discarded ([zellij#5594](https://github.com/zellij-org/zellij/issues/5594)).
+  fleet works around it by briefly attaching a hidden client while it opens a
+  driver tab (`FLEET_ZELLIJ_TEMP_CLIENT=0|1` forces the workaround off / on).
+- **claude's workspace-trust dialog.** claude's first run in a fresh worktree
+  asks whether to trust the folder. fleet does not answer it: the task is
+  surfaced as a boot gate (`awaiting_orders` + a notification), and a human
+  must attach and confirm. The prompt is then delivered automatically.
+- **Verify commands run under `cmd.exe`** on Windows, so a
+  `verify` command must be valid cmd syntax.
+- **codex under zellij is not verified yet.** claude drivers are.
+
+Desktop notifications use a Windows toast (on by default; set
+`windows: {enabled: false}` in the project's `notify.yaml` to turn it off).
+The investigation behind this port and the remaining follow-ups are in
+[docs/windows-support.md](docs/windows-support.md).
 
 ---
 

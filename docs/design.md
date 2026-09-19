@@ -21,7 +21,7 @@
 
 | Pillar | Description |
 |---|---|
-| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both on tmux). A leader is a project-agnostic **session** — one conversational counterpart that may serve one or several projects (§5.6) |
+| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both in a terminal multiplexer: tmux on macOS/Linux, zellij on Windows). A leader is a project-agnostic **session** — one conversational counterpart that may serve one or several projects (§5.6) |
 | **2. Multi-vendor agents** | claude / codex can be combined (MVP supports 2 vendors; OpenAI / Gemini come later) |
 | **3. Team formation definitions** | Per-project team formation (single driver / driver + reviewer / multi-stage) selected via YAML |
 
@@ -92,18 +92,24 @@ these principles (see §9 anti-scope).
 ## 3. Architecture Overview
 
 ```
-[user] <--tmux--> [leader: conversation + start only]
+[user] <--mux--> [leader: conversation + start only]
                        |
                        v fleet-agent start
-                  [driver pane] (tmux window)
+                  [driver pane] (mux window: tmux window / zellij tab)
                        |
                        +--> events.jsonl (append-only)
-                       +--> notification (macOS / slack)
+                       +--> notification (macOS / Windows / slack)
                        +--> dashboard (read-only view)
                        |
                        v user intervenes when needed
                   [user attaches directly to the driver pane to converse]
 ```
+
+"mux" is the terminal multiplexer: tmux on macOS/Linux, zellij on Windows
+(`FLEET_MUX` overrides). Every multiplexer call goes through the
+mechanism-only `fleet/mux/` interface (`mux/tmux.py`, `mux/zellij.py`).
+Where this document names a tmux primitive, it describes the tmux backend;
+the zellij mapping is in [windows-support.md](windows-support.md) §3.
 
 ### 3.1 Key Ideas
 
@@ -114,8 +120,8 @@ these principles (see §9 anti-scope).
   explicit `--project`; the **task** carries the binding (`owner_session`, §5.6).
 - **The driver reaches the user directly**: via events.jsonl + notifications +
   dashboard, without relaying through the leader.
-- **The user can talk to the driver directly**: a tmux attach lets them
-  intervene in the pane.
+- **The user can talk to the driver directly**: attaching to the
+  multiplexer (`fleet attach`) lets them intervene in the pane.
 - **The fleet itself is development-flow agnostic**: worktrees are a workspace
   mode; PR / changelog and the like are left to the project.
 
@@ -137,8 +143,10 @@ may run one or several leader sessions (§5.6). The leader's responsibilities:
 - driver-prompt injection is not pasted directly inside `start`. After
   launching the driver pane and the agent CLI, `start` detaches a small
   stdlib-only prompt deliverer and returns immediately. The deliverer polls
-  tmux `capture-pane` at short intervals, and once the per-adapter ready regex
-  (one each for claude / codex) matches, it pastes — via the tmux buffer — a
+  the pane capture (tmux `capture-pane` / zellij `dump-screen`) at short
+  intervals, and once the per-adapter ready regex (one each for claude /
+  codex) matches, it pastes — via the multiplexer (a tmux buffer / zellij's
+  bracketed `paste`) — a
   pointer line referencing `driver-prompt.md`, then sends Enter to submit after
   the paste settles, and exits (it pastes a single pointer line, not the full
   prompt). After submitting, it does not interpret the pane's text; instead it
@@ -210,7 +218,7 @@ optional warning if the npm global install's package version differs from the
 
 ### 4.3 User Responsibilities
 
-- Delegating tasks to the leader (on tmux)
+- Delegating tasks to the leader (in the terminal multiplexer)
 - Tracking driver state via notifications / dashboard
 - Attaching directly to a driver pane to converse when needed
 - Answering driver questions and making merge decisions (depending on the
@@ -250,16 +258,17 @@ A global registry (`fleet-state/projects.yaml`) manages all projects centrally.
 - Omitting `--name` in `fleet init` uses the repo directory basename.
 
 **Sessions are launched by label, not by project.** `fleet leader [--name
-<label>]` starts a project-agnostic leader session in tmux `fleet-<label>`
-(default label `main`). The label is free-form, so the operational style falls
-out of how you name sessions (§5.6). A driver window the session spawns is
-opened **in that session's tmux** (`fleet-<label>`) — the owner session holds
-both the leader window and the driver windows it started.
+<label>]` starts a project-agnostic leader session in the multiplexer
+session `fleet-<label>` (default label `main`). The label is free-form, so the
+operational style falls out of how you name sessions (§5.6). A driver window
+the session spawns is opened **in that session's multiplexer session**
+(`fleet-<label>`) — the owner session holds both the leader window and the
+driver windows it started.
 
 ```bash
 fleet init /path/to/image-gallery        # name is the basename "image-gallery"
 fleet init --name api /path/to/api-repo  # explicit
-fleet leader                             # one project-agnostic session, tmux fleet-main
+fleet leader                             # one project-agnostic session, mux session fleet-main
 fleet leader --name migration            # a second session for a workstream
 fleet sessions                           # live leader sessions + their in-flight tasks
 fleet status --all                       # cross-project task summary
@@ -288,7 +297,7 @@ A project that is no longer needed can be removed from the registry with
       dashboard.html   # cross-project GUI view (auto-generated by fleet dashboard; §5.5)
       sessions/
         <label>/                       ← per-session leader state (one dir per live/known session)
-          session.json          # label / agent spec / started_at / tmux pane
+          session.json          # label / agent spec / started_at / leader pane
           leader-pending.jsonl  # queued driver done/gate notifications for this session
           leader-notifier.lock  # flock: one notifier per session at a time
     projects/
@@ -464,9 +473,9 @@ A **session** is the unit of context scope and the binding key for
 notifications. It replaces the old "1 project = 1 leader" coupling.
 
 **Entrypoint and naming.** `fleet leader [--name <label>]` starts a
-project-agnostic session as tmux `fleet-<label>` (default label `main`). The
-label is free-form, so the operational style is expressed by how you name
-sessions:
+project-agnostic session as multiplexer session `fleet-<label>` (default label
+`main`). The label is free-form, so the operational style is expressed by how
+you name sessions:
 
 | Style | How | Who it suits |
 |---|---|---|
@@ -798,8 +807,8 @@ Exceeding `verify.max_iterations` parks the task at `awaiting_orders`.
 
 In a stage with peer_review, the implementer's and reviewer's agent CLIs are
 kept running for the duration of the stage. Only the first reviewer is launched
-as a new tmux window when needed; subsequent iteration handoffs wake the
-existing pane via an inbox notification with `send-keys`. This preserves agent
+as a new multiplexer window when needed; subsequent iteration handoffs wake the
+existing pane via an inbox notification typed into the pane. This preserves agent
 context, so the agent CLI boot gate is only crossed at the stage's first
 launch. In multi_stage, this long-lived behavior is stage-local; an ordinary
 cross-stage advance launches the next stage's driver fresh.
@@ -1019,7 +1028,7 @@ fact: the command exited zero or it did not.
 
 | Feature | Placement |
 |---|---|
-| tmux pane launch | core |
+| multiplexer pane launch (`fleet/mux/`: tmux / zellij) | core |
 | inbox / outbox file communication | core |
 | driver-prompt injection | core |
 | state DB update | core |
@@ -1092,7 +1101,7 @@ to **`owner_session`**:
 - **Record at spawn.** `fleet-agent start` stamps the spawning session's label
   onto the task as `owner_session` (the leader pane carries its label in the
   environment, e.g. `FLEET_SESSION`, so `start` knows who it is). The same label
-  also decides **which tmux session the driver window opens in** (`fleet-<label>`,
+  also decides **which multiplexer session the driver window opens in** (`fleet-<label>`,
   §5.2) — `owner_session` governs both window placement and notification routing,
   so a session sees its own drivers' panes and gets its own drivers' notifications.
 - **Resolve at `done`.** When the gated event fires, the notifier resolves
@@ -1136,13 +1145,14 @@ cross-project web view (Issue #166 facet A).
 
 - **Not adopted** (Anthropic Agent SDK / LangGraph / a homegrown framework)
 - Reasons:
-  - Launching claude / codex CLIs directly in a tmux pane aligns with the
-    fleet's distinctive human fallback.
+  - Launching claude / codex CLIs directly in a multiplexer pane (tmux on
+    macOS/Linux, zellij on Windows) aligns with the fleet's distinctive human
+    fallback.
   - Going through an SDK loses pane visibility.
   - Handling multi-vendor (claude / codex) through an SDK introduces vendor SDK
     compatibility problems.
-- A driver = a claude / codex CLI process launched inside a tmux pane;
-  communication is via files + the tmux pane.
+- A driver = a claude / codex CLI process launched inside a multiplexer pane;
+  communication is via files + the pane (through `fleet/mux/`).
 
 ### 11.3 Dependencies
 
@@ -1179,6 +1189,9 @@ agent-fleet/
 - Both are shebang scripts that import the same `src/fleet/` module. A design
   that physically separates "what humans type" from "what the system invokes
   automatically."
+- On Windows, where shebang scripts are not executable, `fleet.cmd` /
+  `fleet-agent.cmd` shims run the same scripts (`py -3`, falling back to
+  `python`, with `PYTHONUTF8=1`); prompts embed the `fleet-agent.cmd` path.
 - pyproject.toml / setuptools entry_points are **not used in the MVP** (no
   `pip install` assumed)
 - Room is left to switch to pyproject when distribution becomes a goal
