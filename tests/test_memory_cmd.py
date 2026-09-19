@@ -1,7 +1,6 @@
 """Tests for ``fleet-agent memory <list|read|write>`` (Issue #114)."""
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import unittest
@@ -9,11 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet-agent"
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
+from tests._fleet_test_helpers import run_fleet_agent  # noqa: E402
 
 _FIXTURE = """\
 ---
@@ -48,13 +47,9 @@ class MemoryCmdTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _run(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env.pop("FLEET_TASK_ID", None)
-        env["FLEET_STATE_DIR"] = str(self.state_dir)
-        return subprocess.run(
-            [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True, encoding="utf-8", cwd=str(self.project), env=env,
-            input=stdin,
+        return run_fleet_agent(
+            *args, cwd=self.project, stdin=stdin,
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
         )
 
     def test_list_shows_entry_with_description(self) -> None:

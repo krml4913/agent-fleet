@@ -27,7 +27,11 @@ from tests._fleet_test_helpers import make_project, seed_global_roles  # noqa: E
 class RunningEditServer:
     def __init__(self, context: edit_cmd.EditContext):
         self.server = edit_cmd.EditServer(context)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # A short poll interval keeps ``shutdown()`` from waiting out the
+        # default 0.5 s select() timeout on every test.
+        self.thread = threading.Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
 
     @property
     def base_url(self) -> str:

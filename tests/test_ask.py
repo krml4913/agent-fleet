@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet-agent"
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
@@ -46,14 +44,11 @@ class AskTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_records_awaiting_orders(self) -> None:
-        env = os.environ.copy()
-        env["FLEET_STATE_DIR"] = str(self.state_dir)
-        result = subprocess.run(
-            [sys.executable, str(FLEET), "ask", "--task-id", "1",
-             "Should I use approach A or B?"],
-            capture_output=True, text=True, encoding="utf-8",
-            cwd=str(self.project),
-            env=env,
+        result = run_fleet_agent(
+            "ask", "--task-id", "1",
+            "Should I use approach A or B?",
+            cwd=self.project,
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -70,25 +65,18 @@ class AskTests(unittest.TestCase):
 
     def test_resolves_from_cwd(self) -> None:
         task_cwd = self.state_dir / "tasks" / "task-1"
-        env = os.environ.copy()
-        env.pop("FLEET_TASK_ID", None)
-        env["FLEET_STATE_DIR"] = str(self.state_dir)
-        result = subprocess.run(
-            [sys.executable, str(FLEET), "ask", "from cwd"],
-            capture_output=True, text=True, encoding="utf-8",
-            cwd=str(task_cwd),
-            env=env,
+        result = run_fleet_agent(
+            "ask", "from cwd",
+            cwd=task_cwd,
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_unknown_task(self) -> None:
-        env = os.environ.copy()
-        env["FLEET_STATE_DIR"] = str(self.state_dir)
-        result = subprocess.run(
-            [sys.executable, str(FLEET), "ask", "--task-id", "999", "?"],
-            capture_output=True, text=True, encoding="utf-8",
-            cwd=str(self.project),
-            env=env,
+        result = run_fleet_agent(
+            "ask", "--task-id", "999", "?",
+            cwd=self.project,
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("task.yaml missing", result.stderr)

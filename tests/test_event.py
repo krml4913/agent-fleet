@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import unittest
@@ -10,11 +9,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet-agent"
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
+from tests._fleet_test_helpers import run_fleet_agent  # noqa: E402
 
 
 class EventEmitTests(unittest.TestCase):
@@ -29,19 +28,20 @@ class EventEmitTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env.pop("FLEET_TASK_ID", None)
-        env["FLEET_STATE_DIR"] = str(self.state_dir)
-        return subprocess.run(
-            [sys.executable, str(FLEET), *args],
-            capture_output=True, text=True, encoding="utf-8",
-            cwd=str(cwd) if cwd else str(self.project),
-            env=env,
+    def _run(self, *args: str, cwd: Path | None = None,
+             subprocess_: bool = False) -> subprocess.CompletedProcess[str]:
+        return run_fleet_agent(
+            *args, cwd=cwd or self.project,
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
+            subprocess_=subprocess_,
         )
 
     def test_emit_basic(self) -> None:
-        r = self._run("event", "emit", "milestone", "--task-id", "1")
+        # Deliberately a real ``python fleet-agent …`` subprocess: the suite's
+        # end-to-end smoke test of the fleet-agent script (sys.path shim,
+        # stdio setup, exit code, state written from another process). Other
+        # CLI tests run in-process via fleet.cli.main_agent.
+        r = self._run("event", "emit", "milestone", "--task-id", "1", subprocess_=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         events = self._events()
         msl = [e for e in events if e["type"] == "milestone"]
