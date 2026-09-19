@@ -9,6 +9,7 @@ import yaml
 from .. import task_context
 from .. import formation as formation_mod
 from .. import state as state_mod
+from ._seed import add_seed_parser
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -36,6 +37,8 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p_show = sp.add_parser("show", help="Print a formation's YAML")
     p_show.add_argument("name", help="Formation name")
     p_show.set_defaults(func=run_show)
+
+    add_seed_parser(sp, "formation")
 
 
 def run_list(args: argparse.Namespace) -> int:

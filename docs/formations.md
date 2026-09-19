@@ -414,6 +414,8 @@ approval/review/check boundaries cannot silently disappear through a typo
 |---|---|
 | `fleet formation list` | List project/global runtime formations plus shipped template seed sources. |
 | `fleet formation show <name>` | Print a project/global formation's YAML and run validate. |
+| `fleet formation seed <name> [--global] [--project P] [--force]` | Copy a shipped formation seed into the project (default) or global tier; refuses to overwrite unless `--force`. |
+| `fleet role seed <name> [--global] [--project P] [--force]` | Copy a shipped role prompt into the project (default) or global tier (same overwrite rule). |
 | `fleet-agent start <task-id> --formation <name>` | Resolve the formation and launch the task. |
 | `fleet-agent approve <task-id>` | Relay user approval for the current `user_approval` gate. |
 | `fleet-agent reject <task-id>` | Relay user rejection; the stage returns to implementation. |

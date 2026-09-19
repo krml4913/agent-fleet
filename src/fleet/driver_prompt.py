@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from . import seeds
 from . import state as state_mod
 from .paths import fleet_agent_bin, prompt_bin_ref  # fleet_agent_bin re-exported: shared by leader_prompt
 
@@ -51,7 +52,14 @@ def _load_role_fragment(role: str, state_dir: Path | str | None) -> str:
         if path.is_file():
             return path.read_text(encoding="utf-8")
     tiers = "\n".join(f"  - {path}" for path in looked)
-    raise RoleResolutionError(f"no role named {role!r}. Looked in:\n{tiers}")
+    raise RoleResolutionError(
+        seeds.with_hint(
+            f"no role named {role!r}. Looked in:\n{tiers}",
+            "role",
+            role,
+            state_dir,
+        )
+    )
 
 
 def _iter_formation_roles(formation_data: dict[str, Any]) -> list[str]:

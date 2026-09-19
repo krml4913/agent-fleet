@@ -73,7 +73,18 @@ class FormationTemplateTests(unittest.TestCase):
             (state / "formations").mkdir(parents=True)
             with self.assertRaises(FileNotFoundError) as ctx:
                 formation.load_formation("pair_review", state)
-            self.assertNotIn("templates/pair_review.yaml", str(ctx.exception))
+            # The seed hint may name the shipped template, but only the
+            # "Looked in" tiers matter: they must not include it (no fallback).
+            lines = str(ctx.exception).splitlines()
+            self.assertIn("Looked in:", lines[0])
+            tiers = []
+            for line in lines[1:]:
+                if not line.startswith("  - "):
+                    break
+                tiers.append(line[4:])
+            self.assertEqual(len(tiers), 2)
+            for tier in tiers:
+                self.assertNotIn(str(formation.TEMPLATES_DIR), tier)
 
     def test_resolve_formation_explicit_from_global(self) -> None:
         with TemporaryDirectory() as tmp:
