@@ -9,6 +9,7 @@ import yaml
 from .. import task_context
 from .. import formation as formation_mod
 from .. import state as state_mod
+from ._project_arg import add_group_project_arg, add_sub_project_arg
 from ._seed import add_seed_parser
 
 
@@ -21,21 +22,16 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "one runtime definition. Explicit names resolve project -> global."
         ),
     )
-    p.add_argument(
-        "--project",
-        default=".",
-        help=(
-            "Project name (registry); required from a project-agnostic leader "
-            "session, else resolved from FLEET_STATE_DIR / cwd"
-        ),
-    )
+    add_group_project_arg(p)
     sp = p.add_subparsers(dest="formation_cmd", required=True, metavar="<sub>")
 
     p_list = sp.add_parser("list", help="List runtime formations and template seeds")
+    add_sub_project_arg(p_list)
     p_list.set_defaults(func=run_list)
 
     p_show = sp.add_parser("show", help="Print a formation's YAML")
     p_show.add_argument("name", help="Formation name")
+    add_sub_project_arg(p_show)
     p_show.set_defaults(func=run_show)
 
     add_seed_parser(sp, "formation")

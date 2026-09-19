@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 
+from ._project_arg import add_group_project_arg
 from ._seed import add_seed_parser
 
 
@@ -16,13 +17,6 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "runtime tier."
         ),
     )
-    p.add_argument(
-        "--project",
-        default=".",
-        help=(
-            "Project name (registry); required from a project-agnostic leader "
-            "session, else resolved from FLEET_STATE_DIR / cwd"
-        ),
-    )
+    add_group_project_arg(p)
     sp = p.add_subparsers(dest="role_cmd", required=True, metavar="<sub>")
     add_seed_parser(sp, "role")

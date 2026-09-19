@@ -6,6 +6,7 @@ import sys
 
 from .. import seeds
 from .. import task_context
+from ._project_arg import add_sub_project_arg
 
 
 def add_seed_parser(sub: argparse._SubParsersAction, kind: str) -> None:
@@ -26,13 +27,7 @@ def add_seed_parser(sub: argparse._SubParsersAction, kind: str) -> None:
         action="store_true",
         help="Seed into the global tier instead of the project tier",
     )
-    # SUPPRESS: the group-level --project (fleet <kind> --project P seed ...) keeps
-    # working; a subparser default would otherwise overwrite it.
-    p.add_argument(
-        "--project",
-        default=argparse.SUPPRESS,
-        help="Project name (registry); ignored with --global",
-    )
+    add_sub_project_arg(p, help="Project name (registry); ignored with --global")
     p.add_argument(
         "--force",
         action="store_true",
