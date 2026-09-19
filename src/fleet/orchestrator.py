@@ -304,9 +304,16 @@ def reject_user_approval(
     task_id: str,
     task: dict,
     *,
+    reason: str | None = None,
     dry_run: bool = False,
 ) -> None:
-    """Relay explicit user rejection and return the stage to implementation."""
+    """Relay explicit user rejection and return the stage to implementation.
+
+    Every rejection appends a ``[fleet reject]`` block (carrying ``reason`` when
+    given) to the task inbox before the peer-review handoff / relaunch, so the
+    driver can tell a rejection from a plain restart and does not re-submit
+    unchanged work.
+    """
     stages, current_idx, stage, ua, relay_kind = _require_user_relay_target(task)
 
     if ua is not None:
@@ -327,6 +334,13 @@ def reject_user_approval(
     task["current_stage"] = current_idx
     task["status"] = "running"
     state_mod.save_task(state_dir, task_id, task)
+
+    # Before the handoff / relaunch: the driver reads its inbox on wake-up.
+    _append_handoff_inbox(
+        state_dir,
+        task_id,
+        _reject_message(role=stage.get("role", "driver"), reason=reason),
+    )
 
     if not dry_run:
         pr = stage.get("peer_review")
@@ -851,6 +865,26 @@ def _append_handoff_inbox(state_dir: Path, task_id: str, message: str) -> None:
         # Audit snippet only — the full message lives in inbox.md.
         message=truncate_text(message),
         inbox_ts=ts,
+    )
+
+
+def _reject_message(*, role: str, reason: str | None) -> str:
+    from . import driver_prompt as dp
+
+    fleet_bin = dp.fleet_agent_bin()
+    head = f"[fleet reject] The user rejected this stage's work (role={role})."
+    if reason:
+        return (
+            f"{head}\n\n"
+            f"Reason:\n{reason}\n\n"
+            "Do not re-submit unchanged work. Address the reason above, then "
+            f"call `{fleet_bin} done --result approved` again."
+        )
+    return (
+        f"{head} No reason was given.\n\n"
+        "Do not re-submit unchanged work. Ask the user/leader what to change "
+        f'with `{fleet_bin} ask "<question>"` before calling `{fleet_bin} done` '
+        "again."
     )
 
 
