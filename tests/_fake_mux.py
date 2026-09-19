@@ -58,6 +58,9 @@ class FakeMux(Mux):
         self.preload_hint = preload_hint
         self.calls: list[tuple[str, tuple, dict]] = []
         self.fail: dict[str, BaseException] = {}
+        # Transient failures: method → [exception, remaining raises]; each call
+        # raises until the count runs out, then the method behaves normally.
+        self._fail_next: dict[str, list[Any]] = {}
         # Per-method side-effect hooks, called with the method's arguments
         # after the call is recorded (e.g. to append an ack event on Enter).
         self.on: dict[str, Any] = {}
@@ -67,12 +70,20 @@ class FakeMux(Mux):
 
     def _record(self, method: str, *args: Any, **kwargs: Any) -> None:
         self.calls.append((method, args, kwargs))
+        pending = self._fail_next.get(method)
+        if pending is not None and pending[1] > 0:
+            pending[1] -= 1
+            raise pending[0]
         exc = self.fail.get(method)
         if exc is not None:
             raise exc
         hook = self.on.get(method)
         if hook is not None:
             hook(*args, **kwargs)
+
+    def fail_next(self, method: str, exc: BaseException, times: int = 1) -> None:
+        """Make the next ``times`` calls of ``method`` raise ``exc`` (a transient error)."""
+        self._fail_next[method] = [exc, times]
 
     def calls_named(self, method: str) -> list[tuple[tuple, dict]]:
         return [(a, k) for (m, a, k) in self.calls if m == method]

@@ -235,6 +235,12 @@ After the discarded tabs from §4.3 went away, the next tab got id `1` again.
 
 → Never persist tab or pane ids. Resolve by tab name on every operation.
 
+→ The pane listing can also be briefly inconsistent while another tab in the same
+session is closed (`tab not found` for a tab that exists), so a `MuxError` from a
+detached poller is transient: the prompt deliverer and the leader notifier retry
+until their deadline and give up only when the session is confirmed gone
+(design.md §10.3, Issues #289 / #292).
+
 ### 4.9 Other verified points
 
 - Tab and session names containing `·` work.

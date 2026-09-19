@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import agents, mux, notify, prompt_pointer, state as state_mod
+from . import agents, leader_notifier, mux, notify, prompt_pointer, state as state_mod
 from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 from .proc import spawn_detached
@@ -18,6 +18,15 @@ from .proc import spawn_detached
 DEFAULT_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 PASTE_SETTLE_SECONDS = 0.25
+# A MuxError from the multiplexer is transient (Issue #289: zellij briefly lists
+# panes inconsistently while another tab is closed, docs/windows-support.md §4.8):
+# retry with this doubling backoff until the delivery deadline. It only counts as
+# fatal if it persists that long or the session is confirmed gone.
+TRANSIENT_BACKOFF_INITIAL_SECONDS = 0.5
+TRANSIENT_BACKOFF_MAX_SECONDS = 8.0
+# ``source`` of this module's ``error`` events (also how a later recovery
+# recognises a failure it caused itself).
+DELIVERER_SOURCE = "prompt_deliverer"
 # Settle between each session-rename keystroke step (and after the last) so a
 # TUI rename popup has a beat to open and close before the prompt paste.
 RENAME_SETTLE_SECONDS = 0.6
@@ -112,12 +121,32 @@ def deliver(
         time.sleep(initial_delay)
 
     backend = mux.get()
+    capture_error: mux.MuxError | None = None
+    capture_backoff = TRANSIENT_BACKOFF_INITIAL_SECONDS
     while time.monotonic() <= deadline:
         try:
             pane = backend.capture(session, window)
         except mux.MuxError as e:
-            _fail(state_dir, task_id, f"prompt deliverer cannot capture pane: {e}", window)
-            return 1
+            # Transient unless the session is really gone (Issue #289): keep
+            # polling with a backoff until the deadline.
+            if leader_notifier.session_confirmed_gone(backend, session):
+                _fail(
+                    state_dir,
+                    task_id,
+                    f"prompt deliverer cannot capture pane: session {session} is gone: {e}",
+                    window,
+                )
+                return 1
+            if capture_error is None:
+                _log(f"capture failed ({e}); retrying with backoff until the deadline")
+            capture_error = e
+            time.sleep(min(capture_backoff, max(0.1, deadline - time.monotonic())))
+            capture_backoff = min(capture_backoff * 2, TRANSIENT_BACKOFF_MAX_SECONDS)
+            continue
+        if capture_error is not None:
+            _log("capture recovered")
+            capture_error = None
+            capture_backoff = TRANSIENT_BACKOFF_INITIAL_SECONDS
 
         if adapter.is_ready(pane):
             try:
@@ -127,14 +156,28 @@ def deliver(
                 # claude named itself at launch → session_rename_keys is [] → no-op.
                 if session_name:
                     for step, enter in adapter.session_rename_keys(session_name):
-                        mux.send_step(session, window, step, enter=enter, backend=backend)
+                        _retry_mux(
+                            lambda step=step, enter=enter: mux.send_step(
+                                session, window, step, enter=enter, backend=backend
+                            ),
+                            backend=backend,
+                            session=session,
+                            deadline=deadline,
+                            what="rename step",
+                        )
                         time.sleep(RENAME_SETTLE_SECONDS)
                 # Paste a short pointer to the prompt file, not the prompt
                 # body — pasting the full body trips agent-CLI input quirks
                 # (mixed-character corruption, see Issue #90).
                 checkpoint = _event_checkpoint(state_dir / "events.jsonl", task_id)
-                prompt_pointer.paste_pointer(
-                    backend, session=session, window=window, prompt_path=prompt_path
+                _retry_mux(
+                    lambda: prompt_pointer.paste_pointer(
+                        backend, session=session, window=window, prompt_path=prompt_path
+                    ),
+                    backend=backend,
+                    session=session,
+                    deadline=deadline,
+                    what="paste",
                 )
                 acknowledged = _submit_and_wait_for_inbox_seen(
                     state_dir=state_dir,
@@ -173,6 +216,15 @@ def deliver(
 
         time.sleep(max(0.1, poll_interval))
 
+    if capture_error is not None:
+        _fail(
+            state_dir,
+            task_id,
+            f"prompt deliverer cannot capture pane (still failing after {timeout:g}s): "
+            f"{capture_error}",
+            window,
+        )
+        return 1
     _fail(
         state_dir,
         task_id,
@@ -217,6 +269,40 @@ def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) ->
     )
 
 
+def _log(message: str) -> None:
+    """One timestamped line on stderr, i.e. in ``prompt-deliverer.log`` when detached."""
+    print(f"{utcnow_iso()} [pid {os.getpid()}] {message}", file=sys.stderr, flush=True)
+
+
+def _retry_mux(op, *, backend, session: str, deadline: float, what: str):
+    """Run ``op()``; a ``MuxError`` is transient: back off and retry until ``deadline``.
+
+    Raises the (annotated) ``MuxError`` only when it persisted to the deadline or the
+    session is confirmed gone (re-checked, see :func:`leader_notifier.session_confirmed_gone`).
+    """
+    delay = TRANSIENT_BACKOFF_INITIAL_SECONDS
+    attempt = 0
+    while True:
+        try:
+            result = op()
+        except mux.MuxError as e:
+            attempt += 1
+            if leader_notifier.session_confirmed_gone(backend, session):
+                raise mux.MuxError(f"session {session} is gone: {e}") from e
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise mux.MuxError(
+                    f"{e} (still failing at the delivery deadline after {attempt} attempts)"
+                ) from e
+            _log(f"{what} failed ({e}); attempt {attempt}, retrying in {min(delay, remaining):g}s")
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, TRANSIENT_BACKOFF_MAX_SECONDS)
+            continue
+        if attempt:
+            _log(f"{what} recovered after {attempt} failed attempt(s)")
+        return result
+
+
 def _fail(state_dir: Path, task_id: str, message: str, window: str) -> None:
     try:
         task = state_mod.load_task(state_dir, task_id)
@@ -230,20 +316,81 @@ def _fail(state_dir: Path, task_id: str, message: str, window: str) -> None:
         state_dir / "events.jsonl",
         "error",
         task_id=task_id,
-        source="prompt_deliverer",
+        source=DELIVERER_SOURCE,
         window=window,
         message=message,
     )
+    _push_failure_to_leader(state_dir, task_id, message)
+
+
+def _push_failure_to_leader(state_dir: Path, task_id: str, message: str) -> None:
+    """Opt-in (``notify_leader_on_driver_done``): tell the owning leader delivery failed.
+
+    Without this a failed delivery leaves an idle driver with no prompt until
+    someone happens to look at ``fleet status`` (Issue #289). Best-effort: it must
+    never turn the failure report itself into a crash.
+    """
+    try:
+        task = state_mod.load_task(state_dir, task_id)
+        project = state_mod.load_project(state_dir)
+        leader_notifier.push_to_leader(
+            state_dir,
+            task_id,
+            task,
+            project,
+            project.get("name", "?"),
+            status="failed",
+            summary=message,
+            kind=leader_notifier.KIND_DELIVERY_FAILED,
+        )
+    except Exception:  # noqa: BLE001 - reporting must not break the failure path
+        pass
+
+
+def _last_error_source(state_dir: Path, task_id: str) -> str | None:
+    """``source`` of the most recent ``error`` event of ``task_id``, if any."""
+    events_path = state_dir / "events.jsonl"
+    if not events_path.exists():
+        return None
+    source: str | None = None
+    with events_path.open("rb") as f:
+        for raw in f:
+            try:
+                event = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "error" and event.get("task_id") == task_id:
+                source = event.get("source")
+    return source
 
 
 def _mark_running_if_needed(state_dir: Path, task_id: str) -> None:
+    """After a delivery: lift ``awaiting_orders`` (boot gate) or our own ``failed``.
+
+    A task this deliverer marked ``failed`` (Issue #289) and that was later
+    delivered anyway (e.g. ``fleet-agent send-prompt`` recovery) goes back to the
+    status derived from its stages, with a ``prompt_delivery_recovered`` event. A
+    ``failed`` status from anywhere else is left alone.
+    """
     try:
         task = state_mod.load_task(state_dir, task_id)
     except FileNotFoundError:
         return
-    if task.get("status") == "awaiting_orders":
+    status = task.get("status")
+    if status == "awaiting_orders":
         task["status"] = state_mod.derive_task_status(task.get("stages") or [])
         state_mod.save_task(state_dir, task_id, task)
+    elif status == "failed" and _last_error_source(state_dir, task_id) == DELIVERER_SOURCE:
+        task["status"] = state_mod.derive_task_status(task.get("stages") or [])
+        state_mod.save_task(state_dir, task_id, task)
+        append_event(
+            state_dir / "events.jsonl",
+            "prompt_delivery_recovered",
+            task_id=task_id,
+            source=DELIVERER_SOURCE,
+            previous_status="failed",
+            status=task["status"],
+        )
 
 
 def _submit_and_wait_for_inbox_seen(
@@ -268,7 +415,13 @@ def _submit_and_wait_for_inbox_seen(
     """
     backend = mux.get()
     time.sleep(PASTE_SETTLE_SECONDS)
-    backend.send_key(session, window, "Enter")
+    _retry_mux(
+        lambda: backend.send_key(session, window, "Enter"),
+        backend=backend,
+        session=session,
+        deadline=deadline,
+        what="submit Enter",
+    )
 
     events_path = state_dir / "events.jsonl"
     offset = checkpoint.offset
@@ -279,8 +432,14 @@ def _submit_and_wait_for_inbox_seen(
         if matched:
             return True
         if retries_left > 0 and time.monotonic() >= next_retry_at:
-            backend.send_key(session, window, "Enter")
-            retries_left -= 1
+            try:
+                backend.send_key(session, window, "Enter")
+                retries_left -= 1
+            except mux.MuxError as e:
+                # The pointer is already pasted: a failed resubmit does not use
+                # up a retry and is tried again next interval; the ack wait
+                # still bounds the delivery.
+                _log(f"resubmit Enter failed ({e}); will retry")
             next_retry_at = time.monotonic() + adapter.submit_retry_interval_seconds
         time.sleep(max(0.1, poll_interval))
 
