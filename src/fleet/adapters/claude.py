@@ -12,6 +12,7 @@ class ClaudeAdapter(VendorAdapter):
     name = "claude"
 
     ready = re.compile(r"(?m)^\s*❯(?!\s*\d+\.)")
+    menu_cursor = "❯"
     gate = re.compile(
         r"(?im)"
         r"(?:login|log in|sign in|authentication|authenticate|"

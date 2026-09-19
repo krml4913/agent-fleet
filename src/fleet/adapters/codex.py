@@ -12,6 +12,7 @@ class CodexAdapter(VendorAdapter):
     name = "codex"
 
     ready = re.compile(r"(?m)^\s*›(?!\s*\d+\.)")
+    menu_cursor = "›"
     gate = re.compile(
         r"(?im)"
         r"(?:^\s*(?:[›❯]\s*)?1\.\s*Update now\b|"
