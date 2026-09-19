@@ -41,6 +41,12 @@ _WIN_LOCK_POLL_SECONDS = 0.05
 _REPLACE_RETRIES = 50
 _REPLACE_RETRY_SECONDS = 0.02
 
+#: Flush-to-disk used before each atomic rename. A module attribute (default
+#: ``os.fsync``) purely so the unit-test suite can swap in a no-op: durability
+#: is not observable in-process and the syscall dominated suite wall time on
+#: Windows. Production never reassigns it.
+fsync: Callable[[int], None] = os.fsync
+
 
 def lock_file(fp: IO, *, blocking: bool = True) -> bool:
     """Take an exclusive advisory lock on the open file ``fp``.
@@ -132,7 +138,7 @@ def atomic_write(path: Path, *, encoding: str = "utf-8") -> Iterator[IO[str]]:
                 with os.fdopen(fd, "w", encoding=encoding) as tmp_f:
                     yield tmp_f
                     tmp_f.flush()
-                    os.fsync(tmp_f.fileno())
+                    fsync(tmp_f.fileno())
                 replace_file(tmp_path, target)
             except BaseException:
                 try:
@@ -182,7 +188,7 @@ def atomic_update(
                 with os.fdopen(fd, "w", encoding=encoding) as tmp_f:
                     tmp_f.write(new)
                     tmp_f.flush()
-                    os.fsync(tmp_f.fileno())
+                    fsync(tmp_f.fileno())
                 replace_file(tmp_path, target)
             except BaseException:
                 try:

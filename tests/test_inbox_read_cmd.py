@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import unittest
@@ -10,11 +9,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet-agent"
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
+from tests import _fleet_test_helpers as _helpers  # noqa: E402
 from fleet.commands.inbox_read import extract_watermark  # noqa: E402
 
 
@@ -23,18 +22,7 @@ def run_fleet_agent(
     env: dict | None = None,
     cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    base_env = os.environ.copy()
-    base_env.pop("FLEET_TASK_ID", None)
-    base_env.pop("FLEET_STATE_DIR", None)
-    if env:
-        base_env.update(env)
-    return subprocess.run(
-        [sys.executable, str(FLEET), *args],
-        capture_output=True,
-        text=True, encoding="utf-8",
-        cwd=str(cwd) if cwd else None,
-        env=base_env,
-    )
+    return _helpers.run_fleet_agent(*args, cwd=cwd, env_extra=env)
 
 
 class ExtractWatermarkTests(unittest.TestCase):

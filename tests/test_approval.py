@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import unittest
@@ -10,11 +9,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
-FLEET = ROOT / "fleet-agent"
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import state  # noqa: E402
+from tests._fleet_test_helpers import run_fleet_agent  # noqa: E402
 
 
 def _approval_task(task_id: str = "1") -> dict:
@@ -49,20 +48,13 @@ class ApprovalCommandTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        env.pop("FLEET_TASK_ID", None)
+        env = {}
         env["FLEET_STATE_DIR"] = str(self.state_dir)
         # ``reject`` relaunches the stage driver, which would otherwise spawn a
         # real ``fleet-demo`` tmux session that no test ever tears down (#130).
         # This test only asserts state transitions, so keep tmux out of it.
         env["FLEET_NO_MUX"] = "1"
-        return subprocess.run(
-            [sys.executable, str(FLEET), *args],
-            capture_output=True,
-            text=True, encoding="utf-8",
-            cwd=str(self.project),
-            env=env,
-        )
+        return run_fleet_agent(*args, cwd=self.project, env_extra=env)
 
     def test_approve_completes_waiting_user_approval_gate(self) -> None:
         r = self._run("approve", "1")

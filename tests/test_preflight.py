@@ -15,26 +15,32 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FLEET = ROOT / "fleet"
 sys.path.insert(0, str(ROOT / "src"))
+import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 
 from fleet.commands import preflight  # noqa: E402
 
 
 class PreflightLibraryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # check_all() probes real host tools (git/claude/codex/npm --version
+        # subprocesses); run it once and share the read-only result list.
+        cls.all_results = preflight.check_all()
+
     def test_check_all_returns_results(self) -> None:
-        results = preflight.check_all()
-        names = [r.name for r in results]
+        names = [r.name for r in self.all_results]
         self.assertIn("python", names)
         self.assertIn(preflight._mux_backend_name(), names)
         self.assertIn("git", names)
 
     def test_python_marked_required(self) -> None:
-        results = {r.name: r for r in preflight.check_all()}
+        results = {r.name: r for r in self.all_results}
         self.assertTrue(results["python"].required)
 
     def test_optionals_dont_block(self) -> None:
         # git required-ness depends on workspace (may be true in git repos with worktree).
         # Only verify that the truly optional tools are optional.
-        results = {r.name: r for r in preflight.check_all()}
+        results = {r.name: r for r in self.all_results}
         self.assertFalse(results["claude"].required)
         self.assertFalse(results["codex"].required)
         self.assertFalse(results["codex-update"].required)

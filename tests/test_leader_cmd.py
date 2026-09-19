@@ -126,7 +126,11 @@ class LeaderCmdTests(unittest.TestCase):
         args.auto_paste = True
         args.prompt_delay = 0.0
 
-        with use_fake_mux() as fake:
+        with (
+            use_fake_mux() as fake,
+            # paste → Enter settle delay (0.8 s) is irrelevant to a fake mux.
+            unittest.mock.patch("fleet.commands.leader.time.sleep"),
+        ):
             result = leader.run(args)
 
         self.assertEqual(result, 0)

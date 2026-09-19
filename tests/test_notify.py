@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import unittest
+import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -27,6 +28,20 @@ class NotifyTests(unittest.TestCase):
         win = patch("fleet.notify._windows_notify")
         self.mock_windows = win.start()
         self.addCleanup(win.stop)
+        # These tests exercise the real transports, so FLEET_NO_NOTIFY (set
+        # suite-wide by _fleet_test_helpers) must not short-circuit ``send``.
+        # Previously they were silently no-ops whenever another module had
+        # imported the helpers first — i.e. order-dependent.
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FLEET_NO_NOTIFY", None)
+        # ...but never run osascript for real on a macOS developer box.
+        # (Patching platform, not subprocess.run: the latter is the global
+        # subprocess module, which platform.uname() itself uses on Windows.)
+        system = patch("fleet.notify.platform.system", return_value="Linux")
+        system.start()
+        self.addCleanup(system.stop)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -59,7 +74,19 @@ class NotifyTests(unittest.TestCase):
             "  webhook_url: 'http://127.0.0.1:1/no-listener-here'\n"
         )
         (self.state_dir / notify.CONFIG_FILE).write_text(cfg, encoding="utf-8")
-        notify.send(self.state_dir, "title", "message")  # must not raise
+        # Simulate the refused connection instead of dialling a closed port:
+        # on Windows a real connect() to 127.0.0.1:1 takes ~2 s of SYN retries.
+        err = io.StringIO()
+        with patch(
+            "fleet.notify.urllib.request.urlopen",
+            side_effect=urllib.error.URLError(ConnectionRefusedError(10061, "refused")),
+        ) as mock_urlopen, patch("sys.stderr", err):
+            notify.send(self.state_dir, "title", "message")  # must not raise
+        mock_urlopen.assert_called_once()
+        self.assertEqual(
+            mock_urlopen.call_args.args[0].full_url, "http://127.0.0.1:1/no-listener-here"
+        )
+        self.assertIn("slack notify failed", err.getvalue())
 
 
 class NoNotifyEnvTests(unittest.TestCase):
