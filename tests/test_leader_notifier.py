@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOT
 sys.path.insert(0, str(ROOT / "vendor"))
 
 from fleet import leader_notifier, state  # noqa: E402
+from fleet.commands import ask as ask_cmd  # noqa: E402
 from fleet.commands import done as done_cmd  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
 
@@ -157,6 +159,125 @@ class LeaderNotifierTests(unittest.TestCase):
         """
         block = leader_notifier.render_block([self._record("1", result="approved")])
         self.assertNotIn("result=", block)
+
+    # -- ask records (issue #287) ------------------------------------------
+
+    def _ask_record(self, task_id: str, question: str = "A or B?", **over) -> dict:
+        defaults = dict(
+            status="awaiting_orders",
+            summary=f"task-{task_id} awaiting orders",
+            kind="ask",
+            question=question,
+            project="demo",
+        )
+        defaults.update(over)
+        return self._record(task_id, **defaults)
+
+    def test_ask_record_carries_question_and_skips_pr_lookup(self) -> None:
+        self._seed_task("3", pr_url="https://github.com/o/r/pull/42")
+        with patch.object(leader_notifier, "scan_pr_url") as scan:
+            rec = self._ask_record("3", "Use approach A or B?")
+            scan.assert_not_called()  # an ask needs no diff
+        self.assertEqual(rec["kind"], "ask")
+        self.assertEqual(rec["status"], "awaiting_orders")
+        self.assertEqual(rec["question"], "Use approach A or B?")
+        self.assertEqual(rec["project"], "demo")
+        self.assertIsNone(rec["pr_url"])
+
+    def test_done_record_defaults_to_kind_done(self) -> None:
+        rec = self._record("1")
+        self.assertEqual(rec["kind"], "done")
+        self.assertNotIn("question", rec)
+
+    def test_render_ask_tells_leader_to_answer_via_inbox_not_run_the_gate(self) -> None:
+        block = leader_notifier.render_block([self._ask_record("3", "A or B?")])
+        self.assertNotIn("\n", block)
+        self.assertIn("task-3 [ask]", block)
+        self.assertIn("question: A or B?", block)
+        self.assertIn('fleet-agent inbox 3 "<answer>" --project demo', block)
+        self.assertNotIn("pull the diff", block)
+        self.assertNotIn("run the gate", block)
+        self.assertNotIn("completed+merged", block)
+        self.assertIn("awaiting_orders", block)
+
+    def test_render_ask_flattens_multiline_question_to_one_line(self) -> None:
+        block = leader_notifier.render_block(
+            [self._ask_record("3", "line one\n\n  line   two\r\nline three")]
+        )
+        self.assertNotIn("\n", block)
+        self.assertNotIn("\r", block)
+        self.assertIn("question: line one line two line three", block)
+
+    def test_render_ask_without_project_omits_project_flag(self) -> None:
+        rec = self._ask_record("3")
+        rec.pop("project")
+        block = leader_notifier.render_block([rec])
+        self.assertIn('fleet-agent inbox 3 "<answer>"', block)
+        self.assertNotIn("--project", block)
+
+    def test_render_mixed_keeps_gate_instruction_for_done_and_ask_instruction_for_ask(self) -> None:
+        block = leader_notifier.render_block([self._record("1"), self._ask_record("2")])
+        self.assertIn("2 driver notification", block)
+        self.assertIn("pull the diff and run the gate", block)
+        self.assertIn("NOT marked [ask]", block)
+        self.assertIn('fleet-agent inbox 2 "<answer>" --project demo', block)
+        self.assertIn("task-1 [completed]", block)
+        self.assertIn("task-2 [ask]", block)
+
+    def test_ask_and_done_for_same_task_do_not_suppress_each_other(self) -> None:
+        """The only record identity is the per-record nonce: an ask must not swallow
+        a later done/gate for the same task (nor the reverse)."""
+        self._seed_task("5")
+        ask = self._ask_record("5")
+        gate = self._record("5", status="awaiting_orders")
+        done = self._record("5")
+        self.assertEqual(len({ask["nonce"], gate["nonce"], done["nonce"]}), 3)
+        for rec in (ask, gate, done):
+            leader_notifier.enqueue(self.session_dir, rec)
+        self.assertEqual(
+            [r["kind"] for r in leader_notifier.read_queue(self.session_dir)],
+            ["ask", "done", "done"],
+        )
+        # Flushing one record by nonce leaves the other kinds queued.
+        leader_notifier.clear_records(self.session_dir, {ask["nonce"]})
+        self.assertEqual(
+            [r["kind"] for r in leader_notifier.read_queue(self.session_dir)], ["done", "done"]
+        )
+
+    def test_flush_delivers_ask_then_done_of_same_task_in_one_block(self) -> None:
+        self._seed_task("5")
+        leader_notifier.enqueue(self.session_dir, self._ask_record("5", "ship it?"))
+        leader_notifier.enqueue(self.session_dir, self._record("5"))
+        with use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake:
+            rc = leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.5,
+                poll_interval=0.001,
+            )
+        self.assertEqual(rc, 0)
+        (args, _kwargs), = fake.calls_named("send_text")
+        self.assertIn("task-5 [ask] question: ship it?", args[2])
+        self.assertIn("task-5 [completed]", args[2])
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    def test_refill_never_scans_or_calls_gh_for_ask_records(self) -> None:
+        rec = self._ask_record("6")
+        with patch.object(leader_notifier, "scan_pr_url") as scan:
+            leader_notifier._refill_pr_urls([rec])
+            scan.assert_not_called()
+        self.assertIsNone(rec["pr_url"])
+
+    def test_clear_task_records_evicts_ask_records_too(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._ask_record("1"))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.enqueue(self.session_dir, self._ask_record("2"))
+        self.assertEqual(leader_notifier.clear_task_records(self.session_dir, "1"), 2)
+        self.assertEqual(
+            [r["task_id"] for r in leader_notifier.read_queue(self.session_dir)], ["2"]
+        )
 
     # -- inject-time PR-URL re-scan (per-record project) ------------------
 
@@ -758,6 +879,165 @@ class DoneHookTests(unittest.TestCase):
             len(leader_notifier.read_queue(state.session_dir("migration"))), 1
         )
         self.assertFalse(leader_notifier.queue_path(state.session_dir("main")).exists())
+
+
+class AskHookTests(unittest.TestCase):
+    """ask.py wiring (issue #287): with ``notify_leader_on_driver_done`` on, a driver's
+    ``fleet-agent ask`` also enqueues a kind=ask record into the owner session's
+    queue and spawns the detached notifier. The OS notification is unchanged."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self._old_fleet_home = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo")
+        self.task_id = "1"
+        state.save_task(self.state_dir, self.task_id, {
+            "id": self.task_id,
+            "status": "running",
+            "branch": "fleet/task/1",
+            "worktree": "/wt/1",
+        })
+        self.session_dir = state.session_dir("main")
+
+    def tearDown(self) -> None:
+        if self._old_fleet_home is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old_fleet_home
+        self._tmp.cleanup()
+
+    def _enable(self, value: str = "true") -> None:
+        project = state.load_project(self.state_dir)
+        project["notify_leader_on_driver_done"] = value
+        state.save_project(self.state_dir, project)
+
+    def _write_session_record(self, label: str = "main", agent: str = "claude:opus") -> None:
+        rec_path = state.session_record_path(label)
+        rec_path.parent.mkdir(parents=True, exist_ok=True)
+        rec_path.write_text(json.dumps({"label": label, "agent": agent}), encoding="utf-8")
+
+    def _ask(self, question: str = "Should I use A or B?") -> tuple[int, object]:
+        with (
+            patch("fleet.commands.ask.task_context.resolve",
+                  return_value=(self.state_dir, self.task_id)),
+            patch("fleet.commands.ask.notify.send") as send,
+        ):
+            rc = ask_cmd.run(argparse.Namespace(question=question, task_id=None))
+        return rc, send
+
+    def test_default_off_enqueues_and_spawns_nothing(self) -> None:
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            rc, send = self._ask()
+        self.assertEqual(rc, 0)
+        spawn.assert_not_called()
+        self.assertFalse(leader_notifier.queue_path(self.session_dir).exists())
+        send.assert_called_once()  # the OS notification is independent of the opt-in
+
+    def test_on_enqueues_ask_record_and_spawns_notifier(self) -> None:
+        self._enable()
+        self._write_session_record()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            rc, _send = self._ask("Should I use A or B?")
+        self.assertEqual(rc, 0)
+        spawn.assert_called_once()
+        kwargs = spawn.call_args.kwargs
+        self.assertEqual(kwargs["session_dir"], self.session_dir)
+        self.assertEqual(kwargs["session"], "fleet-main")
+        self.assertEqual(kwargs["window"], "leader")
+        self.assertEqual(kwargs["agent_spec"], "claude:opus")
+        (rec,) = leader_notifier.read_queue(self.session_dir)
+        self.assertEqual(rec["kind"], "ask")
+        self.assertEqual(rec["status"], "awaiting_orders")
+        self.assertEqual(rec["question"], "Should I use A or B?")
+        self.assertEqual(rec["task_id"], "1")
+        self.assertEqual(rec["project"], "demo")
+        self.assertEqual(rec["state_dir"], str(self.state_dir))
+        # The task was still parked as awaiting_orders (unchanged behaviour).
+        self.assertEqual(state.load_task(self.state_dir, "1")["status"], "awaiting_orders")
+
+    def test_on_keeps_os_notification_unchanged(self) -> None:
+        self._enable()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            _rc, send = self._ask("Should I use A or B?")
+        send.assert_called_once_with(
+            self.state_dir,
+            title="fleet demo: task-1 awaiting orders",
+            message="Should I use A or B?",
+            level="waiting",
+        )
+
+    def test_on_without_leader_record_leaves_ask_queued(self) -> None:
+        self._enable()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            rc, _send = self._ask()
+        self.assertEqual(rc, 0)
+        spawn.assert_not_called()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+    def test_owner_session_routes_ask_to_named_session(self) -> None:
+        self._enable()
+        self._write_session_record("migration", "codex:gpt-5.5")
+        task = state.load_task(self.state_dir, "1")
+        task["owner_session"] = "migration"
+        state.save_task(self.state_dir, "1", task)
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"], "fleet-migration": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            self._ask()
+        self.assertEqual(spawn.call_args.kwargs["session"], "fleet-migration")
+        self.assertEqual(len(leader_notifier.read_queue(state.session_dir("migration"))), 1)
+        self.assertFalse(leader_notifier.queue_path(state.session_dir("main")).exists())
+
+    def test_ask_then_done_gate_both_queued_and_injected(self) -> None:
+        """End-to-end through the producers: an ask followed by a done for the same
+        task yields two independent records; one idle-flush injects both, with the
+        answer command for the ask and the gate instruction for the done."""
+        self._enable()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.start_detached"),
+            patch("fleet.leader_notifier.time.sleep", return_value=None),
+            patch.object(leader_notifier, "_run_capture", return_value=None),
+        ):
+            self._ask("A or B?")
+            task = state.load_task(self.state_dir, "1")
+            task["status"] = "completed"
+            done_cmd._maybe_notify_leader(
+                self.state_dir, "1", task, state.load_project(self.state_dir), "demo",
+                status="completed", result="approved", summary="task-1 completed",
+            )
+            recs = leader_notifier.read_queue(self.session_dir)
+            self.assertEqual([r["kind"] for r in recs], ["ask", "done"])
+            rc = leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=0.5,
+                poll_interval=0.001,
+            )
+        self.assertEqual(rc, 0)
+        (args, _kwargs), = fake.calls_named("send_text")
+        self.assertIn('fleet-agent inbox 1 "<answer>" --project demo', args[2])
+        self.assertIn("task-1 [completed]", args[2])
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
 
 
 if __name__ == "__main__":

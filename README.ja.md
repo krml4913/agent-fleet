@@ -245,7 +245,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet formation seed <name> [--global] [--project P] [--force]` | 同梱の formation seed を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet role seed <name> [--global] [--project P] [--force]` | 同梱の role プロンプト（`docs/prompts/roles/`）を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet workspace list \| set <mode>` | workspace モード（`worktree` / `none`）を表示または設定する。 |
-| `fleet notify [--project P] [on\|off\|status]` | オプトインの leader ペインへのプッシュ（`project.yaml` の `notify_leader_on_driver_done`、デフォルト off）を表示（引数なし / `status`）または設定する。on の間は driver の `done` / 承認ゲートが担当 leader のペインに注入される。次回の `done` から有効。 |
+| `fleet notify [--project P] [on\|off\|status]` | オプトインの leader ペインへのプッシュ（`project.yaml` の `notify_leader_on_driver_done`、デフォルト off）を表示（引数なし / `status`）または設定する。on の間は driver の `done` / 承認ゲートに加え `fleet-agent ask` の質問も担当 leader のペインに注入される（ask の行は `fleet-agent inbox <id> "<answer>" --project P` で答えるよう leader に指示する）。次回の `done` / `ask` から有効。 |
 | `fleet rm <name> [--yes]` | プロジェクトの登録を解除し、その state を削除する。 |
 
 ### `fleet-agent` — エージェント用 CLI
@@ -271,7 +271,7 @@ driver 側（driver ペイン内で実行。`FLEET_TASK_ID` は設定済み）:
 
 | コマンド | 用途 |
 |---|---|
-| `fleet-agent ask "<question>"` | タスクを `awaiting_orders` に切り替え、質問を記録し、ユーザーに通知する。 |
+| `fleet-agent ask "<question>"` | タスクを `awaiting_orders` に切り替え、質問を記録し、ユーザーに通知する（`fleet notify on` の間は担当 leader のペインにも注入）。 |
 | `fleet-agent inbox-read` | `inbox.md` を読み、`inbox_seen` の ack を発行する。 |
 | `fleet-agent event emit <type> [--field K=V ...]` | 監査イベントを追記する。 |
 | `fleet-agent done [--result approved\|changes-requested]` | stage を done としてマークする。オーケストレーターがタスクを進める。 |

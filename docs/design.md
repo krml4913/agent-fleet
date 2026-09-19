@@ -1086,6 +1086,8 @@ When this is called:
 1. emit an `awaiting_orders` event to `events.jsonl`
 2. regenerate `dashboard.md` (reflecting the awaiting_orders mark)
 3. fire a notification (macOS / slack)
+4. when the project's `notify_leader_on_driver_done` is on, also push the question
+   into the owning leader's pane (§10.3)
 
 If a driver merely writes a question in the pane, it reaches **nowhere**. The
 structure applies pressure to follow the rule — input only reaches the user if
@@ -1101,9 +1103,10 @@ through the leader. The leader is structurally kept to conversation and
 ### 10.3 Notification Routing by `owner_session`
 
 > Issue #166, resolved 2026-06-17. This concerns the **opt-in** leader-pane push
-> (`notify_leader_on_driver_done`), where a driver `done` / approval gate is
-> injected into the *owning leader's* pane for review. The always-on user
-> notification path (§10.1, §10.2) is unchanged and never routes through a leader.
+> (`notify_leader_on_driver_done`), where a driver `done` / approval gate — and,
+> since Issue #287, a driver `ask` question — is injected into the *owning
+> leader's* pane. The always-on user notification path (§10.1, §10.2) is
+> unchanged and never routes through a leader.
 
 With leaders decoupled from projects (§5.1), "the project's leader" is no longer
 a well-defined push target — a project may be served by several sessions, or a
@@ -1131,6 +1134,28 @@ to **`owner_session`**:
   can then flush all of a session's pending notifications regardless of which
   project produced them, and reattach finds the session's queue directly instead
   of scanning every project.
+
+**`ask` rides the same path (Issue #287).** An autonomous leader has to act on a
+driver's question just as it does on a `done`, and an `awaiting_orders` task that
+nobody is watching would otherwise sit forever. So with `notify_leader_on_driver_done`
+on, `fleet-agent ask` and `fleet-agent done` share one producer
+(`leader_notifier.push_to_leader`: resolve `owner_session` → enqueue → best-effort
+spawn of the detached notifier). The OS notification `ask` fires is unchanged and
+independent of the opt-in. The key keeps its name; it now covers asks too.
+
+- **Record.** An ask enqueues a record with `kind: "ask"`, `status: "awaiting_orders"`,
+  the driver's `question` and the project's `project` name (records without a
+  `kind` are `done`). It skips the PR lookup — an ask needs no diff.
+- **Injected line.** The lead-in follows the kinds present in the coalesced block.
+  A done / gate entry says "pull the diff and run the gate"; an `[ask]` entry says
+  to answer with `fleet-agent inbox <id> "<answer>" --project <P>` (printed per
+  entry, question flattened to one line), or to relay it to the user if it is not the
+  leader's call, and to skip any task no longer `awaiting_orders`. An ask is never
+  told to "run the gate".
+- **No cross-suppression.** The only record identity is its `nonce`; there is no
+  per-task dedup. An ask and a later done / gate for the same task are separate
+  records, both delivered (in one block if the leader was busy for both), and
+  `clear_task_records` evicts all of a task's records on retirement.
 
 **`fleet sessions`** is the cross-session CLI view: live leader sessions (label →
 pane, agent) and each session's in-flight tasks (task.yaml across projects where
