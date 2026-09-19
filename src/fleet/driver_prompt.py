@@ -132,8 +132,10 @@ def _workspace_section(
         "Working directory:",
         f"  - Work in {where}. Make every project edit, build, test and commit"
         " there (`cd` back to it if you leave it).",
-        f"  - Never edit the fleet state directly (`{state_mod.fleet_home().as_posix()}/`,"
-        " incl. `$FLEET_STATE_DIR` and this task's dir); it is not the project."
+        # The worktree itself lives under fleet-state/, hence "apart from it".
+        "  - Apart from it, never edit anything under"
+        f" `{state_mod.fleet_home().as_posix()}/` directly (fleet state, incl."
+        " `$FLEET_STATE_DIR` and this task's dir); it is not the project."
         f" Go through `{bin_ref}` (inbox-read, ask, event, memory, done).",
     ]
     if state_dir is not None:

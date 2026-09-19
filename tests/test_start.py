@@ -200,7 +200,7 @@ class StartTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Working directory:", prompt)
         self.assertIn("Work in the project root `", prompt)
-        self.assertIn("Never edit the fleet state directly", prompt)
+        self.assertIn("Apart from it, never edit anything under", prompt)
 
     def test_rejects_duplicate_task_id(self) -> None:
         run_fleet_agent("start", "--project", "demo", "--dry-run",

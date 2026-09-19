@@ -316,7 +316,7 @@ class WorkingDirectoryTests(RoleFixtureMixin, unittest.TestCase):
         # worktree wins over the project root
         self.assertNotIn("/src/demo", text)
         self.assertIn(f"`{self.fleet_home.resolve().as_posix()}/`", text)
-        self.assertIn("Never edit the fleet state directly", text)
+        self.assertIn("Apart from it, never edit anything under", text)
         outbox = (state_dir / "tasks" / "task-7" / "outbox.md").as_posix()
         self.assertIn(f"append milestone reports to `{outbox}`", text)
         # the section precedes the task header
