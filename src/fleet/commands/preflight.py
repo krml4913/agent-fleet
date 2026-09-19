@@ -1,13 +1,18 @@
 """``fleet preflight`` — environment dependency check.
 
-Verifies the toolbelt fleet relies on: Python version, the multiplexer
-(tmux), workspace dependencies, and the agent CLIs (claude / codex). Required tools
-missing → exit 1; optional tools missing → warn but continue.
+Verifies the toolbelt fleet relies on: Python version, the configured
+multiplexer backend (tmux / zellij, with a version gate for zellij), workspace
+dependencies, and the agent CLIs (claude / codex, resolved to absolute paths).
+On Windows it also checks the clone path, ``core.longpaths`` and the
+``fleet-agent.cmd`` shim. Required tools missing → exit 1; optional tools
+missing → warn but continue.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +30,17 @@ class CheckResult(NamedTuple):
     ok: bool
     detail: str
     required: bool
+    # ok but worth a look (printed with ⚠, never affects the exit code)
+    warn: bool = False
+
+
+# src/fleet/commands/preflight.py → parents[0]=commands, [1]=fleet, [2]=src, [3]=clone root
+_CLONE_ROOT = Path(__file__).resolve().parents[3]
+
+# zellij: 0.44.x lacks `new-tab --no-focus`; 0.45.0–0.45.1 need the detached
+# new-tab workaround for zellij#5594 (docs/windows-support.md §4.3 / §6.6).
+ZELLIJ_MIN_VERSION = (0, 45, 0)
+ZELLIJ_WORKAROUND_MAX_VERSION = (0, 45, 1)
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -32,9 +48,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "preflight",
         help="Check environment dependencies",
         description=(
-            "Verify Python >=3.11, tmux, git, and the agent CLIs "
-            "(claude / codex). Optional tools missing → warn; required "
-            "tools missing → exit 1."
+            "Verify Python >=3.11, the multiplexer (FLEET_MUX: tmux / zellij), "
+            "git, and the agent CLIs (claude / codex); on Windows also the "
+            "clone path, core.longpaths and fleet-agent.cmd. Optional tools "
+            "missing → warn; required tools missing → exit 1."
         ),
     )
     p.set_defaults(func=run)
@@ -44,7 +61,10 @@ def run(args: argparse.Namespace) -> int:
     results = check_all()
     rc = 0
     for r in results:
-        mark = "✔" if r.ok else ("✘" if r.required else "⚠")
+        if r.ok:
+            mark = "⚠" if r.warn else "✔"
+        else:
+            mark = "✘" if r.required else "⚠"
         kind = "required" if r.required else "optional"
         print(f"  {mark} {r.name:<8} {kind:<8} {r.detail}")
         if r.required and not r.ok:
@@ -59,15 +79,28 @@ def run(args: argparse.Namespace) -> int:
 
 def check_all() -> list[CheckResult]:
     git_required = _git_required_for_cwd(Path.cwd())
-    return [
+    results = [
         _check_python(),
         _check_mux(),
         _check_command("git", ["git", "--version"], required=git_required),
-        _check_command("claude", ["claude", "--version"], required=False),
-        _check_command("codex", ["codex", "--version"], required=False),
+    ]
+    if _is_windows():
+        results += [
+            _check_clone_path(),
+            _check_longpaths(),
+            _check_fleet_agent_cmd(),
+        ]
+    results += [
+        _check_agent_cli("claude"),
+        _check_agent_cli("codex"),
         _check_codex_update(),
         _check_codex_trust(),
     ]
+    return results
+
+
+def _is_windows() -> bool:
+    return sys.platform == "win32"
 
 
 def _check_python() -> CheckResult:
@@ -80,15 +113,186 @@ def _check_python() -> CheckResult:
     return CheckResult("python", ok, detail, required=True)
 
 
+def _mux_backend_name() -> str:
+    """The configured multiplexer backend name, without importing a backend.
+
+    ``FLEET_MUX`` if set, else the platform default (zellij on Windows, tmux
+    elsewhere) — prefers ``fleet.mux.default_backend_name()`` when present.
+    """
+    env = (os.environ.get("FLEET_MUX") or "").strip().lower()
+    if env:
+        return env
+    default = getattr(mux, "default_backend_name", None)
+    if callable(default):
+        return str(default()).strip().lower()
+    return "zellij" if _is_windows() else "tmux"
+
+
 def _check_mux() -> CheckResult:
-    """Check the selected multiplexer binary (``FLEET_MUX``, default tmux)."""
-    name = mux.backend_name()
-    version_flag = "-V" if name == "tmux" else "--version"
-    return _check_command(name, [name, version_flag], required=True)
+    """Check the selected multiplexer backend's binary (and version)."""
+    name = _mux_backend_name()
+    if name == "tmux":
+        return _check_command("tmux", ["tmux", "-V"], required=True)
+    if name == "zellij":
+        return _check_zellij()
+    return CheckResult(
+        name,
+        False,
+        f"unknown FLEET_MUX={name!r} (expected one of: {', '.join(mux.BACKENDS)})",
+        required=True,
+    )
 
 
-def _check_command(name: str, version_argv: list[str], *, required: bool) -> CheckResult:
-    if not shutil.which(name):
+def _check_zellij() -> CheckResult:
+    base = _check_command("zellij", ["zellij", "--version"], required=True)
+    if not base.ok:
+        return base
+    version = _parse_version(base.detail)
+    if version is None:
+        return base._replace(
+            detail=f"{base.detail} (could not parse version; need >=0.45.0)",
+            warn=True,
+        )
+    shown = ".".join(str(n) for n in version)
+    if version < ZELLIJ_MIN_VERSION:
+        return base._replace(
+            ok=False,
+            detail=f"{shown} (need >=0.45.0: older zellij lacks `new-tab --no-focus`)",
+        )
+    if version <= ZELLIJ_WORKAROUND_MAX_VERSION:
+        return base._replace(
+            detail=f"{shown} (detached new-tab workaround for zellij#5594 active)",
+            warn=True,
+        )
+    return base._replace(detail=shown)
+
+
+def _parse_version(text: str) -> tuple[int, ...] | None:
+    """First ``N.N[.N…]`` in ``text`` as an int tuple (pre-release tags ignored)."""
+    m = re.search(r"\d+(?:\.\d+)+", text)
+    if not m:
+        return None
+    return tuple(int(part) for part in m.group(0).split("."))
+
+
+def _check_clone_path() -> CheckResult:
+    """Windows: the clone path must not contain spaces (docs/windows-support.md §5 #9)."""
+    root = str(_CLONE_ROOT)
+    if " " in root:
+        return CheckResult(
+            "clone-path",
+            False,
+            f"{root} contains spaces; prompts embed the fleet-agent path "
+            "unquoted, so agents cannot run it — clone to a path without spaces",
+            required=False,
+        )
+    return CheckResult("clone-path", True, root, required=False)
+
+
+def _check_longpaths() -> CheckResult:
+    """Windows: deep worktree paths need ``core.longpaths`` (§5 #14)."""
+    fix = "run `git config --global core.longpaths true`"
+    if not shutil.which("git"):
+        return CheckResult("longpaths", True, "skipped (git not on PATH)", required=False)
+    try:
+        r = subprocess.run(
+            ["git", "config", "--get", "core.longpaths"],
+            cwd=_CLONE_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        return CheckResult("longpaths", False, f"{type(e).__name__}; {fix}", required=False)
+    value = r.stdout.strip().lower() if r.returncode == 0 else ""
+    if value in ("true", "yes", "on", "1"):
+        return CheckResult("longpaths", True, "core.longpaths=true", required=False)
+    shown = value or "unset"
+    return CheckResult(
+        "longpaths",
+        False,
+        f"core.longpaths is {shown}; deep worktree paths may exceed MAX_PATH — {fix}",
+        required=False,
+    )
+
+
+def _check_fleet_agent_cmd() -> CheckResult:
+    """Windows: agents invoke the ``fleet-agent.cmd`` shim (§5 #9)."""
+    shim = _CLONE_ROOT / "fleet-agent.cmd"
+    if shim.is_file():
+        return CheckResult("fleet-agent", True, shim.as_posix(), required=True)
+    return CheckResult(
+        "fleet-agent",
+        False,
+        f"{shim.as_posix()} missing (agents cannot signal the orchestrator)",
+        required=True,
+    )
+
+
+def _resolve_cli(name: str) -> tuple[str | None, bool]:
+    """Resolve ``name`` to an absolute path; return ``(path, via_fallback)``.
+
+    On Windows, when ``PATH`` lookup fails, also try ``%USERPROFILE%/.local/bin``
+    (the claude installer's target) and ``PATH`` entries starting with ``~``
+    (expanded — Windows never expands them, so PowerShell / cmd miss them).
+    """
+    found = shutil.which(name)
+    if found:
+        return os.path.abspath(found), False
+    if not _is_windows():
+        return None, False
+    for directory in _fallback_dirs():
+        hit = shutil.which(name, path=directory)
+        if hit:
+            return os.path.abspath(hit), True
+    return None, False
+
+
+def _fallback_dirs() -> list[str]:
+    dirs: list[str] = []
+    profile = os.environ.get("USERPROFILE")
+    if profile:
+        dirs.append(os.path.join(profile, ".local", "bin"))
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if entry.startswith("~"):
+            dirs.append(os.path.expanduser(entry))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for d in dirs:
+        key = os.path.normcase(os.path.normpath(d))
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    return unique
+
+
+def _check_agent_cli(name: str) -> CheckResult:
+    """Optional agent CLI: report its resolved absolute path (and version)."""
+    path, via_fallback = _resolve_cli(name)
+    if path is None:
+        return CheckResult(name, False, "not on PATH", required=False)
+    result = _check_command(name, [path, "--version"], required=False, which=path)
+    detail = f"{result.detail} ({path})"
+    if result.ok and via_fallback:
+        return result._replace(
+            detail=f"{detail}; found only via fallback, not on PATH — "
+            "agent panes may not find it (add its directory to PATH)",
+            warn=True,
+        )
+    return result._replace(detail=detail)
+
+
+def _check_command(
+    name: str,
+    version_argv: list[str],
+    *,
+    required: bool,
+    which: str | None = None,
+) -> CheckResult:
+    if not (which or shutil.which(name)):
         return CheckResult(name, False, "not on PATH", required)
     try:
         r = subprocess.run(
