@@ -40,6 +40,33 @@ class _Unresolved(Exception):
     """Internal: raised by _resolve_state_dir_core when state-dir resolution fails."""
 
 
+def in_driver_pane() -> bool:
+    """True when this process runs inside a driver pane.
+
+    ``launch_stage_driver`` puts ``FLEET_TASK_ID`` in every driver pane's env
+    (tmux window env / zellij pane-env file alike); the leader pane and a
+    user's own terminal never carry it.
+    """
+    return bool(os.environ.get("FLEET_TASK_ID"))
+
+
+def leader_only_refusal(command: str, *, allowed: bool) -> str | None:
+    """Error text when leader-only *command* is invoked from a driver pane.
+
+    A soft guard — it stops a driver running ``merge`` / ``cleanup`` by reflex,
+    not a determined one (the env can be unset). *allowed* is the explicit
+    override flag. Returns ``None`` when the call may proceed.
+    """
+    if allowed or not in_driver_pane():
+        return None
+    return (
+        f"error: `fleet-agent {command}` is a leader-only action, but this looks "
+        f"like a driver pane (FLEET_TASK_ID={os.environ.get('FLEET_TASK_ID')}). "
+        f"Drivers never merge or clean up tasks; leave it to the leader. "
+        f"Pass --allow-from-driver to override."
+    )
+
+
 def resolve(
     *,
     explicit_id: str | None = None,
