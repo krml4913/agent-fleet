@@ -187,6 +187,21 @@ class StartTests(unittest.TestCase):
         self.assertNotIn("Git workflow", prompt)
         self.assertNotIn("gh pr create", prompt)
 
+    def test_prompt_states_working_directory(self) -> None:
+        # dry-run skips worktree creation, so the project root is stated.
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "wd", "Where do I work?",
+            fleet_home=self.fleet_home,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = (
+            self.state_dir / "tasks" / "task-wd" / "driver-prompt.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Working directory:", prompt)
+        self.assertIn("Work in the project root `", prompt)
+        self.assertIn("Apart from it, never edit anything under", prompt)
+
     def test_rejects_duplicate_task_id(self) -> None:
         run_fleet_agent("start", "--project", "demo", "--dry-run",
                         "1", "first", fleet_home=self.fleet_home)

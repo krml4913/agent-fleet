@@ -1100,6 +1100,26 @@ class WindowCwdTests(unittest.TestCase):
         self.assertIsNone(kwargs.get("window_cwd"))
         mock_render.assert_called_once()
 
+    def test_render_receives_worktree_branch_and_project_root(self) -> None:
+        task = self._make_task("wt4", worktree="/tmp/fake-worktree-wt4")
+        task["branch"] = "demo/task/wt4"
+        stage = task["stages"][0]
+
+        with (
+            use_fake_mux(),
+            unittest.mock.patch("fleet.driver_prompt.render", return_value="p") as mock_render,
+            unittest.mock.patch("fleet.commands.start.launch_stage_driver"),
+        ):
+            orchestrator._launch_driver_for_stage(self.sd, "wt4", task, 0, stage)
+
+        kwargs = mock_render.call_args.kwargs
+        self.assertEqual(kwargs["worktree"], "/tmp/fake-worktree-wt4")
+        self.assertEqual(kwargs["branch"], "demo/task/wt4")
+        self.assertEqual(
+            kwargs["project_root"],
+            orchestrator.state_mod.load_project(self.sd).get("repo"),
+        )
+
     def test_tmux_unavailable_skips_launch(self) -> None:
         task = self._make_task("wt3", worktree="/tmp/fake-worktree-wt3")
         stage = task["stages"][0]

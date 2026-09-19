@@ -11,7 +11,7 @@ and this launcher
 
 1. starts from the inherited environment, **strips** the agent-session
    markers a creating agent leaks into it (``CLAUDECODE``, ``CLAUDE_PID``,
-   ``CLAUDE_CODE_*`` except user configuration such as
+   ``CLAUDE_EFFORT``, ``AI_AGENT``, ``CLAUDE_CODE_*`` except user configuration such as
    ``CLAUDE_CODE_USE_BEDROCK``; ``CLAUDE_CONFIG_DIR`` and ``ANTHROPIC_*``
    are kept),
 2. applies the per-pane env from the JSON env file (``FLEET_*``, ``PATH``…),
@@ -64,7 +64,13 @@ EXIT_NOT_FOUND = 127
 #: Inherited by a pane, they make a claude started there think it is a child
 #: session (``⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION``),
 #: which breaks the usage accounting that reads claude's session JSONL.
-MARKER_VARS: frozenset[str] = frozenset({"CLAUDECODE", "CLAUDE_PID"})
+#: ``CLAUDE_EFFORT`` is the creating session's effort level: inherited, it
+#: silently forces that level onto every driver / leader pane. ``AI_AGENT``
+#: names the creating agent (``claude-code_<version>_agent``) and would tell
+#: tools in e.g. a codex pane that they run under that claude session.
+MARKER_VARS: frozenset[str] = frozenset(
+    {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT"}
+)
 MARKER_PREFIXES: tuple[str, ...] = ("CLAUDE_CODE_",)
 
 #: ``CLAUDE_CODE_*`` variables that are *user configuration*, not session

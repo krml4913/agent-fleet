@@ -105,6 +105,45 @@ def _memory_index_section(state_dir: Path | str | None) -> str:
     return "## Project memory (index)\n\n" + content
 
 
+def _workspace_section(
+    *,
+    task_id: str,
+    bin_ref: str,
+    state_dir: Path | str | None,
+    worktree: Path | str | None,
+    branch: str | None,
+    project_root: Path | str | None,
+) -> str:
+    """Return the "Working directory" section, or ``""`` when nothing is known.
+
+    A driver whose task description does not say where to work may otherwise
+    edit/commit inside its task dir (under the agent-fleet clone's
+    ``fleet-state/``) instead of the project (Windows E2E finding). Paths are
+    rendered with forward slashes so they work in Git Bash and PowerShell alike.
+    """
+    if worktree:
+        on_branch = f" on branch `{branch}`" if branch else ""
+        where = f"the task worktree `{Path(worktree).as_posix()}`{on_branch}"
+    elif project_root:
+        where = f"the project root `{Path(project_root).as_posix()}`"
+    else:
+        return ""
+    lines = [
+        "Working directory:",
+        f"  - Work in {where}. Make every project edit, build, test and commit"
+        " there (`cd` back to it if you leave it).",
+        # The worktree itself lives under fleet-state/, hence "apart from it".
+        "  - Apart from it, never edit anything under"
+        f" `{state_mod.fleet_home().as_posix()}/` directly (fleet state, incl."
+        " `$FLEET_STATE_DIR` and this task's dir); it is not the project."
+        f" Go through `{bin_ref}` (inbox-read, ask, event, memory, done).",
+    ]
+    if state_dir is not None:
+        outbox = (state_mod.task_dir(Path(state_dir), task_id) / "outbox.md").as_posix()
+        lines.append(f"  - Sole exception: append milestone reports to `{outbox}`.")
+    return "\n".join(lines)
+
+
 def render(
     *,
     task_id: str,
@@ -114,6 +153,9 @@ def render(
     agent: str,
     fleet_bin: str | None = None,
     state_dir: Path | str | None = None,
+    worktree: Path | str | None = None,
+    branch: str | None = None,
+    project_root: Path | str | None = None,
 ) -> str:
     """Return the prompt string to send to the driver.
 
@@ -127,6 +169,11 @@ def render(
     index is injected so any vendor driver starts with the shared project
     knowledge (Issue #114). The injected index is project content, so it is not
     subject to the ``fleet-agent`` path rewrite.
+
+    ``worktree`` / ``branch`` (workspace=worktree) or ``project_root``
+    (workspace=none) add a short "Working directory" section so the driver
+    works in the project, never in the fleet state dir. Omitted, the section
+    is left out (backwards compatible).
     """
     bin_path = fleet_bin if fleet_bin is not None else fleet_agent_bin()
     base = _load_base()
@@ -134,7 +181,20 @@ def render(
     role_fragment = _load_role_fragment(role, state_dir).strip()
     parts.append(role_fragment)
     body = "\n\n".join(parts)
-    body = body.replace("fleet-agent", prompt_bin_ref(bin_path))
+    bin_ref = prompt_bin_ref(bin_path)
+    body = body.replace("fleet-agent", bin_ref)
+    # Appended after the rewrite: it embeds user paths, which must not be
+    # touched by the ``fleet-agent`` substitution.
+    workspace_section = _workspace_section(
+        task_id=task_id,
+        bin_ref=bin_ref,
+        state_dir=state_dir,
+        worktree=worktree,
+        branch=branch,
+        project_root=project_root,
+    )
+    if workspace_section:
+        body = body + "\n\n" + workspace_section
     memory_section = _memory_index_section(state_dir)
     if memory_section:
         body = body + "\n\n" + memory_section

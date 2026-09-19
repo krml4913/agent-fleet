@@ -288,5 +288,69 @@ class FleetAgentPathInjectionTests(RoleFixtureMixin, unittest.TestCase):
         self.assertNotIn("'D:/dev/agent-fleet/fleet-agent.cmd'", text)
 
 
+class WorkingDirectoryTests(RoleFixtureMixin, unittest.TestCase):
+    """The prompt states where to work and forbids editing fleet state."""
+
+    def _render(self, **kwargs) -> str:
+        return driver_prompt.render(
+            task_id="7",
+            description="x",
+            formation_name="solo",
+            role="driver",
+            agent="claude:sonnet",
+            fleet_bin="/opt/fleet/fleet-agent",
+            **kwargs,
+        )
+
+    def test_worktree_states_path_branch_and_state_rule(self) -> None:
+        state_dir = self.fleet_home / "projects" / "demo"
+        worktree = state_dir / "worktrees" / "task-7"
+        text = self._render(
+            state_dir=state_dir, worktree=str(worktree), branch="demo/task/7",
+            project_root="/src/demo",
+        )
+        self.assertIn("Working directory:", text)
+        self.assertIn(
+            f"the task worktree `{worktree.as_posix()}` on branch `demo/task/7`", text
+        )
+        # worktree wins over the project root
+        self.assertNotIn("/src/demo", text)
+        self.assertIn(f"`{self.fleet_home.resolve().as_posix()}/`", text)
+        self.assertIn("Apart from it, never edit anything under", text)
+        outbox = (state_dir / "tasks" / "task-7" / "outbox.md").as_posix()
+        self.assertIn(f"append milestone reports to `{outbox}`", text)
+        # the section precedes the task header
+        self.assertLess(text.index("Working directory:"), text.index("task id:"))
+
+    def test_workspace_none_states_project_root(self) -> None:
+        text = self._render(project_root=Path("/src/demo"))
+        self.assertIn("Work in the project root `/src/demo`.", text)
+        self.assertNotIn("worktree `", text)
+        # no state_dir → no outbox path line
+        self.assertNotIn("Sole exception", text)
+
+    def test_no_location_omits_section(self) -> None:
+        self.assertNotIn("Working directory:", self._render())
+
+    def test_paths_not_rewritten_by_fleet_agent_substitution(self) -> None:
+        with mock.patch("fleet.paths._is_windows", return_value=False):
+            text = self._render(worktree="/w/fleet-agent-wt", branch="b")
+        self.assertIn("`/w/fleet-agent-wt`", text)
+        self.assertIn("Go through `/opt/fleet/fleet-agent`", text)
+
+    def test_windows_paths_rendered_with_forward_slashes(self) -> None:
+        if sys.platform != "win32":
+            self.skipTest("Windows path semantics")
+        text = self._render(worktree=r"D:\fs\projects\demo\worktrees\task-7", branch="b")
+        self.assertIn("`D:/fs/projects/demo/worktrees/task-7`", text)
+
+    def test_worktree_prompt_stays_under_budget(self) -> None:
+        text = self._render(
+            state_dir=self.fleet_home / "projects" / "demo",
+            worktree="/w/task-7", branch="demo/task/7",
+        )
+        self.assertLess(text.count("\n"), 60)
+
+
 if __name__ == "__main__":
     unittest.main()

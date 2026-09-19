@@ -358,7 +358,8 @@ Responsibilities:
 - Apply the env (`FLEET_TASK_ID`, `FLEET_STATE_DIR`, `FLEET_SESSION`,
   `PATH` prefixed with the clone root, `PYTHONUTF8=1`, `MSYS_NO_PATHCONV=1`).
 - Remove the inherited agent-session markers before starting the agent:
-  `CLAUDECODE`, every `CLAUDE_CODE_*`, and `CLAUDE_PID` (§4.4). Keep
+  `CLAUDECODE`, every `CLAUDE_CODE_*`, `CLAUDE_PID`, `CLAUDE_EFFORT` (the
+  creator's effort level) and `AI_AGENT` (§4.4). Keep
   user-level settings such as `CLAUDE_CONFIG_DIR` and `ANTHROPIC_*`.
 - Resolve the agent CLI to an absolute path with `shutil.which` under that
   `PATH`. On failure, print a clear error and keep the pane open.
@@ -564,7 +565,8 @@ and ends the agent process.
 > - **Marker stripping** keeps a short allow-list of user-configuration
 >   `CLAUDE_CODE_*` variables (`CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` /
 >   `_FOUNDRY`, `CLAUDE_CODE_GIT_BASH_PATH`, `CLAUDE_CODE_OAUTH_TOKEN`, …);
->   every other `CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PID` is removed.
+>   every other `CLAUDE_CODE_*`, `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`
+>   and `AI_AGENT` is removed.
 > - **Agent CLI resolution** falls back to `~/.local/bin`, `~/.bun/bin`,
 >   `%APPDATA%\npm` and `%LOCALAPPDATA%\Microsoft\WinGet\Links` (that is how the
 >   native claude install is found when the Windows `PATH` lacks it).

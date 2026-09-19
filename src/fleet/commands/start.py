@@ -572,6 +572,9 @@ def run(args: argparse.Namespace) -> int:
         role=role_name,
         agent=agent_spec,
         state_dir=state_dir,
+        worktree=task_data.get("worktree"),
+        branch=task_data.get("branch"),
+        project_root=ctx["project_root"],
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
