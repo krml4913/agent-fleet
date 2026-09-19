@@ -42,6 +42,12 @@ class MarkerTests(unittest.TestCase):
             ]),
         )
 
+    def test_strips_creator_effort_and_agent_identity(self) -> None:
+        # CLAUDE_EFFORT would force the creating session's effort level onto
+        # every pane; AI_AGENT names the creating claude session.
+        env = {"CLAUDE_EFFORT": "high", "AI_AGENT": "claude-code_2_agent", "HOME": "/h"}
+        self.assertEqual(pl.strip_agent_markers(env), {"HOME": "/h"})
+
     @unittest.skipUnless(sys.platform == "win32", "case-insensitive env on Windows")
     def test_markers_case_insensitive_on_windows(self) -> None:
         self.assertTrue(pl.is_agent_marker("claudecode"))

@@ -729,6 +729,7 @@ def _launch_driver_for_stage(
     formation_name = task.get("formation", "unknown")
     description = task.get("description") or task.get("title", "")
 
+    worktree = task.get("worktree")
     prompt = dp.render(
         task_id=task_id,
         description=description,
@@ -736,10 +737,12 @@ def _launch_driver_for_stage(
         role=role_name,
         agent=agent_spec,
         state_dir=state_dir,
+        worktree=worktree,
+        branch=task.get("branch"),
+        project_root=project.get("repo") or state_dir.parent,
     )
     (task_dir_path / "driver-prompt.md").write_text(prompt, encoding="utf-8")
 
-    worktree = task.get("worktree")
     launch_stage_driver(
         state_dir=state_dir,
         task_id=task_id,
