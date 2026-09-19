@@ -1,7 +1,7 @@
 """``fleet notify`` — show / enable / disable the opt-in leader-pane push.
 
-The push (design §10.3) is gated on ``notify_leader_on_driver_done`` in
-``project.yaml``. This is the only supported way to flip it: the leader
+The push (design §10.3; driver ``done`` / approval gate and ``ask``) is gated on
+``notify_leader_on_driver_done`` in ``project.yaml``. This is the only supported way to flip it: the leader
 protocol forbids hand-editing state files.
 """
 from __future__ import annotations
@@ -23,7 +23,8 @@ def add_parser(sub: "argparse._SubParsersAction") -> None:
         help="Show or set the project's leader-pane push (notify_leader_on_driver_done)",
         description=(
             "Show or set the opt-in leader-pane push. When on, a driver's "
-            "done / approval gate is injected into the owning leader's pane "
+            "done / approval gate and ask question are injected into the "
+            "owning leader's pane "
             f"({KEY} in project.yaml). Default: off. "
             "With no argument (or 'status'), print the current state."
         ),

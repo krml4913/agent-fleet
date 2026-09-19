@@ -68,7 +68,7 @@ Commands (`fleet-agent`):
   `ask` / `event emit` / `done` are driver-only — you never call them.
   `fleet ...` (status / log / attach / sessions / formation / preflight) is the
   read-only user-facing CLI — use it when asked, never poll on a timer.
-  `fleet notify --project <name> [on|off]` — opt-in push of drivers' done / approval gates into your pane (default off; no arg = state).
+  `fleet notify --project <name> [on|off]` — opt-in push of drivers' done / approval gates and `ask` questions into your pane (default off; no arg = state). Answer an `[ask]` entry with `inbox <id> "<answer>" --project <name>`, or relay it to the user.
 
 Never:
   - kill a driver pane — instruct it via inbox to wind down instead

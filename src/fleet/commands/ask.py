@@ -1,7 +1,9 @@
 """``fleet-agent ask "<question>"`` — driver-side: ask the user a question.
 
 Records an ``awaiting_orders`` event, flips the task status to ``awaiting_orders``,
-appends to ``questions.md``, and fires a notification. **Does not block.**
+appends to ``questions.md``, and fires a notification. When the project's
+``notify_leader_on_driver_done`` is on, the question is also pushed into the
+owning leader's pane (design §10.3). **Does not block.**
 The driver re-checks ``inbox.md`` on its own schedule for the answer.
 """
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from .. import leader_notifier
 from .. import notify
 from .. import state as state_mod
 from .. import task_context
@@ -63,11 +66,26 @@ def run(args: argparse.Namespace) -> int:
     )
 
     project = state_mod.load_project(state_dir)
+    project_name = project.get("name", "?")
     notify.send(
         state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
+        title=f"fleet {project_name}: task-{task_id} awaiting orders",
         message=args.question,
         level="waiting",
+    )
+
+    # Opt-in (notify_leader_on_driver_done): also push the question into the owning
+    # leader's pane so an autonomous leader can answer it via `fleet-agent inbox`.
+    leader_notifier.push_to_leader(
+        state_dir,
+        task_id,
+        task,
+        project,
+        project_name,
+        status="awaiting_orders",
+        summary=f"task-{task_id} awaiting orders",
+        kind=leader_notifier.KIND_ASK,
+        question=args.question,
     )
 
     print(f"recorded awaiting_orders for task-{task_id}")

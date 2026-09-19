@@ -1,10 +1,10 @@
-"""Detached leader-pane notifier: push driver done/gate into the leader.
+"""Detached leader-pane notifier: push driver done/gate/ask into the leader.
 
 Sibling of :mod:`fleet.prompt_deliverer`. Where the prompt deliverer waits
 for a *driver* pane to reach its CLI prompt and pastes the task prompt, this
 module waits for the *leader* pane to go idle (vendor ``ready`` regex) and
-injects a coalesced, idempotent summary of finished/gated tasks so the leader
-can review without polling.
+injects a coalesced, idempotent summary of finished/gated tasks and of driver
+questions (``fleet-agent ask``) so the leader can review / answer without polling.
 
 "Idle" means a real turn boundary — :meth:`VendorAdapter.is_idle` (input prompt
 visible, no dialog, AND no running-turn indicator), seen on two captures
@@ -23,7 +23,8 @@ whose whole purpose is to reach a driver that may be working; the message itself
 is durable in ``inbox.md``.
 
 fleet is daemon-less, so there is nothing watching for the leader to become
-idle. ``done`` resolves the task's ``owner_session`` and enqueues a persisted
+idle. ``done`` / ``ask`` resolve the task's ``owner_session`` (see
+:func:`push_to_leader`) and enqueue a persisted
 record into that session's queue (`global/sessions/<label>/leader-pending.jsonl`),
 then spawns this detached poller against the ``fleet-<label>`` pane. The queue
 survives process exit and leader detach: if the leader pane is absent the records
@@ -54,7 +55,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import agents, mux, state as state_mod
+from . import agents, formation, mux, state as state_mod
 from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 from .locking import atomic_update, lock_file, unlock_file
@@ -234,6 +235,10 @@ def _scan_pr_url(state_dir: Path, task_id: str, branch: str | None, use_gh: bool
     return None
 
 
+KIND_DONE = "done"
+KIND_ASK = "ask"
+
+
 def build_record(
     *,
     state_dir: Path,
@@ -243,28 +248,44 @@ def build_record(
     worktree: str | None,
     summary: str,
     result: str | None = None,
+    kind: str = KIND_DONE,
+    question: str | None = None,
+    project: str | None = None,
 ) -> dict:
     """Build an idempotent pending-notification record for ``task_id``.
 
     Carries everything the leader needs to no-op an already-handled task and,
-    otherwise, to make its first move "pull the diff and run the gate".
+    otherwise, to make its first move: "pull the diff and run the gate" for a
+    ``done`` record, "answer the question via ``fleet-agent inbox``" for an
+    ``ask`` record (``kind="ask"``, carrying the driver's ``question``).
+
+    Records are independent: the only identity is the per-record ``nonce``, so an
+    ask and a later done (or gate) for the same task are both delivered.
 
     ``state_dir`` here is the **project** state dir the task lives in. It is
     recorded on the record so the (session-keyed, cross-project) notifier can
     re-scan that task's outbox at flush time — the queue itself lives under the
     owner session's dir, away from any one project (Issue #166 §10.3).
+    ``project`` is the project's name, needed to render the ``--project`` flag of
+    the answer command for an ask.
     """
     record: dict = {
         "nonce": uuid.uuid4().hex,
         "ts": utcnow_iso(),
         "task_id": task_id,
+        "kind": kind,
         "status": status,
         "branch": branch,
         "worktree": worktree,
         "state_dir": str(state_dir),
-        "pr_url": scan_pr_url(state_dir, task_id),
+        # An ask needs no diff, so it never pays for the PR lookup.
+        "pr_url": None if kind == KIND_ASK else scan_pr_url(state_dir, task_id),
         "summary": summary,
     }
+    if project:
+        record["project"] = project
+    if question is not None:
+        record["question"] = question
     if result:
         record["result"] = result
     return record
@@ -362,8 +383,128 @@ def clear_task_records(session_dir: Path, task_id: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Producer side (shared by ``done`` and ``ask``)
+# ---------------------------------------------------------------------------
+
+
+def truthy(value: object) -> bool:
+    """Parse a ``project.yaml`` flag (``true`` / ``1`` / ``yes`` / ``on``)."""
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def push_to_leader(
+    state_dir: Path,
+    task_id: str,
+    task: dict,
+    project: dict,
+    project_name: str,
+    *,
+    status: str,
+    summary: str,
+    result: str | None = None,
+    kind: str = KIND_DONE,
+    question: str | None = None,
+) -> None:
+    """Opt-in leader-pane push, routed by the task's ``owner_session``.
+
+    Shared by ``fleet-agent done`` (``kind="done"``) and ``fleet-agent ask``
+    (``kind="ask"``). Default OFF (``notify_leader_on_driver_done``) → zero
+    behaviour change. Always enqueues a persisted record (never dropped) into the
+    owner session's queue when the feature is on, then best-effort spawns the
+    detached notifier against the ``fleet-<label>`` pane. multiplexer/leader
+    absence only leaves the record queued — it never errors the caller.
+
+    Routing is keyed by ``owner_session`` (Issue #166 §10.3): the queue lives under
+    that session's dir and the agent ``ready`` regex is read from its record. A
+    missing ``owner_session`` is treated as ``main`` (:func:`state.task_owner_session`).
+    """
+    if not truthy(project.get("notify_leader_on_driver_done")):
+        return
+
+    label = state_mod.task_owner_session(task)
+    session_dir = state_mod.session_dir(label)
+
+    try:
+        record = build_record(
+            state_dir=state_dir,
+            task_id=task_id,
+            status=status,
+            branch=task.get("branch"),
+            worktree=task.get("worktree"),
+            summary=summary,
+            result=result,
+            kind=kind,
+            question=question,
+            project=project_name,
+        )
+        enqueue(session_dir, record)
+    except Exception:
+        # The queue is the durable path; if even that fails, do not break the caller.
+        return
+
+    # Spawn the detached notifier only when the leader pane is resolvable.
+    # Otherwise the record stays queued for the next done / ask / re-attach.
+    try:
+        m = mux.get()
+        if not m.available():
+            return
+        session = f"fleet-{label}"
+        if not m.session_exists(session):
+            return
+        leader_session = formation.read_leader_session(label)
+        if not leader_session or not leader_session.get("agent"):
+            return
+        start_detached(
+            session_dir=session_dir,
+            session=session,
+            window="leader",
+            agent_spec=leader_session["agent"],
+        )
+    except Exception:
+        return
+
+
+# ---------------------------------------------------------------------------
 # Coalesced injection text
 # ---------------------------------------------------------------------------
+
+
+def _is_ask(record: dict) -> bool:
+    return record.get("kind") == KIND_ASK
+
+
+def _render_ask(record: dict) -> str:
+    """One ask record: the question plus the exact command that answers it."""
+    task_id = record.get("task_id", "?")
+    question = " ".join(str(record.get("question") or "").split())  # keep it single-line
+    project = record.get("project")
+    project_flag = f" --project {project}" if project else ""
+    return (
+        f"task-{task_id} [ask] question: {question or '(empty)'}"
+        f' | answer with: fleet-agent inbox {task_id} "<answer>"{project_flag}'
+    )
+
+
+def _render_done(record: dict) -> str:
+    parts = [f"task-{record.get('task_id', '?')} [{record.get('status', '?')}]"]
+    summary = (record.get("summary") or "").strip()
+    if summary:
+        parts.append(summary)
+    # result= is the driver's self-reported flag, not a gate decision — omit to
+    # avoid confusion with a user_approval outcome.
+    if record.get("branch"):
+        parts.append(f"branch={record['branch']}")
+    if record.get("worktree"):
+        parts.append(f"worktree={record['worktree']}")
+    parts.append(f"PR={record.get('pr_url') or '(none yet)'}")
+    return " ".join(parts)
+
+
+_GATE_INSTRUCTION = "pull the diff and run the gate. Skip any task already completed+merged."
+_ASK_INSTRUCTION = (
+    "answer the driver's question with the fleet-agent inbox command shown, or relay it "
+    "to the user if it is not yours to decide. Skip any task no longer awaiting_orders."
+)
 
 
 def render_block(records: list[dict]) -> str:
@@ -372,26 +513,24 @@ def render_block(records: list[dict]) -> str:
     Single-line on purpose: typing text into a pane (tmux ``send-keys``) turns an
     embedded newline into Enter, which would submit prematurely. So fields are joined inline and the
     whole block is submitted with one trailing Enter.
+
+    The lead-in instruction follows the record kinds: a done / gate entry says to
+    pull the diff and run the gate; an ``[ask]`` entry says to answer it (never
+    "run the gate", which makes no sense for a question).
     """
     n = len(records)
-    head = (
-        f"[fleet] {n} driver notification(s) — for each: pull the diff and run "
-        f"the gate. Skip any task already completed+merged."
-    )
-    segs: list[str] = []
-    for r in records:
-        parts = [f"task-{r.get('task_id', '?')} [{r.get('status', '?')}]"]
-        summary = (r.get("summary") or "").strip()
-        if summary:
-            parts.append(summary)
-        # result= is the driver's self-reported flag, not a gate decision — omit to
-        # avoid confusion with a user_approval outcome.
-        if r.get("branch"):
-            parts.append(f"branch={r['branch']}")
-        if r.get("worktree"):
-            parts.append(f"worktree={r['worktree']}")
-        parts.append(f"PR={r.get('pr_url') or '(none yet)'}")
-        segs.append(" ".join(parts))
+    asks = sum(1 for r in records if _is_ask(r))
+    if asks == 0:
+        instruction = f"for each: {_GATE_INSTRUCTION}"
+    elif asks == n:
+        instruction = f"for each: {_ASK_INSTRUCTION}"
+    else:
+        instruction = (
+            f"for each entry NOT marked [ask]: {_GATE_INSTRUCTION} "
+            f"For each [ask] entry: {_ASK_INSTRUCTION}"
+        )
+    head = f"[fleet] {n} driver notification(s) — {instruction}"
+    segs = [_render_ask(r) if _is_ask(r) else _render_done(r) for r in records]
     return head + " :: " + " || ".join(segs)
 
 
@@ -574,7 +713,7 @@ def _refill_pr_urls(records: list[dict]) -> None:
     block the injection.
     """
     for rec in records:
-        if rec.get("pr_url"):
+        if rec.get("pr_url") or _is_ask(rec):
             continue
         task_id = rec.get("task_id")
         state_dir = rec.get("state_dir")

@@ -11,18 +11,15 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .. import formation
 from .. import leader_notifier
 from .. import notify
 from .. import orchestrator as orch
 from .. import state as state_mod
 from .. import task_context
-from .. import mux
 from ..events import append_event
 
 
-def _truthy(value: object) -> bool:
-    return str(value).strip().lower() in ("1", "true", "yes", "on")
+_truthy = leader_notifier.truthy
 
 
 def _next_handoff_role(stages: list, idx: int) -> str:
@@ -150,20 +147,7 @@ def _maybe_notify_leader(
     result: str,
     summary: str,
 ) -> None:
-    """Opt-in leader-pane push, routed by the task's ``owner_session``.
-
-    Default OFF → zero behaviour change. Always enqueues a persisted record
-    (never dropped) into the owner session's queue when the feature is on, then
-    best-effort spawns the detached notifier against the ``fleet-<label>`` pane.
-    multiplexer/leader absence only leaves the record queued — it never errors ``done``.
-
-    Routing is keyed by ``owner_session`` (Issue #166 §10.3): the queue lives under
-    that session's dir and the agent ``ready`` regex is read from its record. A
-    missing ``owner_session`` is treated as ``main`` (:func:`state.task_owner_session`).
-    """
-    if not _truthy(project.get("notify_leader_on_driver_done")):
-        return
-
+    """Opt-in leader-pane push of a ``done`` (:func:`leader_notifier.push_to_leader`)."""
     # Only notify the leader for events that require action: task completed or
     # awaiting_orders (user_approval gate). Intermediate peer_review / multi_stage
     # handoffs are internal driver-to-driver transfers — the leader has nothing to
@@ -171,41 +155,13 @@ def _maybe_notify_leader(
     if status not in ("completed", "awaiting_orders"):
         return
 
-    label = state_mod.task_owner_session(task)
-    session_dir = state_mod.session_dir(label)
-
-    try:
-        record = leader_notifier.build_record(
-            state_dir=state_dir,
-            task_id=task_id,
-            status=status,
-            branch=task.get("branch"),
-            worktree=task.get("worktree"),
-            summary=summary,
-            result=result,
-        )
-        leader_notifier.enqueue(session_dir, record)
-    except Exception:
-        # The queue is the durable path; if even that fails, do not break done.
-        return
-
-    # Spawn the detached notifier only when the leader pane is resolvable.
-    # Otherwise the record stays queued for the next done / re-attach.
-    try:
-        m = mux.get()
-        if not m.available():
-            return
-        session = f"fleet-{label}"
-        if not m.session_exists(session):
-            return
-        leader_session = formation.read_leader_session(label)
-        if not leader_session or not leader_session.get("agent"):
-            return
-        leader_notifier.start_detached(
-            session_dir=session_dir,
-            session=session,
-            window="leader",
-            agent_spec=leader_session["agent"],
-        )
-    except Exception:
-        return
+    leader_notifier.push_to_leader(
+        state_dir,
+        task_id,
+        task,
+        project,
+        project_name,
+        status=status,
+        summary=summary,
+        result=result,
+    )
