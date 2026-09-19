@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import orchestrator, state  # noqa: E402
+from fleet import orchestrator, state, verify_shell  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
@@ -809,6 +809,101 @@ class VerifyGateTests(unittest.TestCase):
         self.assertIn("TAIL", inbox)
         self.assertIn("exited 7", inbox)
         self.assertIn("truncated", inbox)
+
+    def test_verify_shell_runs_command_as_argv_not_shell_true(self) -> None:
+        argv = ["/bin/bash", "-c", "make test && make lint"]
+        with unittest.mock.patch.object(
+            orchestrator.verify_shell, "build_argv", return_value=argv
+        ) as build, unittest.mock.patch.object(
+            orchestrator.subprocess, "run"
+        ) as run:
+            run.return_value = subprocess.CompletedProcess(argv, 0, b"ok\n", None)
+            result = orchestrator._run_verify_command(
+                self.sd,
+                {"worktree": str(self.project)},
+                {"command": "make test && make lint", "shell": "bash"},
+            )
+        build.assert_called_once_with("bash", "make test && make lint")
+        self.assertEqual(run.call_args.args[0], argv)
+        self.assertFalse(run.call_args.kwargs["shell"])
+        self.assertEqual(result.returncode, 0)
+
+    def test_verify_without_shell_keeps_shell_true(self) -> None:
+        with unittest.mock.patch.object(orchestrator.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess("x", 0, b"", None)
+            orchestrator._run_verify_command(
+                self.sd, {"worktree": str(self.project)}, {"command": "echo hi"}
+            )
+        self.assertEqual(run.call_args.args[0], "echo hi")
+        self.assertTrue(run.call_args.kwargs["shell"])
+
+    def test_verify_shell_bash_runs_posix_command(self) -> None:
+        try:
+            verify_shell.build_argv("bash", "true")
+        except verify_shell.ShellUnavailableError:
+            self.skipTest("bash is not available here")
+        # POSIX-only syntax: `$(( ))` and `test -d` fail under cmd.exe.
+        command = 'test -d . && [ "$((1+2))" = 3 ] && echo ok > verified.txt'
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": command, "shell": "bash"},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "vs1", stages, formation="solo")
+
+        orchestrator.advance(self.sd, "vs1", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "vs1")
+        self.assertTrue((self.project / "verified.txt").exists())
+        self.assertTrue(updated["stages"][0]["verify"]["passed"])
+        self.assertEqual(updated["stages"][0]["user_approval"]["status"], "asked")
+
+    def test_verify_shell_missing_bounces_with_clear_error(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": "true", "shell": "pwsh", "max_iterations": 3},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "vs2", stages, formation="solo")
+
+        with unittest.mock.patch.object(verify_shell, "_find_shell", return_value=None):
+            orchestrator.advance(self.sd, "vs2", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "vs2")
+        self.assertFalse(updated["stages"][0]["verify"]["passed"])
+        self.assertEqual(updated["stages"][0]["verify"]["iteration"], 2)
+        inbox = (state.task_dir(self.sd, "vs2") / "inbox.md").read_text(encoding="utf-8")
+        self.assertIn("exited 127", inbox)
+        self.assertIn("(shell: pwsh)", inbox)
+        self.assertIn("verify shell 'pwsh' was requested", inbox)
+        self.assertIn("not found", inbox)
+
+    def test_verify_shell_missing_escalates_at_iteration_cap(self) -> None:
+        stages = [
+            {
+                "role": "driver",
+                "agent": "claude:sonnet",
+                "status": "running",
+                "verify": {"command": "true", "shell": "bash", "max_iterations": 1},
+                "user_approval": {"required": True, "status": "pending"},
+            }
+        ]
+        task = _make_task(self.sd, "vs3", stages, formation="solo")
+
+        with unittest.mock.patch.object(verify_shell, "_find_shell", return_value=None):
+            orchestrator.advance(self.sd, "vs3", task, result="approved", dry_run=True)
+
+        updated = state.load_task(self.sd, "vs3")
+        self.assertTrue(updated["stages"][0]["verify"]["escalated"])
+        self.assertEqual(updated["status"], "awaiting_orders")
 
     def test_peer_review_launches_only_after_verify_passes(self) -> None:
         marker = self.project / "allow"

@@ -582,6 +582,27 @@ class FormationTemplateTests(unittest.TestCase):
                             "verify": {"command": "pytest", "max_iterations": True}}],
             })
 
+    def test_validate_accepts_each_verify_shell(self) -> None:
+        for shell in ("bash", "sh", "pwsh", "powershell", "cmd"):
+            with self.subTest(shell=shell):
+                formation.validate({
+                    "name": "x",
+                    "stages": [{"role": "implementer",
+                                "verify": {"command": "pytest", "shell": shell}}],
+                })
+
+    def test_validate_rejects_bad_verify_shell(self) -> None:
+        for shell in ("zsh", "", "BASH", True, 7, ["bash"], {"name": "bash"}):
+            with self.subTest(shell=shell):
+                with self.assertRaises(ValueError) as ctx:
+                    formation.validate({
+                        "name": "x",
+                        "stages": [{"role": "implementer",
+                                    "verify": {"command": "pytest", "shell": shell}}],
+                    })
+                self.assertIn("verify.shell", str(ctx.exception))
+                self.assertIn("bash", str(ctx.exception))
+
     def test_validate_accepts_valid_gates(self) -> None:
         # String shorthand, object form, and a valid peer_review all pass.
         formation.validate({
