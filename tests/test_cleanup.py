@@ -22,6 +22,11 @@ from tests._fake_mux import use_fake_mux  # noqa: E402
 
 class CleanupCmdTests(unittest.TestCase):
     def setUp(self) -> None:
+        # The suite may itself run inside a driver pane; ``cleanup`` refuses there.
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FLEET_TASK_ID", None)
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
@@ -34,10 +39,12 @@ class CleanupCmdTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def _run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, *args: str, cwd: Path | None = None, env_extra: dict | None = None
+    ) -> subprocess.CompletedProcess[str]:
         return run_fleet_agent(
             *args, cwd=cwd or self.project,
-            env_extra={"FLEET_STATE_DIR": str(self.state_dir)},
+            env_extra={"FLEET_STATE_DIR": str(self.state_dir), **(env_extra or {})},
         )
 
     def _save(self, task_id: str, status: str) -> None:
@@ -129,6 +136,30 @@ class CleanupCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("task.yaml missing", r.stderr)
 
+    # -- leader-only guard (driver pane detected via FLEET_TASK_ID) ----------
+
+    def test_refuses_from_driver_pane(self) -> None:
+        self._save("1", "completed")
+        r = self._run("cleanup", "1", env_extra={"FLEET_TASK_ID": "1"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("leader-only", r.stderr)
+        self.assertIn("--allow-from-driver", r.stderr)
+        self.assertTrue(state.task_dir(self.state_dir, "1").exists())
+        events_path = self.state_dir / "events.jsonl"
+        self.assertFalse(events_path.exists() and "cleanup" in events_path.read_text(encoding="utf-8"))
+
+    def test_force_does_not_override_driver_guard(self) -> None:
+        # --force means "skip the terminal-status guard", not "I am the leader".
+        self._save("2", "spawning")
+        r = self._run("cleanup", "2", "--force", env_extra={"FLEET_TASK_ID": "2"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("leader-only", r.stderr)
+
+    def test_allow_from_driver_overrides_guard(self) -> None:
+        self._save("1", "completed")
+        r = self._run("cleanup", "1", "--allow-from-driver", env_extra={"FLEET_TASK_ID": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_cleanup_kills_task_windows_by_task_id(self) -> None:
         self._save("stage-transition", "completed")
         args = MagicMock()
@@ -137,6 +168,7 @@ class CleanupCmdTests(unittest.TestCase):
         args.project = "."
         args.archive = False
         args.force = False
+        args.allow_from_driver = False
 
         windows = ["leader", "stage-transition·designer", "stage-transition·implementer", "other·driver"]
         with (

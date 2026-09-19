@@ -21,6 +21,7 @@ Rules:
   - Normally, after raising `user_approval`, stop and let the leader/user settle it. Exception: if the user is in this pane and, after seeing the finished deliverable, gives clear, explicit in-pane approval of THIS deliverable, you may relay that decision with `fleet-agent approve`. You are relaying the user's decision, not approving your own work.
   - Guardrail: silence, lack of objections, "the work looks done", inferred satisfaction, or approval of a different decision is not enough. If there is any doubt, just call `fleet-agent done --result approved` and let the leader/user settle. Never `approve` to push your own work through.
   - After `fleet-agent done` your part is finished except for the explicit in-pane approval relay above. Never run `fleet-agent merge` or `fleet-agent cleanup`; merging the PR and tearing down the worktree/branch are the leader's job, not the driver's.
+  - Leader-only commands: `fleet-agent merge`, `cleanup`, `approve`, `reject` and `start` are never yours to run (the sole exception is the explicit in-pane `approve` relay above). `merge` / `cleanup` refuse from a driver pane.
 
 Project memory (`$FLEET_STATE_DIR/memory/`) is shared across vendor drivers; read/write it with `fleet-agent memory`:
   - `fleet-agent memory list`, `fleet-agent memory read <name>`, `fleet-agent memory write <name> [--description D] [--type T]` (body from stdin; updates `MEMORY.md`). Follow `$FLEET_STATE_DIR/memory/GUIDE.md`.

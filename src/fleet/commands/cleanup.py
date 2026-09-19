@@ -154,10 +154,22 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Run even if the task isn't in a terminal status",
     )
+    p.add_argument(
+        "--allow-from-driver",
+        action="store_true",
+        help="Run even from inside a driver pane (leader-only action)",
+    )
     p.set_defaults(func=run)
 
 
 def run(args: argparse.Namespace) -> int:
+    refusal = task_context.leader_only_refusal(
+        "cleanup", allowed=bool(getattr(args, "allow_from_driver", False))
+    )
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+
     project_arg = getattr(args, "project", ".")
     project_name = project_arg if project_arg != "." else None
     try:

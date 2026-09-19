@@ -29,6 +29,11 @@ def _ok(*_a, **_k) -> subprocess.CompletedProcess:
 
 class MergeCmdTests(unittest.TestCase):
     def setUp(self) -> None:
+        # The suite may itself run inside a driver pane; ``merge`` refuses there.
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FLEET_TASK_ID", None)
         self._tmp = TemporaryDirectory()
         self.project = Path(self._tmp.name) / "proj"
         self.project.mkdir()
@@ -58,6 +63,7 @@ class MergeCmdTests(unittest.TestCase):
         args.squash = False
         args.keep = False
         args.force = False
+        args.allow_from_driver = False
         for k, v in over.items():
             setattr(args, k, v)
         return args
@@ -209,6 +215,42 @@ class MergeCmdTests(unittest.TestCase):
             rc = merge_mod.run(self._args("999"))
         self.assertEqual(rc, 1)
 
+    # -- leader-only guard (driver pane detected via FLEET_TASK_ID) ----------
+
+    def test_refuses_from_driver_pane(self) -> None:
+        self._save("1", "completed", branch="demo/task/1")
+        called: list = []
+        env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
+
+        err = io.StringIO()
+        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run",
+                      side_effect=lambda *a, **k: called.append(a) or _ok()),                 redirect_stderr(err):
+            rc = merge_mod.run(self._args("1"))
+
+        self.assertEqual(rc, 1)
+        self.assertIn("leader-only", err.getvalue())
+        self.assertIn("--allow-from-driver", err.getvalue())
+        self.assertEqual(called, [])  # never reached gh
+        self.assertTrue((self.state_dir / "tasks" / "task-1").exists())  # not archived
+        self.assertEqual([e for e in self._events() if e["type"] == "merge"], [])
+
+    def test_force_does_not_override_driver_guard(self) -> None:
+        # --force means "skip the terminal-status guard", not "I am the leader".
+        self._save("1", "running", branch="demo/task/1")
+        env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
+        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok) as run_mock,                 redirect_stderr(io.StringIO()):
+            rc = merge_mod.run(self._args("1", force=True))
+        self.assertEqual(rc, 1)
+        run_mock.assert_not_called()
+
+    def test_allow_from_driver_overrides_guard(self) -> None:
+        self._save("1", "completed", branch="demo/task/1")
+        env = {"FLEET_STATE_DIR": str(self.state_dir), "FLEET_TASK_ID": "1"}
+        with patch.dict(os.environ, env, clear=False),                 patch("fleet.commands.merge.subprocess.run", side_effect=_ok),                 use_fake_mux(available=False):
+            rc = merge_mod.run(self._args("1", allow_from_driver=True))
+        self.assertEqual(rc, 0)
+        self.assertTrue(any(e["type"] == "merge" for e in self._events()))
+
 
 class MergeLeaderProjectTests(unittest.TestCase):
     """Phase 6: ``merge --project <name>`` resolves cross-project from a leader
@@ -221,6 +263,11 @@ class MergeLeaderProjectTests(unittest.TestCase):
         self.fleet_home.mkdir()
         self.repo = base / "repo"
         self.repo.mkdir()
+        # A leader pane carries no FLEET_TASK_ID (the suite itself may run in a driver's).
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("FLEET_TASK_ID", None)
         self._old = os.environ.get("FLEET_HOME")
         os.environ["FLEET_HOME"] = str(self.fleet_home)
         self.state_dir = make_project(self.fleet_home, "demo", self.repo)
@@ -246,6 +293,7 @@ class MergeLeaderProjectTests(unittest.TestCase):
         args.squash = False
         args.keep = True
         args.force = False
+        args.allow_from_driver = False
         for k, v in over.items():
             setattr(args, k, v)
         return args
