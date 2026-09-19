@@ -2,19 +2,22 @@
 
 *[English README](README.md)*
 
-**agent-fleet** は、tmux のペイン内で driver エージェント（claude / codex）を
-動かす、階層的かつマルチベンダーなエージェントオーケストレーターである。
+**agent-fleet** は、ターミナルマルチプレクサ（macOS/Linux では tmux、Windows では
+zellij）のペイン内で driver エージェント（claude / codex）を動かす、階層的かつ
+マルチベンダーなエージェントオーケストレーターである。
 あなたは単一の **leader** エージェントと対話し、タスクを軽く投げるだけでよい。
 leader はそれぞれ専用のペインで **driver** エージェントを起動して作業を進める。
 各プロジェクトごとに YAML で定義された **team formation** に従う。多数のタスクを
-同時に走らせられる。すべて tmux 上のキーボード操作だけで完結し、いつでも driver の
+同時に走らせられる。すべてマルチプレクサ上のキーボード操作だけで完結し、いつでも
+driver の
 ペインにアタッチして、何をしているかを読んだり、軌道修正したり、作業の途中で
 引き継いだりできる。これは無人の完全自律ではなく、human-in-the-loop な
 コーディング作業のために作られている。
 
-**Python ≥ 3.11** と **tmux** が必要。**`pip install` は不要** で、repo を
-clone して `./fleet` を実行するだけでよい。Python 依存はすべて `vendor/` 配下に
-同梱してある。
+**Python ≥ 3.11** とターミナルマルチプレクサが必要: macOS/Linux では **tmux**、
+Windows では **zellij ≥ 0.45.0**（[Windows](#windows) を参照）。**`pip install` は
+不要** で、repo を clone して `./fleet`（Windows では `fleet.cmd`）を実行するだけで
+よい。Python 依存はすべて `vendor/` 配下に同梱してある。
 
 ---
 
@@ -56,7 +59,8 @@ cd agent-fleet
 ./fleet preflight
 ```
 
-`preflight` は、`PATH` 上の Python、tmux、git、そしてエージェント CLI
+`preflight` は、`PATH` 上の Python、ターミナルマルチプレクサ（tmux、Windows では
+zellij）、git、そしてエージェント CLI
 （`claude`、`codex`）をチェックする。Codex CLI が古い場合や、directory trust が
 設定されていない場合にも警告する。指摘された点は次に進む前に解消すること。
 
@@ -228,7 +232,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 
 | コマンド | 用途 |
 |---|---|
-| `fleet preflight` | Python / tmux / git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む）。 |
+| `fleet preflight` | Python / マルチプレクサ（tmux または zellij）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--project P] [--agent SPEC] [--attach]` | leader ペインを起動 / アタッチする（デフォルトエージェント `claude:opus`）。 |
 | `fleet attach [target] [--project P]` | leader（デフォルト）またはタスク driver ペインにアタッチする。 |
@@ -305,6 +309,97 @@ agent-fleet/fleet-state/
         questions.md            # `fleet-agent ask` がここに記録する
       _archive/                 # cleanup --archive がここに着地する
 ```
+
+---
+
+## Windows
+
+fleet は Windows 上でネイティブに（WSL なしで）動く。tmux の代わりに
+[zellij](https://zellij.dev/) を使う。leader と driver のペインは `fleet-<label>`
+という名前の zellij セッション内に置かれ、各 driver ウィンドウは zellij の
+**タブ** になる。それ以外 —— formation、state ファイル、`fleet` / `fleet-agent`
+コマンド —— は macOS/Linux と同じである。
+
+### 必要なもの
+
+- **Python ≥ 3.11**（`py` ランチャー、または `PATH` 上の `python`）。
+- **zellij ≥ 0.45.0** のネイティブ Windows ビルド。それより古いバージョンは
+  弾かれる（0.44.x には `new-tab --no-focus` がない）。
+- **Git for Windows**。
+- 使用するエージェント CLI（`claude`、`codex`）が **`PATH` 上にあること**（後述）。
+
+zellij は `winget install Zellij.Zellij` でインストールするか、
+[zellij のリリース](https://github.com/zellij-org/zellij/releases) から Windows
+ビルドの zip を取得して `PATH` 上のディレクトリに展開する。
+
+### セットアップ
+
+```powershell
+git clone <this-repo-url> D:\dev\agent-fleet     # スペースを含まないパス
+git config --global core.longpaths true
+D:\dev\agent-fleet\fleet.cmd preflight
+```
+
+- **fleet は `fleet.cmd` / `fleet-agent.cmd` 経由で実行する**（PowerShell または
+  cmd から）か、`python fleet …` として実行する。拡張子のない `fleet` /
+  `fleet-agent` スクリプトは Windows では直接実行できない。`.cmd` シムは
+  `py -3` を優先し、なければ `python` にフォールバックし、`PYTHONUTF8=1` を
+  設定する。エージェントは `fleet-agent.cmd` を自分で呼ぶ: fleet はそのパスを
+  プロンプトに埋め込む。
+- **スペースを含まないパスに clone する。** `fleet-agent` のパスはプロンプトに
+  クォートなしで埋め込まれるため、スペースがあるとエージェントからの呼び出しが
+  壊れる。
+- **`core.longpaths`** は、`fleet-state/projects/<p>/worktrees/` 配下の深い
+  worktree パスが `MAX_PATH` に達するのを防ぐ。
+- **エージェント CLI は `PATH` 上に置くこと。** Windows は `PATH` 内の `~` を
+  展開しないので、`~/.local/bin` のようなエントリは Git Bash では効くが、
+  PowerShell、cmd、zellij のペインでは効かない。代わりに実際のディレクトリ
+  （例: `%USERPROFILE%\.local\bin`）を追加すること。
+- **`FLEET_MUX=tmux|zellij`** でバックエンドを上書きできる。デフォルトは Windows
+  では zellij、それ以外では tmux。
+
+### Windows で `fleet preflight` がチェックすること
+
+通常のチェックに加えて: zellij のバージョン（0.45.0 未満は失敗。zellij#5594 の
+回避策が有効になる 0.45.0–0.45.1 では ⚠）、スペースを含まない clone パス、
+`core.longpaths`（修正コマンド付き）、そして `fleet-agent.cmd` の存在。
+`claude` / `codex` は解決済みの絶対パスとともに表示される。`PATH` の外
+（`%USERPROFILE%\.local\bin`、または `~` で始まる `PATH` エントリ経由）でしか
+見つからない CLI は ⚠ で示される。エージェントのペインからは見つからない
+可能性があるためだ。
+
+### zellij でのアタッチ
+
+`fleet leader --attach` と `fleet attach [<task>]` は `zellij attach
+fleet-<label>` を実行する。デタッチは zellij の `Ctrl o` のあと `d`。zellij の
+クライアントはそれぞれ自分のフォーカスを持つので、アタッチしても他の誰かの
+表示が動くことはない。ただし fleet がクライアントを特定のタブへ移動させられるのは、
+そのクライアントが唯一アタッチ中のときだけである:
+
+- 他にアタッチ中のクライアントがなければ、`fleet attach <task>` はそのタスクの
+  タブに着地する。
+- 他のクライアントがアタッチ中なら（例: 別のターミナルで leader を見ている）、
+  fleet は代わりにタスクのタブ番号を表示するので、自分で切り替える:
+  `Ctrl t` のあとその番号。
+
+### 既知の制限
+
+- **zellij 0.45.0–0.45.1:** クライアントが 1 つもアタッチしていない間に作られた
+  タブは破棄される（[zellij#5594](https://github.com/zellij-org/zellij/issues/5594)）。
+  fleet は driver タブを開く間だけ非表示のクライアントを一時的にアタッチして
+  回避する（`FLEET_ZELLIJ_TEMP_CLIENT=0|1` で回避策を強制的にオフ / オンにできる）。
+- **claude の workspace-trust ダイアログ。** 新しい worktree で claude を初めて
+  起動すると、そのフォルダを信頼するかを尋ねられる。fleet はこれに答えない:
+  タスクは boot gate として通知され（`awaiting_orders` + 通知）、人間がアタッチ
+  して確認する必要がある。その後プロンプトは自動で配送される。
+- **verify コマンドは Windows では `cmd.exe` で実行される** ので、`verify`
+  コマンドは cmd の構文として正しくなければならない。
+- **zellij 上の codex はまだ検証されていない。** claude の driver は検証済み。
+
+デスクトップ通知は Windows のトーストを使う（デフォルトで有効。無効にするには
+プロジェクトの `notify.yaml` に `windows: {enabled: false}` を設定する）。
+この移植の背景となった調査と残りのフォローアップは
+[docs/windows-support.md](docs/windows-support.md) にある。
 
 ---
 
