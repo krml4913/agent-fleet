@@ -7,6 +7,7 @@ import sys
 from .. import workspace as workspace_mod
 from .. import state as state_mod
 from .. import task_context
+from ._project_arg import add_group_project_arg, add_sub_project_arg
 
 
 def add_parser(sub: "argparse._SubParsersAction") -> None:
@@ -19,21 +20,16 @@ def add_parser(sub: "argparse._SubParsersAction") -> None:
             "Available: worktree, none."
         ),
     )
-    p.add_argument(
-        "--project",
-        default=".",
-        help=(
-            "Project name (registry); required from a project-agnostic leader "
-            "session, else resolved from FLEET_STATE_DIR / cwd"
-        ),
-    )
+    add_group_project_arg(p)
     sp = p.add_subparsers(dest="workspace_cmd", required=True, metavar="<sub>")
 
     sp_list = sp.add_parser("list", help="Show available workspace modes and the active one")
+    add_sub_project_arg(sp_list)
     sp_list.set_defaults(func=run_list)
 
     sp_set = sp.add_parser("set", help="Set the active workspace mode")
     sp_set.add_argument("name", choices=workspace_mod.VALUES, help="worktree | none")
+    add_sub_project_arg(sp_set)
     sp_set.set_defaults(func=run_set)
 
 
