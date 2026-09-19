@@ -930,6 +930,11 @@ The omitted-formation auto-pick intentionally considers only the project tier.
 Global formations are reachable by explicit name but are not auto-selected, so a
 fresh project with no formation files still falls back to `_leader_solo`. Shipped
 templates are seed sources only and are never used as a runtime fallback.
+A miss on a name that ships as a seed (formation template or role prompt) stays a
+hard error, but the message names the shipped seed and the next step:
+`fleet formation seed <name>` / `fleet role seed <name>` (project tier by default,
+`--global` for the global tier, refusing to overwrite without `--force`), or
+`fleet edit`'s "seed shipped" mode (Issue #267).
 Both the shipped `solo` template and the synthetic `_leader_solo` fallback carry
 `user_approval: required`, so a finished single-driver task parks at
 `awaiting_orders` for sign-off instead of jumping straight to `completed`.

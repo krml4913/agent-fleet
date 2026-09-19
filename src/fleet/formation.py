@@ -19,9 +19,10 @@ if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
 
 import yaml  # noqa: E402
 
+from . import seeds  # noqa: E402
 from . import state as state_mod  # noqa: E402
 
-TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+TEMPLATES_DIR = seeds.TEMPLATES_DIR
 CUSTOM_SUBDIR = "formations"
 
 
@@ -99,7 +100,12 @@ def load_formation(name: str, state_dir: Path) -> dict[str, Any]:
             return _load_yaml(path)
     tiers = "\n".join(f"  - {path}" for path in looked)
     raise FileNotFoundError(
-        f"no formation named {name!r}. Looked in:\n{tiers}"
+        seeds.with_hint(
+            f"no formation named {name!r}. Looked in:\n{tiers}",
+            "formation",
+            name,
+            state_dir,
+        )
     )
 
 

@@ -242,6 +242,8 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet scope [label] [--set/--add/--rm/--clear]` | leader セッションが担当する project の集合（scope）を確認・編集する。 |
 | `fleet log [task_id] [-n N] [--type T]` | `events.jsonl` を tail し、任意でタスク / タイプでフィルタする。 |
 | `fleet formation list \| show <name>` | runtime formation と template seed source を確認する。 |
+| `fleet formation seed <name> [--global] [--project P] [--force]` | 同梱の formation seed を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
+| `fleet role seed <name> [--global] [--project P] [--force]` | 同梱の role プロンプト（`docs/prompts/roles/`）を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet workspace list \| set <mode>` | workspace モード（`worktree` / `none`）を表示または設定する。 |
 | `fleet rm <name> [--yes]` | プロジェクトの登録を解除し、その state を削除する。 |
 

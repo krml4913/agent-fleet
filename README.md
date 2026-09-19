@@ -237,6 +237,8 @@ not killed for you — fleet warns if it spots one still running.
 | `fleet scope [label] [--set/--add/--rm/--clear]` | View or edit the set of projects a leader session is responsible for. |
 | `fleet log [task_id] [-n N] [--type T]` | Tail `events.jsonl`, optionally filtered by task / type. |
 | `fleet formation list \| show <name>` | Inspect runtime formations and template seed sources. |
+| `fleet formation seed <name> [--global] [--project P] [--force]` | Copy a shipped formation seed into the project (default) or global tier; refuses to overwrite unless `--force`. |
+| `fleet role seed <name> [--global] [--project P] [--force]` | Copy a shipped role prompt (`docs/prompts/roles/`) into the project (default) or global tier; refuses to overwrite unless `--force`. |
 | `fleet workspace list \| set <mode>` | Show or set the workspace mode (`worktree` / `none`). |
 | `fleet rm <name> [--yes]` | Unregister a project and delete its state. |
 

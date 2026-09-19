@@ -22,11 +22,10 @@ import yaml
 
 from .. import driver_prompt
 from .. import formation as formation_mod
+from .. import seeds
 from .. import state as state_mod
 from .. import task_context
 
-_ROOT = Path(__file__).resolve().parents[3]
-_SHIPPED_ROLES_DIR = _ROOT / "docs" / "prompts" / "roles"
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -317,9 +316,8 @@ def _runtime_path(context: EditContext, kind: str, tier: str, name: str) -> Path
 
 
 def _seed_path(kind: str, name: str) -> Path:
-    if kind == "formation":
-        return formation_mod.TEMPLATES_DIR / f"{name}.yaml"
-    return _SHIPPED_ROLES_DIR / f"{name}.md"
+    suffix = ".yaml" if kind == "formation" else ".md"
+    return seeds.seed_source_dir(kind) / f"{name}{suffix}"
 
 
 def _list_names(directory: Path, suffix: str) -> set[str]:
@@ -342,7 +340,7 @@ def _list_kind(context: EditContext, kind: str) -> list[dict[str, Any]]:
     if context.state_dir is not None:
         project_dir = context.state_dir / (state_mod.FORMATIONS_SUBDIR if kind == "formation" else state_mod.ROLES_SUBDIR)
     global_dir = state_mod.global_formations_dir() if kind == "formation" else state_mod.global_roles_dir()
-    seed_dir = formation_mod.TEMPLATES_DIR if kind == "formation" else _SHIPPED_ROLES_DIR
+    seed_dir = seeds.seed_source_dir(kind)
 
     project_names = _list_names(project_dir, suffix) if project_dir is not None else set()
     global_names = _list_names(global_dir, suffix)
