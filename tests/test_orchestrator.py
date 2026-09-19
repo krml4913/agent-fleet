@@ -985,6 +985,55 @@ class VerifyGateTests(unittest.TestCase):
         self.assertFalse((self.project / "worktree-cwd.txt").exists())
 
 
+class VerifyOutputDecodeTests(unittest.TestCase):
+    """Verify output is captured as bytes and decoded per line (cmd.exe on Windows)."""
+
+    JA = "指定されたファイルが見つかりません。"
+
+    def test_utf8_output_is_unchanged(self) -> None:
+        data = "héllo·ok\r\nline2\n".encode("utf-8")
+        self.assertEqual(orchestrator._coerce_output(data), "héllo·ok\nline2\n")
+
+    def test_console_code_page_lines_fall_back_per_line(self) -> None:
+        # Mixed: a UTF-8 line (Python tool) and a cp932 line (cmd built-in).
+        data = "tool: ✓ ok\r\n".encode("utf-8") + (self.JA + "\r\n").encode("cp932")
+        with unittest.mock.patch.object(
+            orchestrator, "_legacy_console_encoding", return_value="cp932"
+        ):
+            out = orchestrator._coerce_output(data)
+        self.assertEqual(out, f"tool: ✓ ok\n{self.JA}\n")
+
+    def test_without_legacy_code_page_replaces_invalid_bytes(self) -> None:
+        data = (self.JA + "\n").encode("cp932")
+        with unittest.mock.patch.object(
+            orchestrator, "_legacy_console_encoding", return_value=None
+        ):
+            out = orchestrator._coerce_output(data)
+        self.assertIn("�", out)
+
+    def test_legacy_console_encoding_is_windows_only(self) -> None:
+        with unittest.mock.patch.object(orchestrator.sys, "platform", "linux"):
+            self.assertIsNone(orchestrator._legacy_console_encoding())
+
+    def test_run_verify_command_captures_bytes(self) -> None:
+        with TemporaryDirectory() as tmp, unittest.mock.patch.object(
+            orchestrator.subprocess, "run"
+        ) as run:
+            run.return_value = subprocess.CompletedProcess(
+                "x", 1, (self.JA + "\r\n").encode("cp932"), None
+            )
+            with unittest.mock.patch.object(
+                orchestrator, "_legacy_console_encoding", return_value="cp932"
+            ):
+                result = orchestrator._run_verify_command(
+                    Path(tmp), {"worktree": tmp}, {"command": "type missing.txt"}
+                )
+        self.assertNotIn("text", run.call_args.kwargs)
+        self.assertNotIn("encoding", run.call_args.kwargs)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.output, self.JA + "\n")
+
+
 class WindowCwdTests(unittest.TestCase):
     """Verify _launch_driver_for_stage passes window_cwd correctly depending on whether a worktree exists."""
 

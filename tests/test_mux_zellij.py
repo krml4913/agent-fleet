@@ -742,6 +742,41 @@ class SpawnFlagsTests(unittest.TestCase):
             for std in ("stdin", "stdout", "stderr"):
                 self.assertNotIn(std, kw)
 
+    def test_spawned_client_env_drops_zellij_pane_markers(self) -> None:
+        # A fleet command run from a pane of S (leader ``start``, driver
+        # ``done``) inherits ZELLIJ_SESSION_NAME=S; ``zellij attach S`` then
+        # panics ("attach to the current session … not supported").
+        m = ZellijMux(binary=sys.executable)
+        pane_env = {
+            "ZELLIJ": "0",
+            "ZELLIJ_SESSION_NAME": "fleet-main",
+            "ZELLIJ_PANE_ID": "3",
+            "FLEET_TASK_ID": "t1",
+            "PATH": os.environ.get("PATH", ""),
+        }
+        for windows in (True, False):
+            with self.subTest(windows=windows), \
+                    unittest.mock.patch.dict(os.environ, pane_env, clear=True), \
+                    unittest.mock.patch.object(zmod, "_is_windows", return_value=windows), \
+                    unittest.mock.patch.object(zmod.subprocess, "STARTUPINFO", create=True), \
+                    unittest.mock.patch.object(zmod.subprocess, "Popen", return_value="proc") as popen:
+                m._spawn_client(["zellij", "attach", "fleet-main"])
+                env = popen.call_args.kwargs["env"]
+                for var in zmod.ZELLIJ_PANE_VARS:
+                    self.assertNotIn(var, env)
+                self.assertEqual(env["FLEET_TASK_ID"], "t1")
+
+    def test_client_env_is_case_insensitive(self) -> None:
+        env = zmod.client_env({"zellij_session_name": "s", "Zellij": "0", "KEEP": "1"})
+        self.assertEqual(env, {"KEEP": "1"})
+
+    def test_window_close_kills_caller_only_on_windows(self) -> None:
+        m = ZellijMux(binary=sys.executable)
+        with unittest.mock.patch.object(zmod, "_is_windows", return_value=True):
+            self.assertTrue(m.window_close_kills_caller)
+        with unittest.mock.patch.object(zmod, "_is_windows", return_value=False):
+            self.assertFalse(m.window_close_kills_caller)
+
     def test_run_uses_utf8_and_no_window_on_windows(self) -> None:
         m = ZellijMux(binary=sys.executable)
         with unittest.mock.patch.object(zmod, "_is_windows", return_value=True), \

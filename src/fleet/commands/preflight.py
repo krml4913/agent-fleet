@@ -22,6 +22,8 @@ from typing import NamedTuple
 from .. import agents as agents_mod
 from .. import mux
 from .. import workspace as workspace_mod
+# Constants only: importing the backend module runs no zellij command.
+from ..mux import zellij as zellij_mux
 from .. import state as state_mod
 
 
@@ -37,10 +39,16 @@ class CheckResult(NamedTuple):
 # src/fleet/commands/preflight.py → parents[0]=commands, [1]=fleet, [2]=src, [3]=clone root
 _CLONE_ROOT = Path(__file__).resolve().parents[3]
 
-# zellij: 0.44.x lacks `new-tab --no-focus`; 0.45.0–0.45.1 need the detached
-# new-tab workaround for zellij#5594 (docs/windows-support.md §4.3 / §6.6).
-ZELLIJ_MIN_VERSION = (0, 45, 0)
-ZELLIJ_WORKAROUND_MAX_VERSION = (0, 45, 1)
+# zellij: 0.44.x lacks `new-tab --no-focus`; versions below
+# FIXED_DETACHED_TAB_VERSION get the detached new-tab workaround for
+# zellij#5594 (docs/windows-support.md §4.3 / §6.6). Both come from the
+# backend so the preflight warning and the backend's behavior cannot drift.
+ZELLIJ_MIN_VERSION = zellij_mux.MIN_VERSION
+ZELLIJ_WORKAROUND_BELOW_VERSION = zellij_mux.FIXED_DETACHED_TAB_VERSION
+
+
+def _version_str(version: tuple[int, ...]) -> str:
+    return ".".join(str(n) for n in version)
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -144,16 +152,19 @@ def _check_zellij() -> CheckResult:
     version = _parse_version(base.detail)
     if version is None:
         return base._replace(
-            detail=f"{base.detail} (could not parse version; need >=0.45.0)",
+            detail=f"{base.detail} (could not parse version; need >={_version_str(ZELLIJ_MIN_VERSION)})",
             warn=True,
         )
-    shown = ".".join(str(n) for n in version)
+    shown = _version_str(version)
     if version < ZELLIJ_MIN_VERSION:
         return base._replace(
             ok=False,
-            detail=f"{shown} (need >=0.45.0: older zellij lacks `new-tab --no-focus`)",
+            detail=(
+                f"{shown} (need >={_version_str(ZELLIJ_MIN_VERSION)}: "
+                "older zellij lacks `new-tab --no-focus`)"
+            ),
         )
-    if version <= ZELLIJ_WORKAROUND_MAX_VERSION:
+    if version < ZELLIJ_WORKAROUND_BELOW_VERSION:
         return base._replace(
             detail=f"{shown} (detached new-tab workaround for zellij#5594 active)",
             warn=True,

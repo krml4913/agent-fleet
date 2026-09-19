@@ -244,6 +244,39 @@ class MuxBackendCheckTests(unittest.TestCase):
         self.assertFalse(result.warn)
         self.assertEqual(result.detail, "0.46.0")
 
+    def test_zellij_version_gates_come_from_the_backend(self) -> None:
+        # The preflight warning must match when ZellijMux actually applies the
+        # #5594 temp-client workaround (every version below the fixed one).
+        from fleet.mux import zellij as zellij_mux
+
+        self.assertEqual(preflight.ZELLIJ_MIN_VERSION, zellij_mux.MIN_VERSION)
+        self.assertEqual(
+            preflight.ZELLIJ_WORKAROUND_BELOW_VERSION,
+            zellij_mux.FIXED_DETACHED_TAB_VERSION,
+        )
+
+    def test_zellij_workaround_warning_tracks_backend_fixed_version(self) -> None:
+        from fleet.mux import zellij as zellij_mux
+
+        fixed = zellij_mux.FIXED_DETACHED_TAB_VERSION
+        below = (fixed[0], fixed[1] - 1, 99)  # e.g. 0.45.99: still worked around
+        for version, warns in ((below, True), (fixed, False)):
+            shown = ".".join(str(n) for n in version)
+            with self.subTest(version=shown):
+                result, _ = self._check_mux(
+                    "zellij", which="/bin/zellij", stdout=f"zellij {shown}\n"
+                )
+                self.assertTrue(result.ok)
+                self.assertEqual(result.warn, warns)
+                self.assertEqual("zellij#5594" in result.detail, warns)
+                # The backend agrees with the warning.
+                with unittest.mock.patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("FLEET_ZELLIJ_TEMP_CLIENT", None)
+                    m = zellij_mux.ZellijMux()
+                    m._version_probed = True
+                    m._version = version
+                    self.assertEqual(m.needs_temp_client(), warns)
+
     def test_zellij_unparseable_version_warns(self) -> None:
         result, _ = self._check_mux("zellij", which="/bin/zellij", stdout="zellij dev\n")
         self.assertTrue(result.ok)
