@@ -112,6 +112,57 @@ class MemoryCmdTests(unittest.TestCase):
         self.assertIn("now with a sharper summary", matches[0])
         self.assertNotIn("integration tests must use real state files", index)
 
+    def test_write_drops_seeded_placeholder_on_first_entry(self) -> None:
+        # Fresh store: index is exactly the seeded template (Issue #269).
+        (self.memory_dir / "MEMORY.md").write_text(state._MEMORY_INDEX_TEMPLATE, encoding="utf-8")
+        r = self._run("memory", "write", "first", "--description", "d1", stdin="body")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        index = (self.memory_dir / "MEMORY.md").read_text(encoding="utf-8")
+        self.assertNotIn("no entries yet", index)
+        self.assertEqual(index, "# Memory Index\n\n- [first](first.md) — d1\n")
+
+    def test_write_drops_global_style_placeholder_and_keeps_other_lines(self) -> None:
+        (self.memory_dir / "MEMORY.md").write_text(
+            "# Leader Memory Index (global)\n\nintro prose\n\n"
+            + state._GLOBAL_MEMORY_INDEX_TEMPLATE.split("\n\n", 1)[1]
+            + "- [old](old.md) — kept\n",
+            encoding="utf-8",
+        )
+        r = self._run("memory", "write", "new", "--description", "d2", stdin="body")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        index = (self.memory_dir / "MEMORY.md").read_text(encoding="utf-8")
+        self.assertNotIn("no entries yet", index)
+        self.assertIn("# Leader Memory Index (global)", index)
+        self.assertIn("intro prose", index)
+        self.assertIn("- [old](old.md) — kept", index)
+        self.assertIn("- [new](new.md) — d2", index)
+
+    def test_write_update_of_existing_slug_also_drops_placeholder(self) -> None:
+        index_path = self.memory_dir / "MEMORY.md"
+        index_path.write_text(
+            "# Memory Index\n\n- *(no entries yet — add one)*\n"
+            "- [testing-rule](testing-rule.md) — old\n",
+            encoding="utf-8",
+        )
+        r = self._run("memory", "write", "testing-rule", "--description", "new", stdin="b")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        index = index_path.read_text(encoding="utf-8")
+        self.assertNotIn("no entries yet", index)
+        self.assertIn("- [testing-rule](testing-rule.md) — new", index)
+
+    def test_write_leaves_index_without_placeholder_untouched(self) -> None:
+        index_path = self.memory_dir / "MEMORY.md"
+        index_path.write_text(
+            "# Memory Index\n\n- [a](a.md) — about no entries yet\n",
+            encoding="utf-8",
+        )
+        r = self._run("memory", "write", "b", "--description", "d", stdin="x")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            index_path.read_text(encoding="utf-8"),
+            "# Memory Index\n\n- [a](a.md) — about no entries yet\n- [b](b.md) — d\n",
+        )
+
     def test_write_body_from_file(self) -> None:
         body_file = Path(self._tmp.name) / "body.txt"
         body_file.write_text("Body sourced from a file.", encoding="utf-8")

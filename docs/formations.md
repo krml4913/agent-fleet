@@ -95,6 +95,7 @@ Resolution order (`fleet-agent start`):
 ```yaml
 verify:
   command: "ruff check && python -m unittest discover tests"  # required
+  shell: bash           # optional: bash | sh | pwsh | powershell | cmd; default = platform shell
   timeout: 900          # optional, seconds; default 600
   max_iterations: 3     # optional; default 3
 ```
@@ -120,6 +121,24 @@ implement → verify → peer_review loop → user_approval gate → stage done
 - Fleet only gates on the exit code; it does not parse or interpret output.
 - With `workspace: worktree`, the command runs in the task worktree. With
   `workspace: none`, it runs in the project root.
+- `shell` picks the shell that runs the command. When omitted, the command runs
+  under the platform default shell: `/bin/sh` on macOS / Linux and **`cmd.exe`
+  on Windows** — so POSIX-style commands fail on Windows unless you set `shell`.
+
+  | `shell` | runs as | notes |
+  |---|---|---|
+  | `bash` | `bash -c <command>` | On Windows this is **Git Bash** (looked up next to `git`, then in the standard install dirs, then `PATH`); the WSL launcher in `System32` is never used. |
+  | `sh` | `sh -c <command>` | On Windows, the `sh` shipped with Git for Windows. |
+  | `pwsh` | `pwsh -NoProfile -NonInteractive -Command <command>` | PowerShell 7+. |
+  | `powershell` | `powershell -NoProfile -NonInteractive -Command <command>` | Windows PowerShell 5.1. On macOS / Linux it falls back to `pwsh`. |
+  | `cmd` | `cmd.exe` (the Windows default) | Windows only. |
+
+  Under PowerShell the exit code follows PowerShell's rules (the last
+  statement decides), and `&&` / `||` need `pwsh` 7+. If the requested shell is
+  not installed, nothing runs: the check counts as a failed run (exit 127) with
+  an inbox message that names the shell and how to fix it, and the usual
+  `max_iterations` cap escalates it to the user. The same formation can be
+  shared across OSes; a shell is only looked up when the gate runs.
 
 ### 2.6 `peer_review` (nested AI review)
 
@@ -335,6 +354,10 @@ Use the command your project already trusts locally. Keep it as one shell string
 and let the shell compose multiple tools. Do not put `verify` in `project.yaml`;
 it is a per-stage formation block.
 
+Add `shell: bash` (or `pwsh`, …) when the command is not valid in the platform
+default shell — most commonly a POSIX command on Windows, where the default is
+`cmd.exe` (see §2.5).
+
 ---
 
 ## 5. Validation and behavior
@@ -366,7 +389,8 @@ approval/review/check boundaries cannot silently disappear through a typo
 | missing `name` | `formation missing required field: name` |
 | missing / empty `stages` | `formation 'stages' must be a non-empty list` |
 | stage missing `role` | `formation stages[i] missing required field: role` |
-| malformed `verify` | `formation stages[i] verify must carry a non-empty 'command' string`, or a positive-integer error for `timeout` / `max_iterations` |
+| malformed `verify` | `formation stages[i] verify must carry a non-empty 'command' string`, a positive-integer error for `timeout` / `max_iterations`, or `verify.shell must be one of bash, sh, pwsh, powershell, cmd` |
+| `verify.shell` not installed (at run time) | The gate fails with exit 127 and `verify shell '<name>' was requested (verify.shell) but was not found on this machine; …` in the driver's inbox; `max_iterations` then escalates. |
 | bad `agent` spec | At runtime: `unsupported vendor` or `agent spec must be 'vendor:model'`. |
 | unsupported vendor (e.g. `openai:gpt-4`) | `unsupported vendor 'openai'; supported: ['claude', 'codex']` |
 

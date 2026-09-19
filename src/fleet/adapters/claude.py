@@ -1,11 +1,10 @@
 """Adapter for Anthropic's ``claude`` CLI."""
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-from .base import VendorAdapter
+from .base import VendorAdapter, parse_jsonl_records, session_started_by_pointer
 
 
 class ClaudeAdapter(VendorAdapter):
@@ -32,7 +31,11 @@ class ClaudeAdapter(VendorAdapter):
 
     @classmethod
     def usage_from_session(
-        cls, *, cwd: str | Path, home: Path | None = None
+        cls,
+        *,
+        cwd: str | Path,
+        home: Path | None = None,
+        pointer: str | None = None,
     ) -> dict | None:
         """Sum token usage from claude's session JSONL for ``cwd``.
 
@@ -45,8 +48,9 @@ class ClaudeAdapter(VendorAdapter):
         ``input_tokens + cache_creation_input_tokens + cache_read_input_tokens``.
 
         Sums across every ``*.jsonl`` in the dir (all sessions for this task's
-        worktree). Returns ``None`` when the dir is missing or no usage is
-        found; never raises.
+        worktree). With ``pointer`` (a directory shared with other sessions),
+        only the session logs that pointer started count. Returns ``None`` when
+        the dir is missing or no usage is found; never raises.
         """
         proj = (home or Path.home()) / ".claude" / "projects" / _escape_cwd(cwd)
         if not proj.is_dir():
@@ -63,14 +67,10 @@ class ClaudeAdapter(VendorAdapter):
                 text = log_file.read_text(encoding="utf-8")
             except OSError:
                 continue
-            for line in text.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                except (ValueError, TypeError):
-                    continue
+            records = parse_jsonl_records(text)
+            if pointer is not None and not session_started_by_pointer(records, pointer):
+                continue
+            for record in records:
                 message = record.get("message") if isinstance(record, dict) else None
                 usage = message.get("usage") if isinstance(message, dict) else None
                 if not isinstance(usage, dict):

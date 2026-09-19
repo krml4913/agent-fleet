@@ -536,7 +536,7 @@ is captured somewhere. fleet records it **per task**, into the task's own
 
 - **Seam = the vendor adapter.** Token accounting is vendor-specific in exactly
   the same way the launch command is, so it lives where the other vendor seams do:
-  a `VendorAdapter.usage_from_session(*, cwd, home=None)` classmethod (§ adapter
+  a `VendorAdapter.usage_from_session(*, cwd, home=None, pointer=None)` classmethod (§ adapter
   registry, `src/fleet/adapters/`). It **defaults to `None`** — a vendor that
   cannot report usage contributes nothing rather than erroring — and `claude` /
   `codex` override it. Adding a vendor stays "one file plus one registry line".
@@ -547,7 +547,11 @@ is captured somewhere. fleet records it **per task**, into the task's own
   cache-creation + cache-read, since claude reports input excluding cache); codex
   takes the last cumulative `token_count` total from each
   `~/.codex/sessions/**/rollout-*.jsonl` whose recorded `cwd` matches. The working
-  dir (the task's worktree, unique per task) is the attribution key. Reading
+  dir (the task's worktree, unique per task) is the attribution key. A
+  workspace=none task runs in the shared project root, so there the key is the
+  root **plus the task's prompt pointer** (`pointer=`, the text fleet pastes as
+  the pane's first input): only sessions whose first pointer mention is this
+  task's count, which keeps the leader's and other tasks' sessions out. Reading
   home-dir vendor logs mirrors fleet's existing posture (e.g. reading
   `~/.codex/config.toml`); fleet never writes its state into the home dir — usage
   lands in `task.yaml` only.
@@ -870,7 +874,7 @@ schema language (JSON Schema etc.) is used (§1.3 principle 1).
 |---|---|---|
 | `role` | required | the role the driver plays (e.g. `driver`, `implementer`, `designer`) |
 | `agent` | optional | the agent to use (e.g. `claude:sonnet`). If omitted, the `--agent` argument value is used |
-| `verify` | optional | mechanical check gate. Subfields: `command` (required string), `timeout` (optional positive integer seconds, default 600), `max_iterations` (optional positive integer, default 3) |
+| `verify` | optional | mechanical check gate. Subfields: `command` (required string), `shell` (optional: `bash` / `sh` / `pwsh` / `powershell` / `cmd`; default is the platform shell — `cmd.exe` on Windows), `timeout` (optional positive integer seconds, default 600), `max_iterations` (optional positive integer, default 3) |
 | `peer_review` | optional | specified when inserting AI review. Subfields: `role` (reviewer's role, required), `agent` (reviewer's agent, optional). If `agent` is omitted, it falls back in order to the stage's `agent` → `claude:sonnet` |
 | `user_approval` | optional | human approval point. The string `"required"` / `"optional"`, or an object form |
 
@@ -883,7 +887,8 @@ boundary (P8) cannot silently vanish into a bare solo:
   object carrying a bool `required`;
 - a present `peer_review` must be an object carrying `role`;
 - a present `verify` must be an object carrying a non-empty `command` string;
-  optional `timeout` and `max_iterations` must be positive integers;
+  optional `timeout` and `max_iterations` must be positive integers, and an
+  optional `shell` must be one of `bash`, `sh`, `pwsh`, `powershell`, `cmd`;
 - a stage key that is a **near-miss misspelling** of a gate key — a case-only
   difference or an edit distance threshold from `user_approval` / `peer_review`
   / `verify` (e.g. `user_aproval`, `peer_reveiw`, `verfy`) — is rejected. The

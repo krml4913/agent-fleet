@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,10 @@ from .. import state as state_mod
 _INDEX_NAME = "MEMORY.md"
 _RESERVED = {"MEMORY.md", "GUIDE.md"}
 _INDEX_HEADER = "# Memory Index\n"
+# The "- *(no entries yet — …)*" line seeded into MEMORY.md by ``state`` (project
+# and global leader-memory templates share this shape). Tolerates any bullet
+# marker, ``*`` / ``_`` emphasis, surrounding whitespace and any trailing text.
+_PLACEHOLDER_RE = re.compile(r"^\s*[-*+]\s+[*_]\(\s*no entries yet\b.*\)[*_]\s*$", re.IGNORECASE)
 
 
 def add_parser(sub: argparse._SubParsersAction) -> None:
@@ -196,6 +201,11 @@ def run_write(args: argparse.Namespace) -> int:
     return 0
 
 
+def _drop_placeholder(lines: list[str]) -> list[str]:
+    """Return *lines* without the seeded ``*(no entries yet …)*`` placeholder."""
+    return [l for l in lines if not _PLACEHOLDER_RE.match(l)]
+
+
 def _update_index(memory_dir: Path, slug: str, description: str) -> None:
     """Insert or replace the ``MEMORY.md`` index line for *slug*."""
     line = f"- [{slug}]({slug}.md) — {description}" if description else f"- [{slug}]({slug}.md)"
@@ -210,10 +220,14 @@ def _update_index(memory_dir: Path, slug: str, description: str) -> None:
     for i, existing in enumerate(lines):
         if marker in existing:
             lines[i] = line
-            index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            index_path.write_text("\n".join(_drop_placeholder(lines)) + "\n", encoding="utf-8")
             return
 
-    # No existing entry — append, ensuring a blank line separates the header block.
+    # No existing entry — drop the seeded placeholder, then append.
+    lines = _drop_placeholder(lines)
+    text = "\n".join(lines) + "\n" if lines else ""
+
+    # Ensure a blank line separates the header block.
     new_text = text if text.endswith("\n") else text + "\n"
     if not new_text.endswith("\n\n"):
         # keep a single trailing newline before appending the entry

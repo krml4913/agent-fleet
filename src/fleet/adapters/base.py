@@ -8,6 +8,7 @@ scattered across ``agents.py`` / ``prompt_deliverer.py`` / the launchers.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -147,7 +148,11 @@ class VendorAdapter:
 
     @classmethod
     def usage_from_session(
-        cls, *, cwd: str | Path, home: Path | None = None
+        cls,
+        *,
+        cwd: str | Path,
+        home: Path | None = None,
+        pointer: str | None = None,
     ) -> dict | None:
         """Return RAW token usage for the agent that ran in ``cwd``, or ``None``.
 
@@ -157,6 +162,14 @@ class VendorAdapter:
         worktree, unique per task); ``home`` overrides the home directory for
         tests (``None`` means :meth:`Path.home`).
 
+        ``pointer`` is for a ``cwd`` shared with other sessions (a
+        workspace=none task runs in the project root, next to the leader and
+        other tasks): the prompt-pointer text fleet pasted into this task's
+        pane (see :func:`fleet.prompt_pointer.pointer_text`). When given, only
+        sessions that were started by that pointer count (see
+        :func:`session_started_by_pointer`); ``None`` counts every session in
+        ``cwd``.
+
         Returns ``{"input_tokens": int, "output_tokens": int}`` (an optional
         approximate ``"cost"`` may be added by a vendor that can compute one).
         The base default returns ``None`` — a vendor that cannot report usage
@@ -164,6 +177,54 @@ class VendorAdapter:
         unparseable log degrades to ``None`` rather than raising.
         """
         return None
+
+
+# The fixed lead-in of ``prompt_pointer.pointer_text`` — how a pasted pointer is
+# recognised without knowing the task it names.
+POINTER_LEAD = "Read the prompt file at this path before doing anything else"
+
+
+def parse_jsonl_records(text: str) -> list:
+    """Parse a JSONL log into records, skipping blank and malformed lines."""
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except (ValueError, TypeError):
+            continue
+    return records
+
+
+def _strings(value: object):
+    """Yield every string in a parsed-JSON value (vendor-log-format agnostic)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+
+
+def session_started_by_pointer(records: list, pointer: str) -> bool:
+    """Whether the session whose parsed log ``records`` is the one ``pointer`` started.
+
+    A driver's first input is the pointer fleet pastes into its pane, so the
+    FIRST record in the log that carries the pointer lead-in must carry this
+    task's exact ``pointer`` text. Later mentions (a leader reading the
+    prompt file, a session grepping fleet's own source) are ignored — only the
+    first counts — so a shared project root can't attribute another session's
+    tokens to the task.
+    """
+    for record in records:
+        for text in _strings(record):
+            if POINTER_LEAD in text:
+                return pointer in text
+    return False
 
 
 def _tail(lines: list[str], n: int) -> list[str]:

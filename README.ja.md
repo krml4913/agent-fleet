@@ -394,8 +394,10 @@ fleet-<label>` を実行する。デタッチは zellij の `Ctrl o` のあと `
   起動すると、そのフォルダを信頼するかを尋ねられる。fleet はこれに答えない:
   タスクは boot gate として通知され（`awaiting_orders` + 通知）、人間がアタッチ
   して確認する必要がある。その後プロンプトは自動で配送される。
-- **verify コマンドは Windows では `cmd.exe` で実行される** ので、`verify`
-  コマンドは cmd の構文として正しくなければならない。
+- **verify コマンドは Windows ではデフォルトで `cmd.exe` で実行される** ので、
+  `verify` コマンドは cmd の構文として正しくなければならない。ただし formation で
+  `verify.shell`（`bash` = Git Bash、`pwsh`、`powershell`、`sh`、`cmd`）を指定した
+  場合は、そのシェルで実行される（[docs/formations.md](docs/formations.md) §2.5 を参照）。
 - **zellij 上の codex はまだ検証されていない。** claude の driver は検証済み。
 
 デスクトップ通知は Windows のトーストを使う（デフォルトで有効。無効にするには

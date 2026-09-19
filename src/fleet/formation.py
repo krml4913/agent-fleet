@@ -21,6 +21,7 @@ import yaml  # noqa: E402
 
 from . import seeds  # noqa: E402
 from . import state as state_mod  # noqa: E402
+from .verify_shell import SUPPORTED_SHELLS  # noqa: E402
 
 TEMPLATES_DIR = seeds.TEMPLATES_DIR
 CUSTOM_SUBDIR = "formations"
@@ -258,7 +259,8 @@ def validate(data: dict[str, Any]) -> None:
       * a present ``user_approval`` must be the string ``"required"`` /
         ``"optional"`` or an object carrying a bool ``required``;
       * a present ``peer_review`` must be an object carrying ``role``;
-      * a present ``verify`` must be an object carrying ``command``;
+      * a present ``verify`` must be an object carrying ``command``; its
+        optional ``shell`` must be one of ``verify_shell.SUPPORTED_SHELLS``;
       * top-level gate keys and near-miss misspellings are rejected, because
         gates only take effect inside stages;
       * a stage key that is a near-miss misspelling of a gate key
@@ -375,6 +377,12 @@ def _validate_stage_gates(idx: int, stage: dict[str, Any]) -> None:
             raise ValueError(
                 f"formation stages[{idx}] verify must carry a non-empty "
                 f"'command' string"
+            )
+        shell = verify.get("shell")
+        if shell is not None and shell not in SUPPORTED_SHELLS:
+            raise ValueError(
+                f"formation stages[{idx}] verify.shell must be one of "
+                f"{', '.join(SUPPORTED_SHELLS)}, got {shell!r}"
             )
         for field in ("timeout", "max_iterations"):
             value = verify.get(field)
