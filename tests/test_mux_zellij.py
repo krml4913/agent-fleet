@@ -646,6 +646,71 @@ class AttachTests(ZellijSimTestCase):
         self.assertIn("Ctrl t", err.getvalue())
         self.assertEqual(self.z.actions("go-to-tab-name"), [])
 
+    def _attach_with_other_client(self, stdin: io.StringIO, *, stdin_tty: bool, stderr_tty: bool):
+        class _Stream(io.StringIO):
+            def __init__(self, initial: str = "", tty: bool = False) -> None:
+                super().__init__(initial)
+                self._tty = tty
+
+            def isatty(self) -> bool:
+                return self._tty
+
+        self.z.sessions["fleet-p"]["clients"].append("1")
+        fake_in = _Stream(stdin.getvalue(), stdin_tty)
+        fake_err = _Stream("", stderr_tty)
+        with unittest.mock.patch.object(self.z, "start_focus_helper") as helper, \
+                unittest.mock.patch.object(sys, "stdin", fake_in), \
+                unittest.mock.patch.object(sys, "stderr", fake_err):
+            rc = self.z.attach("fleet-p", "7·driver")
+        return rc, fake_in, fake_err, helper
+
+    def test_other_client_on_tty_waits_for_enter_before_attaching(self) -> None:
+        rc, fake_in, fake_err, helper = self._attach_with_other_client(
+            io.StringIO("\n"), stdin_tty=True, stderr_tty=True
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(fake_in.read(), "")  # the Enter was consumed
+        self.assertIn("Ctrl t", fake_err.getvalue())
+        self.assertIn("press Enter to attach", fake_err.getvalue())
+        helper.assert_not_called()
+        self.assertEqual(len(self.z.attach_calls), 1)
+
+    def test_other_client_on_tty_with_eof_stdin_still_attaches(self) -> None:
+        rc, _, fake_err, _ = self._attach_with_other_client(
+            io.StringIO(""), stdin_tty=True, stderr_tty=True
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("press Enter to attach", fake_err.getvalue())
+        self.assertEqual(len(self.z.attach_calls), 1)
+
+    def test_other_client_without_tty_never_waits(self) -> None:
+        for stdin_tty, stderr_tty in ((False, False), (True, False), (False, True)):
+            with self.subTest(stdin_tty=stdin_tty, stderr_tty=stderr_tty):
+                self.z.attach_calls.clear()
+                self.z.sessions["fleet-p"]["clients"] = []
+                rc, fake_in, fake_err, _ = self._attach_with_other_client(
+                    io.StringIO("unread\n"), stdin_tty=stdin_tty, stderr_tty=stderr_tty
+                )
+                self.assertEqual(rc, 0)
+                self.assertEqual(fake_in.read(), "unread\n")  # stdin untouched
+                self.assertIn("Ctrl t", fake_err.getvalue())
+                self.assertNotIn("press Enter", fake_err.getvalue())
+                self.assertEqual(len(self.z.attach_calls), 1)
+
+    def test_sole_client_on_tty_does_not_prompt(self) -> None:
+        class _Tty(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        fake_in, fake_err = _Tty("x\n"), _Tty()
+        with unittest.mock.patch.object(self.z, "start_focus_helper") as helper, \
+                unittest.mock.patch.object(sys, "stdin", fake_in), \
+                unittest.mock.patch.object(sys, "stderr", fake_err):
+            self.z.attach("fleet-p", "7·driver")
+        helper.assert_called_once_with("fleet-p", "7·driver")
+        self.assertEqual(fake_in.read(), "x\n")
+        self.assertEqual(fake_err.getvalue(), "")
+
     def test_focus_helper_waits_for_client_then_goes_to_tab(self) -> None:
         self.z._pending_clients.append((0.3, "fleet-p", "1"))
         t = self.z.start_focus_helper("fleet-p", "7·driver", timeout=5)

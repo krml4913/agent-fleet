@@ -719,7 +719,10 @@ class ZellijMux(Mux):
         waits for our client to show up in ``list-clients`` and then runs
         ``go-to-tab-name`` (which drives the lowest-id client — ours, since
         it is the only one). With another client attached it only prints the
-        tab position: ``go-to-tab-name`` would move the *other* client.
+        tab position: ``go-to-tab-name`` would move the *other* client. On an
+        interactive terminal it then waits for Enter, because ``zellij attach``
+        takes over the screen at once and the note would flash by unread
+        (Issue #297); without a TTY it prints and carries on.
         """
         zellij = self._bin()
         if not self.session_exists(session):
@@ -734,9 +737,29 @@ class ZellijMux(Mux):
                     file=sys.stderr,
                     flush=True,
                 )
+                self._wait_for_ack()
             else:
                 self.start_focus_helper(session, window)
         return self._call_attach([zellij, "attach", session])
+
+    @staticmethod
+    def _wait_for_ack() -> None:
+        """Block until Enter when both stdin and stderr are a TTY; else return.
+
+        Never waits when piped / in CI. ``isatty()`` can be True without a
+        reader (e.g. the Windows NUL device), so EOF just continues.
+        """
+        try:
+            interactive = sys.stdin.isatty() and sys.stderr.isatty()
+        except (AttributeError, ValueError):
+            return
+        if not interactive:
+            return
+        print("press Enter to attach… ", end="", file=sys.stderr, flush=True)
+        try:
+            sys.stdin.readline()
+        except (EOFError, OSError):
+            pass
 
     def start_focus_helper(
         self, session: str, window: str, *, timeout: float = ATTACH_FOCUS_TIMEOUT
