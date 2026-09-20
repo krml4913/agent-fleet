@@ -337,6 +337,13 @@ def load_env_file(path: str | os.PathLike[str]) -> tuple[dict[str, str], str | N
     return {str(k): str(v) for k, v in env.items()}, (str(cwd) if cwd else None)
 
 
+def _ignore_sigint() -> None:
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (ValueError, OSError):  # pragma: no cover - not the main thread
+        pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     env_file, agent = _parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -376,16 +383,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Found in a fallback dir: let the agent's own children find siblings.
         _env_set(env, "PATH", f"{path_value}{os.pathsep}{exe_dir}" if path_value else exe_dir)
 
-    # Ctrl+C belongs to the agent (same console): the launcher just waits.
-    try:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-    except (ValueError, OSError):  # pragma: no cover - not the main thread
-        pass
+    # Ctrl+C belongs to the agent (same console / terminal): the launcher just
+    # waits. On POSIX an ignored signal stays ignored across exec, so ignore it
+    # only once the agent runs — otherwise the agent, and every command it
+    # starts, would never see SIGINT (a shell in the pane could not be
+    # interrupted). Windows keeps ignoring it before the spawn.
+    if _is_windows():
+        _ignore_sigint()
     try:
         proc = subprocess.Popen([exe, *agent[1:]], env=env)
     except OSError as e:
         _hold(f"[fleet] error: cannot start {exe}: {e}")
         return 1
+    if not _is_windows():
+        _ignore_sigint()
     if env_file:
         write_pid_file(pid_file_for(env_file), launcher_pid=os.getpid(), agent_pid=proc.pid)
     return proc.wait()
