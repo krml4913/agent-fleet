@@ -21,7 +21,7 @@
 
 | Pillar | Description |
 |---|---|
-| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both in a terminal multiplexer: tmux on macOS/Linux, zellij on Windows). A leader is a project-agnostic **session** — one conversational counterpart that may serve one or several projects (§5.6) |
+| **1. Hierarchical dialogue UI** | Task delegation goes to the leader; task-level requirement refinement happens directly with the driver (both in a terminal multiplexer: zellij by default, tmux optional; §3, §5.3). A leader is a project-agnostic **session** — one conversational counterpart that may serve one or several projects (§5.6) |
 | **2. Multi-vendor agents** | claude / codex can be combined (MVP supports 2 vendors; OpenAI / Gemini come later) |
 | **3. Team formation definitions** | Per-project team formation (single driver / driver + reviewer / multi-stage) selected via YAML |
 
@@ -105,8 +105,9 @@ these principles (see §9 anti-scope).
                   [user attaches directly to the driver pane to converse]
 ```
 
-"mux" is the terminal multiplexer: tmux on macOS/Linux, zellij on Windows
-(`FLEET_MUX` overrides). Every multiplexer call goes through the
+"mux" is the terminal multiplexer: zellij by default on every platform, tmux
+optional (`FLEET_MUX` or the global config's `mux` selects it; §5.3). Every
+multiplexer call goes through the
 mechanism-only `fleet/mux/` interface (`mux/tmux.py`, `mux/zellij.py`).
 Where this document names a tmux primitive, it describes the tmux backend;
 the zellij mapping is in [windows-support.md](windows-support.md) §3.
@@ -290,6 +291,7 @@ A project that is no longer needed can be removed from the registry with
     projects.yaml                      ← global registry (name → repo map)
     projects.yaml.lock                 ← for flock
     global/                            ← reserved namespace for cross-project concerns (§6, §5.6)
+      config.yaml                      ← global config (`mux: zellij|tmux`; `fleet config`; see below)
       leader-memory/                   ← two-tier leader memory: GLOBAL layer (loaded every session)
         MEMORY.md      # index
         GUIDE.md       # discipline
@@ -330,6 +332,35 @@ so it does not violate the "nothing under the home directory" non-goal (§9) —
 per-session state under `global/sessions/<label>/` is keyed by `owner_session`
 (the session label), since a session spans projects: its notification queue and
 its leader agent spec belong to the session, not to any one project (§10.3).
+
+#### Global config (`global/config.yaml`)
+
+Settings that are not per-project live in `fleet-state/global/config.yaml`
+(project settings stay in `project.yaml` / `notify.yaml`). It is read through
+`fleet/config.py` and written only by `fleet config [get <key> | set <key>
+<value>]`, never by hand (the leader protocol forbids hand-editing state).
+
+| Key | Values | Built-in default |
+|---|---|---|
+| `mux` | `zellij` \| `tmux` | `zellij` (every platform) |
+
+- **Selection rule** (`fleet.mux.backend_selection()`), first hit wins:
+  `FLEET_MUX` env → `mux` in `config.yaml` → the built-in default. `fleet
+  preflight` prints the selected backend and the source (`env` / `config` /
+  `default`). `FLEET_NO_MUX` / `FLEET_ZELLIJ` are separate switches and are not
+  part of this rule. Before #299 the built-in default was tmux off Windows.
+- **Reads are tolerant**, like `notify.load_config`: a missing file means the
+  defaults; an unreadable / non-mapping / invalid-YAML file or an invalid value
+  prints one `warn:` to stderr and is ignored. Unknown keys in the file are
+  ignored (forward compatible). The parsed result is cached per process
+  (keyed by path, so `$FLEET_HOME` changes reload; `fleet.config.reset_cache()`
+  drops it, and `set` does so itself).
+- **Writes are locked and atomic** (`locking.atomic_update`, the same
+  read-modify-write as the registry): other keys in the file are preserved, an
+  unknown key or an invalid value is rejected with the valid ones listed, and a
+  file that is not a valid mapping is refused rather than overwritten.
+- `fleet config` / `get` report the config layer (file, else default) and only
+  *note* an active `FLEET_MUX`; the env layer is applied by `fleet.mux`.
 
 #### Project Resolution Logic
 

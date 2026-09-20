@@ -6,6 +6,8 @@ rest are mock-based and need no tmux at all.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -16,7 +18,7 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from fleet import mux  # noqa: E402
+from fleet import config, mux  # noqa: E402
 from fleet.mux import Key, MuxError  # noqa: E402
 from fleet.mux.tmux import TmuxError, TmuxMux, tmux_key  # noqa: E402
 from tests._fake_mux import FakeMux, use_fake_mux  # noqa: E402
@@ -493,41 +495,77 @@ class AvailabilityTests(unittest.TestCase):
 
 
 class BackendSelectionTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._prev = mux.set_backend(None)
+    """env (``FLEET_MUX``) > global config (``mux``) > built-in default (zellij).
 
-    def tearDown(self) -> None:
-        mux.set_backend(self._prev)
+    Hermetic: ``FLEET_HOME`` is a throwaway dir, so the host's real
+    ``fleet-state/global/config.yaml`` is never read, and nothing here depends
+    on the host platform (the default is zellij everywhere).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.fleet_home = Path(self._tmp.name)
+        self._prev = mux.set_backend(None)
+        config.reset_cache()
+        self.addCleanup(config.reset_cache)
+        self.addCleanup(mux.set_backend, self._prev)
 
     def _env(self, value: str | None):
         env = dict(os.environ)
         env.pop("FLEET_MUX", None)
+        env["FLEET_HOME"] = str(self.fleet_home)
         if value is not None:
             env["FLEET_MUX"] = value
         return unittest.mock.patch.dict(os.environ, env, clear=True)
 
-    def test_default_is_tmux_off_windows(self) -> None:
-        for platform in ("linux", "darwin"):
-            with self._env(None), unittest.mock.patch("fleet.mux.sys.platform", platform):
-                self.assertEqual(mux.default_backend_name(), "tmux")
-                self.assertEqual(mux.backend_name(), "tmux")
-                mux.set_backend(None)
-                self.assertIsInstance(mux.get(), TmuxMux)
-            mux.set_backend(None)
+    def _write_config(self, text: str) -> None:
+        path = self.fleet_home / "global" / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        config.reset_cache()
 
-    def test_default_is_zellij_on_windows(self) -> None:
+    def test_default_is_zellij_on_every_platform(self) -> None:
         from fleet.mux.zellij import ZellijMux
 
-        with self._env(None), unittest.mock.patch("fleet.mux.sys.platform", "win32"):
-            self.assertEqual(mux.default_backend_name(), "zellij")
+        self.assertEqual(mux.DEFAULT_BACKEND, "zellij")
+        for platform in ("linux", "darwin", "win32"):
+            with self._env(None), unittest.mock.patch("sys.platform", platform):
+                self.assertEqual(mux.default_backend_name(), "zellij")
+                self.assertEqual(mux.backend_selection(), ("zellij", "default"))
+        with self._env(None):
             self.assertEqual(mux.backend_name(), "zellij")
             self.assertIsInstance(mux.get(), ZellijMux)
 
-    def test_env_wins_over_platform_default(self) -> None:
-        with self._env("tmux"), unittest.mock.patch("fleet.mux.sys.platform", "win32"):
+    def test_config_beats_default(self) -> None:
+        self._write_config("mux: tmux\n")
+        with self._env(None):
+            self.assertEqual(mux.backend_selection(), ("tmux", "config"))
             self.assertEqual(mux.backend_name(), "tmux")
-        with self._env("zellij"), unittest.mock.patch("fleet.mux.sys.platform", "linux"):
-            self.assertEqual(mux.backend_name(), "zellij")
+            self.assertIsInstance(mux.get(), TmuxMux)
+
+    def test_env_beats_config(self) -> None:
+        from fleet.mux.zellij import ZellijMux
+
+        self._write_config("mux: tmux\n")
+        with self._env("zellij"):
+            self.assertEqual(mux.backend_selection(), ("zellij", "env"))
+            self.assertIsInstance(mux.get(), ZellijMux)
+        self._write_config("mux: zellij\n")
+        with self._env("tmux"):
+            self.assertEqual(mux.backend_selection(), ("tmux", "env"))
+
+    def test_empty_env_falls_through_to_config(self) -> None:
+        self._write_config("mux: tmux\n")
+        with self._env("  "):
+            self.assertEqual(mux.backend_selection(), ("tmux", "config"))
+
+    def test_bad_config_never_breaks_selection(self) -> None:
+        for text in ("mux: [unclosed\n", "- just\n- a list\n", "mux: screen\n"):
+            self._write_config(text)
+            with self._env(None), contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(mux.backend_selection(), ("zellij", "default"))
+            self.assertIn("warn:", err.getvalue(), text)
 
     def test_explicit_tmux(self) -> None:
         with self._env(" TMUX "):

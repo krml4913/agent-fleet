@@ -35,8 +35,9 @@ stage handoff, verify gate, cleanup / merge, and attach.
 
 **Out of scope**
 
-- Changing the default on macOS / Linux. tmux stays the default there. The
-  zellij backend may work on POSIX too, but that is not a goal of this plan.
+- Changing the default on macOS / Linux. This plan left tmux as the default
+  there; #299 later made zellij the default on every platform (tmux stays
+  available via `FLEET_MUX=tmux` or `fleet config set mux tmux`).
 - WSL2. fleet already runs unchanged under WSL2 + tmux. This plan is about
   native Windows.
 
@@ -377,8 +378,10 @@ launcher can serve the leader pane (`fleet leader`).
 
 ### 6.4 Backend selection
 
-`FLEET_MUX` (`tmux` | `zellij`) wins. Otherwise use `zellij` on
-`sys.platform == "win32"` and `tmux` everywhere else. One backend per
+`FLEET_MUX` (`tmux` | `zellij`) wins. Otherwise the `mux` key of the global
+config (`fleet-state/global/config.yaml`, set with `fleet config set mux`)
+wins. Otherwise the built-in default is `zellij` on every platform (it was
+`tmux` off Windows before #299). One backend per
 process, chosen at first use. Once a task records which multiplexer it was
 spawned in, a later process cannot switch backends under it.
 
@@ -725,8 +728,9 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
 - **Visible-terminal attach is not exercised by automation** (#257). Phase 0
   checked attach focus with hidden clients only; `fleet attach <task>` with and
   without another client in a real, visible terminal (§8 step 8) is manual only.
-- **zellij on macOS / Linux is untested** (#258). `FLEET_MUX=zellij` may work
-  there, but only Windows was tried.
+- **zellij on macOS / Linux is untested** (#258). It is now the default there
+  too (#299), but only Windows was tried; `FLEET_MUX=tmux` or
+  `fleet config set mux tmux` keeps tmux.
 - **claude's workspace-trust dialog** (#259). claude's first run in a fresh
   worktree asks whether to trust the folder. The adapter's `gate` regex
   catches it, so the deliverer holds back and the task is surfaced as a boot

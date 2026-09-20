@@ -126,22 +126,24 @@ def _run_cli_in_process(entry_name: str, prog: str, args: tuple[str, ...], env: 
 
     Emulates what a child process would see: the environment is *replaced* by
     ``env`` (and restored afterwards), the cwd is switched, stdin is ``stdin`` (default empty),
-    stdout/stderr are captured, the process-wide mux backend starts unselected
-    (re-chosen from ``env``), and ``SystemExit`` / uncaught exceptions become a
-    return code (1 + traceback on stderr, like the interpreter). ``os.exec*``
-    is refused so a stray attach can never replace the test runner.
+    stdout/stderr are captured, the process-wide mux backend and the
+    global-config cache start unselected / unloaded (re-chosen from ``env``),
+    and ``SystemExit`` / uncaught exceptions become a return code (1 +
+    traceback on stderr, like the interpreter). ``os.exec*`` is refused so a
+    stray attach can never replace the test runner.
     """
     import contextlib
     import io
     import traceback
     from unittest import mock
 
-    from fleet import cli, mux
+    from fleet import cli, config, mux
 
     out, err = io.StringIO(), io.StringIO()
     saved_env = os.environ.copy()
     saved_cwd = os.getcwd()
     saved_backend = mux.set_backend(None)
+    config.reset_cache()
     saved_stdin = sys.stdin
     rc: int
     try:
@@ -175,6 +177,7 @@ def _run_cli_in_process(entry_name: str, prog: str, args: tuple[str, ...], env: 
         os.environ.clear()
         os.environ.update(saved_env)
         mux.set_backend(saved_backend)
+        config.reset_cache()
     return subprocess.CompletedProcess([prog, *args], rc, out.getvalue(), err.getvalue())
 
 

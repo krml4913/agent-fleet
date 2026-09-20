@@ -56,8 +56,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "preflight",
         help="Check environment dependencies",
         description=(
-            "Verify Python >=3.11, the multiplexer (FLEET_MUX: tmux / zellij), "
-            "git, and the agent CLIs (claude / codex); on Windows also the "
+            "Verify Python >=3.11, the multiplexer (zellij by default; tmux via "
+            "FLEET_MUX or `fleet config set mux tmux`) and show which backend "
+            "is selected and where that choice came from (env / config / "
+            "default), git, and the agent CLIs (claude / codex); on Windows also the "
             "clone path, core.longpaths and fleet-agent.cmd. Optional tools "
             "missing → warn; required tools missing → exit 1."
         ),
@@ -89,6 +91,7 @@ def check_all() -> list[CheckResult]:
     git_required = _git_required_for_cwd(Path.cwd())
     results = [
         _check_python(),
+        _check_mux_selection(),
         _check_mux(),
         _check_command("git", ["git", "--version"], required=git_required),
     ]
@@ -122,12 +125,26 @@ def _check_python() -> CheckResult:
 
 
 def _mux_backend_name() -> str:
-    """The configured multiplexer backend name, without importing a backend.
+    """The selected multiplexer backend name, without importing a backend.
 
-    ``FLEET_MUX`` if set, else the platform default (zellij on Windows, tmux
-    elsewhere) — see :func:`fleet.mux.backend_name`.
+    ``FLEET_MUX``, else the global config's ``mux``, else the built-in default
+    (zellij) — see :func:`fleet.mux.backend_name`.
     """
     return mux.backend_name()
+
+
+def _check_mux_selection() -> CheckResult:
+    """Report which backend is selected and where that choice came from.
+
+    ``source`` is ``env`` (``FLEET_MUX``), ``config`` (``fleet config set mux``)
+    or ``default``. The default is zellij on every platform, so the default case
+    also names the two ways back to tmux.
+    """
+    name, source = mux.backend_selection()
+    detail = f"{name} (from {source})"
+    if source == "default":
+        detail += "; for tmux: `fleet config set mux tmux` or FLEET_MUX=tmux"
+    return CheckResult("mux", True, detail, required=False)
 
 
 def _check_mux() -> CheckResult:

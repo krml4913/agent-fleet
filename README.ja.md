@@ -2,8 +2,8 @@
 
 *[English README](README.md)*
 
-**agent-fleet** は、ターミナルマルチプレクサ（macOS/Linux では tmux、Windows では
-zellij）のペイン内で driver エージェント（claude / codex）を動かす、階層的かつ
+**agent-fleet** は、ターミナルマルチプレクサ（デフォルトは zellij、tmux も選択可）の
+ペイン内で driver エージェント（claude / codex）を動かす、階層的かつ
 マルチベンダーなエージェントオーケストレーターである。
 あなたは単一の **leader** エージェントと対話し、タスクを軽く投げるだけでよい。
 leader はそれぞれ専用のペインで **driver** エージェントを起動して作業を進める。
@@ -14,8 +14,9 @@ driver の
 引き継いだりできる。これは無人の完全自律ではなく、human-in-the-loop な
 コーディング作業のために作られている。
 
-**Python ≥ 3.11** とターミナルマルチプレクサが必要: macOS/Linux では **tmux**、
-Windows では **zellij ≥ 0.45.0**（[Windows](#windows) を参照）。**`pip install` は
+**Python ≥ 3.11** とターミナルマルチプレクサが必要: **zellij ≥ 0.45.0**
+（全プラットフォームでのデフォルト）または **tmux**（明示的に選ぶ場合。
+[マルチプレクサの選択](#マルチプレクサの選択) と [Windows](#windows) を参照）。**`pip install` は
 不要** で、repo を clone して `./fleet`（Windows では `fleet.cmd`）を実行するだけで
 よい。Python 依存はすべて `vendor/` 配下に同梱してある。
 
@@ -59,9 +60,9 @@ cd agent-fleet
 ./fleet preflight
 ```
 
-`preflight` は、`PATH` 上の Python、ターミナルマルチプレクサ（tmux、Windows では
-zellij）、git、そしてエージェント CLI
-（`claude`、`codex`）をチェックする。Codex CLI が古い場合や、directory trust が
+`preflight` は、`PATH` 上の Python、ターミナルマルチプレクサ（どのバックエンドが
+選ばれ、その選択がどこから来たか — `env` / `config` / `default` — も表示する）、git、
+そしてエージェント CLI（`claude`、`codex`）をチェックする。Codex CLI が古い場合や、directory trust が
 設定されていない場合にも警告する。指摘された点は次に進む前に解消すること。
 
 ### 2. プロジェクトを初期化する
@@ -232,7 +233,8 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 
 | コマンド | 用途 |
 |---|---|
-| `fleet preflight` | Python / マルチプレクサ（tmux または zellij）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
+| `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
+| `fleet config [get <key> \| set <key> <value>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定。現状のキーは `mux` = `zellij` \| `tmux` のみ。[マルチプレクサの選択](#マルチプレクサの選択) を参照。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`、デフォルトエージェントは `claude:opus`）。 |
 | `fleet attach [target] [--project P] [--session LABEL]` | タスクの driver ペイン（そのタスクを所有するセッション `fleet-<owner_session>` 内。`--project` でタスクを特定）、またはデフォルトで `fleet-<LABEL>` の `leader` ペインにアタッチする（`--session`、デフォルトは `$FLEET_SESSION`、なければ `main`）。対象セッションが動いていなければ、稼働中のセッションを一覧表示する。 |
@@ -318,6 +320,46 @@ agent-fleet/fleet-state/
 
 ---
 
+## マルチプレクサの選択
+
+> **デフォルトの変更 — 既存の macOS/Linux ユーザーは必読。** 組み込みのデフォルトの
+> マルチプレクサは **全プラットフォームで zellij** になった。以前は Windows 以外では
+> tmux だった。tmux を使い続けるには、次の **どちらか一方** を行う:
+>
+> ```bash
+> ./fleet config set mux tmux     # 永続（fleet-state/global/config.yaml に書き込む）
+> FLEET_MUX=tmux ./fleet ...      # シェル単位 / コマンド単位
+> ```
+>
+> 動作中の tmux セッションがある場合は、**次に fleet コマンドを実行する前に** これを
+> 行うこと。fleet は選択中のバックエンドのセッションしか探さないため、新しい
+> デフォルトのままでは稼働中の `fleet-<label>` の tmux セッションが見えなくなる。
+> macOS/Linux 上の zellij は tmux ほど検証されていない
+> （[#258](https://github.com/krml4913/agent-fleet/issues/258)）。
+
+バックエンドはプロセスごとに一度だけ選ばれ、最初に該当したものが勝つ:
+
+1. 環境変数 **`FLEET_MUX=tmux|zellij`**。
+2. グローバル config `fleet-state/global/config.yaml`
+   （`$FLEET_HOME/global/config.yaml`）の **`mux:`**。
+3. 組み込みのデフォルト: 全プラットフォームで **zellij**。
+
+config は手で編集せず CLI で管理する:
+
+```bash
+./fleet config                  # 全キーの値と、その値の出どころを表示
+./fleet config get mux          # 値を 1 つ表示
+./fleet config set mux tmux     # tmux | zellij。未知のキー / 値は拒否される
+```
+
+`fleet config` / `get` は config 層（ファイル、なければデフォルト）を報告する。
+`FLEET_MUX` が有効な場合はその旨が注記され、実際に選ばれたバックエンドとその出どころは
+`fleet preflight` で確認できる。`FLEET_NO_MUX` と `FLEET_ZELLIJ` は従来どおり。
+config ファイルがなければデフォルトを使うだけで、読めない / 不正な config は警告を
+出して無視されるだけであり、コマンドが止まることはない。
+
+---
+
 ## Windows
 
 fleet は Windows 上でネイティブに（WSL なしで）動く。tmux の代わりに
@@ -361,8 +403,9 @@ D:\dev\agent-fleet\fleet.cmd preflight
   展開しないので、`~/.local/bin` のようなエントリは Git Bash では効くが、
   PowerShell、cmd、zellij のペインでは効かない。代わりに実際のディレクトリ
   （例: `%USERPROFILE%\.local\bin`）を追加すること。
-- **`FLEET_MUX=tmux|zellij`** でバックエンドを上書きできる。デフォルトは Windows
-  では zellij、それ以外では tmux。
+- **`FLEET_MUX=tmux|zellij`** でバックエンドを上書きできる（
+  [マルチプレクサの選択](#マルチプレクサの選択) を参照）。デフォルトは全
+  プラットフォームで zellij。
 
 ### Windows で `fleet preflight` がチェックすること
 

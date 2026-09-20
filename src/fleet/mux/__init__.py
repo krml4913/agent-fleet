@@ -6,38 +6,49 @@ this module add the one piece of naming convention fleet needs at this layer —
 a task's windows are named ``<task>`` or ``<task>·<role>`` — on top of
 :meth:`Mux.list_windows`.
 
-Backend selection: ``FLEET_MUX`` (``tmux`` | ``zellij``) wins; otherwise
-``zellij`` on Windows (``sys.platform == "win32"``) and ``tmux`` elsewhere.
+Backend selection, first hit wins: ``FLEET_MUX`` (``tmux`` | ``zellij``), then
+the ``mux`` key of the global config (``fleet-state/global/config.yaml``, see
+:mod:`fleet.config`), then the built-in default ``zellij`` (on every platform).
 ``FLEET_NO_MUX`` (alias ``FLEET_NO_TMUX``) makes :meth:`Mux.available` false.
 """
 from __future__ import annotations
 
 import os
-import sys
 from typing import Sequence
 
 from .base import Key, Mux, MuxError, disabled_by_env, parse_key
 
-DEFAULT_BACKEND = "tmux"
-#: Default on native Windows (no tmux there; docs/windows-support.md §6.4).
-WINDOWS_DEFAULT_BACKEND = "zellij"
+#: Built-in default on every platform (was tmux off Windows before #299).
+DEFAULT_BACKEND = "zellij"
 BACKENDS: tuple[str, ...] = ("tmux", "zellij")
 
 _backend: Mux | None = None
 
 
 def default_backend_name() -> str:
-    """The platform default: ``zellij`` on Windows, ``tmux`` elsewhere."""
-    return WINDOWS_DEFAULT_BACKEND if sys.platform == "win32" else DEFAULT_BACKEND
+    """The built-in default backend (``zellij``), ignoring env and config."""
+    return DEFAULT_BACKEND
+
+
+def backend_selection() -> tuple[str, str]:
+    """``(name, source)``: the selected backend and where the choice came from.
+
+    ``source`` is ``env`` (``FLEET_MUX``), ``config`` (global config ``mux``) or
+    ``default``. Does not validate an env value or instantiate anything —
+    :func:`get` does. A bad config file only warns and falls through (see
+    :mod:`fleet.config`).
+    """
+    explicit = (os.environ.get("FLEET_MUX") or "").strip().lower()
+    if explicit:
+        return explicit, "env"
+    from .. import config
+
+    return config.get("mux")
 
 
 def backend_name() -> str:
-    """The configured backend name (``FLEET_MUX``, else the platform default).
-
-    Does not validate or instantiate anything — :func:`get` does.
-    """
-    explicit = (os.environ.get("FLEET_MUX") or "").strip().lower()
-    return explicit or default_backend_name()
+    """The selected backend name (env > global config > built-in default)."""
+    return backend_selection()[0]
 
 
 def get() -> Mux:
@@ -133,11 +144,11 @@ def send_step(
 __all__ = [
     "BACKENDS",
     "DEFAULT_BACKEND",
-    "WINDOWS_DEFAULT_BACKEND",
     "Key",
     "Mux",
     "MuxError",
     "backend_name",
+    "backend_selection",
     "default_backend_name",
     "disabled_by_env",
     "get",
