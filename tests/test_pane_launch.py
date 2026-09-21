@@ -211,6 +211,29 @@ class MainTests(unittest.TestCase):
         self.assertNotIn("CLAUDECODE", captured["env"])
         self.assertEqual(os.path.normcase(os.path.realpath(captured["cwd"])), os.path.normcase(os.path.realpath(work)))
 
+    def test_main_ignores_sigint_after_the_spawn_on_posix_only(self) -> None:
+        # An ignored signal survives exec: on POSIX the agent must start with
+        # the default SIGINT disposition (Ctrl+C has to reach it).
+        for windows, expected in ((False, ["popen", "sigint"]), (True, ["sigint", "popen"])):
+            with self.subTest(windows=windows), TemporaryDirectory() as d:
+                order: list[str] = []
+
+                class Proc:
+                    pid = 1
+
+                    def __init__(self, argv, env=None):
+                        order.append("popen")
+
+                    def wait(self):
+                        return 0
+
+                with unittest.mock.patch.object(pl, "_is_windows", return_value=windows),                         unittest.mock.patch.object(pl.subprocess, "Popen", Proc),                         unittest.mock.patch.object(
+                            pl.signal, "signal", side_effect=lambda *a: order.append("sigint")
+                        ) as sig:
+                    pl.main(["--", sys.executable, "-V"])
+                sig.assert_called_once_with(pl.signal.SIGINT, pl.signal.SIG_IGN)
+                self.assertEqual(order, expected)
+
     def test_main_missing_agent_holds_pane(self) -> None:
         with TemporaryDirectory() as d:
             env_file = pl.write_env_file(Path(d) / "e.json", env={"PATH": d}, cwd=None)

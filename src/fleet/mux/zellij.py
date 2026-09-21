@@ -290,12 +290,15 @@ class ZellijMux(Mux):
         except FileNotFoundError:
             raise ZellijError(f"zellij binary not found: {argv[0]}") from None
 
-    def _spawn_client(self, argv: Sequence[str], *, cwd: str | None = None) -> subprocess.Popen:
+    def _spawn_client(
+        self, argv: Sequence[str], *, cwd: str | None = None, tty: bool = False
+    ) -> subprocess.Popen:
         """Start a zellij process that needs a terminal (``attach``).
 
         Windows: a new, hidden console, **no** std-handle redirection (§4.2);
         breakaway from the caller's job when allowed. POSIX: detached from
-        our stdio.
+        our stdio; with ``tty=True`` its stdio is a pseudo-terminal instead
+        (see :meth:`_spawn_pty_client`).
         """
         args = [str(a) for a in argv]
         env = client_env(os.environ)
@@ -315,6 +318,8 @@ class ZellijMux(Mux):
                 return subprocess.Popen(
                     args, cwd=cwd, env=env, creationflags=CREATE_NEW_CONSOLE, startupinfo=si
                 )
+        if tty:
+            return self._spawn_pty_client(args, cwd=cwd, env=env)
         return subprocess.Popen(
             args,
             cwd=cwd,
@@ -324,6 +329,43 @@ class ZellijMux(Mux):
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+
+    @staticmethod
+    def _spawn_pty_client(
+        args: list[str], *, cwd: str | None, env: dict[str, str]
+    ) -> subprocess.Popen:
+        """POSIX: run ``zellij attach`` on a pseudo-terminal.
+
+        A ``zellij attach`` that is not backgrounded (``-b``) needs a terminal
+        on stdio: with ``/dev/null`` (a detached deliverer / notifier, or CI)
+        it never registers as a client, so the #5594 temp client never appears.
+        The terminal is 120x30 like the Windows hidden console (§4.3). The
+        master end stays open on the returned process until :meth:`_kill_proc`.
+        """
+        import fcntl
+        import pty
+        import struct
+        import termios
+
+        master, slave = pty.openpty()
+        try:
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 120, 0, 0))
+            proc = subprocess.Popen(
+                args,
+                cwd=cwd,
+                env=env,
+                stdin=slave,
+                stdout=slave,
+                stderr=slave,
+                start_new_session=True,
+            )
+        except BaseException:
+            os.close(master)
+            raise
+        finally:
+            os.close(slave)
+        proc._fleet_pty_master = master  # type: ignore[attr-defined]
+        return proc
 
     def _call_attach(self, argv: Sequence[str]) -> int:
         """Run an interactive ``zellij attach`` in the current terminal."""
@@ -562,7 +604,7 @@ class ZellijMux(Mux):
 
     def _attach_temp_client(self, zellij: str, session: str) -> subprocess.Popen:
         before = set(self._clients(session))
-        proc = self._spawn_client([zellij, "attach", session])
+        proc = self._spawn_client([zellij, "attach", session], tty=True)
         try:
             appeared = self._wait_for(
                 lambda: bool(set(self._clients(session)) - before), CLIENT_ATTACH_TIMEOUT
@@ -585,6 +627,12 @@ class ZellijMux(Mux):
             proc.wait(timeout=CLIENT_DETACH_TIMEOUT)
         except (subprocess.TimeoutExpired, OSError):
             pass
+        master = getattr(proc, "_fleet_pty_master", None)
+        if master is not None:
+            try:
+                os.close(master)
+            except OSError:
+                pass
 
     def _kill_temp_client(self, session: str, proc: subprocess.Popen) -> None:
         ids = getattr(proc, "_fleet_client_ids", set())

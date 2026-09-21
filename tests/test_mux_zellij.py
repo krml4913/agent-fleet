@@ -3,8 +3,9 @@
 Most tests drive :class:`ZellijMux` against an in-memory simulation of the
 zellij CLI (``SimZellij``) that answers with output recorded from zellij
 0.45.1 on Windows, so they run anywhere without zellij. The live tests at the
-bottom use a real zellij and are opt-in via ``FLEET_LIVE_ZELLIJ=1`` (never in
-CI: creating a session needs a console on Windows).
+bottom use a real zellij and are opt-in via ``FLEET_LIVE_ZELLIJ=1`` (Windows
+only in practice: creating a session needs a console there; the Linux CI job
+runs ``tests.test_mux_zellij_live`` instead).
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
-import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
+from tests._fleet_test_helpers import requires_live_zellij  # noqa: E402  (also sets the hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 
 from fleet import mux  # noqa: E402
 from fleet.mux import Key, MuxError  # noqa: E402
@@ -293,7 +294,7 @@ class SimZellij(ZellijMux):
             return out("❯ \n")
         raise AssertionError(f"unexpected action: {a}")
 
-    def _spawn_client(self, argv, *, cwd=None):
+    def _spawn_client(self, argv, *, cwd=None, tty=False):
         argv = [str(a) for a in argv]
         self.calls.append(["SPAWN", *argv])
         if argv[1:3] == ["attach", "-b"]:
@@ -856,11 +857,6 @@ class SpawnFlagsTests(unittest.TestCase):
 
 
 # --- live ----------------------------------------------------------------------
-
-requires_live_zellij = unittest.skipUnless(
-    os.environ.get("FLEET_LIVE_ZELLIJ") and shutil.which(os.environ.get("FLEET_ZELLIJ") or "zellij"),
-    "live-zellij test: set FLEET_LIVE_ZELLIJ=1 (and have zellij) to run",
-)
 
 LIVE_SESSION = "fleet-ztest-" + os.urandom(3).hex()
 

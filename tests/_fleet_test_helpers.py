@@ -55,6 +55,13 @@ requires_live_tmux = unittest.skipUnless(
     "live-tmux test: set FLEET_LIVE_TMUX=1 (and have tmux) to run",
 )
 
+# Same for the zellij backend: set FLEET_LIVE_ZELLIJ=1 (and have zellij on PATH,
+# or FLEET_ZELLIJ pointing at it) to run the tests that create real zellij sessions.
+requires_live_zellij = unittest.skipUnless(
+    os.environ.get("FLEET_LIVE_ZELLIJ") and shutil.which(os.environ.get("FLEET_ZELLIJ") or "zellij"),
+    "live-zellij test: set FLEET_LIVE_ZELLIJ=1 (and have zellij) to run",
+)
+
 
 def seed_global_roles(fleet_home: Path, *names: str) -> Path:
     """Populate a test-only global roles tier from shipped prompt files."""
