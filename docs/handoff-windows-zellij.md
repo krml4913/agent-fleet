@@ -127,7 +127,9 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
 - **#256** codex driver under zellij: codex is not installed on the Windows
   machine.
 - **#257** `fleet attach` in a real, visible terminal.
-- **#258** zellij backend on macOS / Linux.
+- **#258** zellij backend on macOS / Linux (the mux layer is covered by the
+  `unittest-zellij-linux` CI job; a live driver E2E with a real agent CLI is
+  still open).
 - **#259** claude's workspace-trust dialog needs one manual attach per
   worktree. There is a proposal for an opt-in `fleet init --trust-claude`; it
   was deferred because it writes to the user's claude config.

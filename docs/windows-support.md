@@ -606,7 +606,9 @@ and ends the agent process.
 > - **Test guard:** `FLEET_NO_MUX` is a hard guard for zellij (every call
 >   raises), and the test helpers set it unless `FLEET_LIVE_TMUX` /
 >   `FLEET_LIVE_ZELLIJ` is set. Live zellij tests: `FLEET_LIVE_ZELLIJ=1
->   python -m unittest tests.test_mux_zellij`.
+>   python -m unittest tests.test_mux_zellij` (Windows console panes) and
+>   `FLEET_LIVE_ZELLIJ=1 python -m unittest tests.test_mux_zellij_live` (POSIX
+>   shell panes; the `unittest-zellij-linux` CI job).
 
 ### PR4 — Windows UX and docs (`windows-ux`)
 
@@ -725,8 +727,26 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
 - **Visible-terminal attach is not exercised by automation** (#257). Phase 0
   checked attach focus with hidden clients only; `fleet attach <task>` with and
   without another client in a real, visible terminal (§8 step 8) is manual only.
-- **zellij on macOS / Linux is untested** (#258). `FLEET_MUX=zellij` may work
-  there, but only Windows was tried.
+- **zellij on macOS / Linux is only covered at the mux layer** (#258). The
+  `unittest-zellij-linux` CI job runs `tests/test_mux_zellij_live.py` (real
+  zellij 0.45.1 on ubuntu-latest, a plain `/bin/sh` as the pane command; no
+  agent CLI). It covers session / tab lifecycle, detached and attached
+  `new-tab`, per-pane env, input / capture and the exit-0-on-missing-target
+  handling. Still open: a live driver E2E on macOS / Linux with a real agent CLI
+  (leader, `start`, prompt delivery, multi-stage handoff, teardown), a macOS
+  run, and whether a `fleet-agent done` run by a real agent CLI is hung up when
+  its own tab closes (`window_close_kills_caller`, below).
+
+  Findings from the Linux run: (1) `zellij attach S` on `/dev/null` stdio never
+  registers as a client without a controlling terminal, so the §4.3 temp client
+  now runs on a pseudo-terminal on POSIX (fixed); (2) `pane_launch` ignored
+  SIGINT before spawning, and an ignored signal survives exec, so nothing in a
+  POSIX pane could be interrupted with Ctrl+C (fixed: ignored after the spawn);
+  (3) closing a tab hangs up (SIGHUP) the *foreground jobs of the pane's
+  terminal* on Linux as it ends every console process on Windows, but a caller
+  with its own session (an agent's tool-call shell) survives, which is what
+  `window_close_kills_caller = False` on POSIX relies on. That is checked with
+  a caller in its own session; how claude / codex spawn their shells is not.
 - **claude's workspace-trust dialog** (#259). claude's first run in a fresh
   worktree asks whether to trust the folder. The adapter's `gate` regex
   catches it, so the deliverer holds back and the task is surfaced as a boot

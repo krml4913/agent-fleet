@@ -39,6 +39,41 @@ jobs:
           FLEET_LIVE_TMUX: "1"
         run: python -m unittest tests.test_mux_tmux -v
 
+  unittest-zellij-linux:
+    # Live zellij backend suite on Linux (Refs #258): ZellijMux end to end
+    # against a real, pinned zellij with a plain shell as the pane command — no
+    # agent CLI, no API key. Separate from the hermetic suites above, which
+    # never need zellij. Run locally with the same command:
+    #   FLEET_LIVE_ZELLIJ=1 python -m unittest tests.test_mux_zellij_live -v
+    runs-on: ubuntu-latest
+    env:
+      ZELLIJ_VERSION: "0.45.1"
+      # sha256 of zellij-x86_64-unknown-linux-musl.tar.gz for that release.
+      ZELLIJ_SHA256: "40bcc2e03f5d5ae8e054e39f676081fe12ab70871506996ba595834c3718eefc"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install zellij ${{ env.ZELLIJ_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o zellij.tar.gz \
+            "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz"
+          echo "${ZELLIJ_SHA256}  zellij.tar.gz" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/zellij-bin"
+          tar -xzf zellij.tar.gz -C "${RUNNER_TEMP}/zellij-bin"
+          echo "${RUNNER_TEMP}/zellij-bin" >> "${GITHUB_PATH}"
+      - name: Show zellij version
+        run: zellij --version
+      - name: Run live zellij backend tests
+        # Isolated: every session is `fleet-citest-<random>` and is torn down
+        # by the tests (also on failure); no other session is touched.
+        env:
+          FLEET_LIVE_ZELLIJ: "1"
+        run: python -m unittest tests.test_mux_zellij_live -v
+
   unittest-windows:
     # Windows-compatible core (docs/windows-support.md §7 PR1). No tmux here:
     # tests that genuinely need tmux/POSIX skip on win32.
