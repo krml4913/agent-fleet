@@ -148,6 +148,16 @@ def session_dir(label: str) -> Path:
     return global_sessions_dir() / label
 
 
+def leader_agent_name(label: str) -> str:
+    """The leader agent's session display name (``<label>-leader``).
+
+    ``fleet leader`` passes it to the agent at launch (``claude --name``), so it
+    ends up as the leader pane's title and survives a rename of the multiplexer
+    window — which is how the leader notifier finds a renamed leader window.
+    """
+    return f"{label}-leader"
+
+
 def session_record_path(label: str) -> Path:
     """Return ``global/sessions/<label>/session.json`` — the per-session record.
 

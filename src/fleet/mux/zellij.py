@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .base import Key, Mux, MuxError, disabled_by_env, parse_key
+from .base import Key, Mux, MuxError, PaneInfo, disabled_by_env, parse_key
 
 
 class ZellijError(MuxError):
@@ -682,6 +682,30 @@ class ZellijMux(Mux):
             lambda: not any(self._pid_alive(p) for p in pids), PROCESS_EXIT_TIMEOUT
         )
         self._remove_env_file(session, window)
+
+    def list_panes(self, session: str) -> list[PaneInfo]:
+        """Live terminal panes of every tab; the tab id is the window id."""
+        if not self.session_exists(session):
+            raise ZellijError(f"zellij session not found: {session}")
+        return [
+            PaneInfo(
+                window=str(p.get("tab_name", "")),
+                window_id=str(p["tab_id"]),
+                title=str(p.get("title") or ""),
+            )
+            for p in self._panes(session)
+            if not p.get("is_plugin")
+            and not p.get("exited")
+            and not p.get("is_suppressed")
+            and p.get("tab_id") is not None
+        ]
+
+    def rename_window(self, session: str, window_id: str, new_name: str) -> None:
+        if not self.session_exists(session):
+            raise ZellijError(f"zellij session not found: {session}")
+        self._action(session, "rename-tab-by-id", str(window_id), new_name)
+        if not self._wait_for(lambda: new_name in self._tab_names(session), TAB_CONFIRM_TIMEOUT):
+            raise ZellijError(f"could not rename tab {window_id} to {new_name!r} in {session}")
 
     def _pid_alive(self, pid: int) -> bool:
         from .. import pane_launch

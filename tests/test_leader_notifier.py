@@ -823,6 +823,199 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
         self.assertIn("send_text failed on the mux", self._log())
 
+    # -- renamed / recreated leader window (Issue #302) ----------------------
+
+    LEADER_TITLE = "✳ main-leader"  # claude decorates the --name it was launched with
+    DRIVER_WINDOW = "7·implementer"
+
+    def _renamed_leader_fake(self):
+        """A session whose leader tab lost its name (zellij's default ``Tab #3``)."""
+        return use_fake_mux(
+            sessions={"fleet-main": ["Tab #3", self.DRIVER_WINDOW]},
+            capture=READY_PANE,
+            strict_windows=True,
+        )
+
+    def test_renamed_leader_window_is_found_by_pane_title_and_renamed_back(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            self._renamed_leader_fake() as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            fake.titles[("fleet-main", "Tab #3")] = self.LEADER_TITLE
+            fake.titles[("fleet-main", self.DRIVER_WINDOW)] = "main-leader-implementer"
+            rc = self._notify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(fake.calls_named("rename_window"), [(("fleet-main", "@0", "leader"), {})])
+        self.assertEqual(fake.sessions["fleet-main"], ["leader", self.DRIVER_WINDOW])
+        sends = fake.calls_named("send_text")
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0][0][:2], ("fleet-main", "leader"))  # typed into the healed window
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+        log = self._log()
+        self.assertIn("leader window 'leader' was missing", log)
+        self.assertIn("'Tab #3'", log)
+        self.assertEqual(log.count("renamed it back to 'leader'"), 1)
+
+    def test_present_leader_window_is_never_looked_up_by_title(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with use_fake_mux(
+            sessions={"fleet-main": ["leader"]}, capture=READY_PANE, strict_windows=True
+        ) as fake:
+            fake.fail_next("capture", mux.MuxError("boom"), times=2)  # an unrelated glitch
+            self._notify()
+        self.assertEqual(fake.calls_named("list_panes"), [])
+        self.assertEqual(fake.calls_named("rename_window"), [])
+        self.assertEqual(len(fake.calls_named("send_text")), 1)
+
+    def test_no_pane_with_the_leader_title_renames_nothing_and_logs_once(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            self._renamed_leader_fake() as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            fake.titles[("fleet-main", "Tab #3")] = "just a shell"
+            self._notify(timeout=0.05)
+        self.assertEqual(fake.calls_named("rename_window"), [])
+        self.assertEqual(fake.calls_named("send_text"), [])
+        rearm.assert_called_once()  # still re-armed: the user may fix it by hand
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+        log = self._log()
+        self.assertEqual(log.count("no pane is titled 'main-leader'"), 1)  # not once per poll
+        self.assertIn("capture failed (transient", log)
+
+    def test_a_driver_pane_is_never_adopted_as_the_leader(self) -> None:
+        # Driver windows are named <task>·<role> and their agents <project>-<task>-<role>:
+        # even a project called "main" with a task called "leader" is not the leader.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(
+                sessions={"fleet-main": [self.DRIVER_WINDOW, "8"]},
+                capture=READY_PANE,
+                strict_windows=True,
+            ) as fake,
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            fake.titles[("fleet-main", self.DRIVER_WINDOW)] = "main-leader-implementer"
+            fake.titles[("fleet-main", "8")] = "domain-leader"
+            self._notify(timeout=0.05)
+        self.assertEqual(fake.calls_named("rename_window"), [])
+        self.assertEqual(fake.calls_named("send_text"), [])
+        self.assertEqual(fake.sessions["fleet-main"], [self.DRIVER_WINDOW, "8"])
+
+    def test_two_windows_with_the_leader_title_are_left_alone(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        with (
+            use_fake_mux(
+                sessions={"fleet-main": ["Tab #3", "Tab #4"]},
+                capture=READY_PANE,
+                strict_windows=True,
+            ) as fake,
+            patch("fleet.leader_notifier.start_detached"),
+        ):
+            fake.titles[("fleet-main", "Tab #3")] = "main-leader"
+            fake.titles[("fleet-main", "Tab #4")] = "main-leader"
+            self._notify(timeout=0.05)
+        self.assertEqual(fake.calls_named("rename_window"), [])
+        self.assertIn("2 windows hold a pane titled 'main-leader'", self._log())
+
+    def test_heal_never_touches_a_session_that_is_not_a_fleet_session(self) -> None:
+        with use_fake_mux(sessions={"work": ["Tab #1"]}, strict_windows=True) as fake:
+            fake.titles[("work", "Tab #1")] = "main-leader"
+            healed, note = leader_notifier.heal_leader_window(
+                fake, "work", "leader", self.session_dir
+            )
+        self.assertEqual((healed, note), (False, None))
+        self.assertEqual(fake.calls, [])  # not even a list_windows
+
+    def test_heal_swallows_mux_errors(self) -> None:
+        with use_fake_mux(sessions={"fleet-main": ["Tab #3"]}) as fake:
+            fake.titles[("fleet-main", "Tab #3")] = "main-leader"
+            fake.fail["rename_window"] = mux.MuxError("rename refused")
+            healed, note = leader_notifier.heal_leader_window(
+                fake, "fleet-main", "leader", self.session_dir
+            )
+            self.assertFalse(healed)
+            self.assertIn("rename refused", note)
+            del fake.fail["rename_window"]
+            fake.fail["list_windows"] = mux.MuxError("session gone")
+            healed, note = leader_notifier.heal_leader_window(
+                fake, "fleet-main", "leader", self.session_dir
+            )
+        self.assertFalse(healed)
+        self.assertIn("session gone", note)
+
+    def test_heal_uses_the_session_label_for_the_title(self) -> None:
+        with use_fake_mux(sessions={"fleet-hotfix": ["Tab #2"]}) as fake:
+            fake.titles[("fleet-hotfix", "Tab #2")] = "main-leader"  # another session's leader
+            healed, _note = leader_notifier.heal_leader_window(
+                fake, "fleet-hotfix", "leader", self.session_dir
+            )
+            self.assertFalse(healed)
+            fake.titles[("fleet-hotfix", "Tab #2")] = "hotfix-leader - Claude"
+            healed, _note = leader_notifier.heal_leader_window(
+                fake, "fleet-hotfix", "leader", self.session_dir
+            )
+        self.assertTrue(healed)
+        self.assertEqual(fake.sessions["fleet-hotfix"], ["leader"])
+
+    def test_title_names_agent_matches_whole_tokens_only(self) -> None:
+        match = leader_notifier.title_names_agent
+        for title in ("main-leader", "✳ main-leader", "Main-Leader", "main-leader - Claude", "⠂ main-leader"):
+            self.assertTrue(match(title, "main-leader"), title)
+        for title in (
+            "",
+            "claude",
+            "main-leader-implementer",  # a driver named <project>-<task>-<role>
+            "domain-leader",
+            "x-main-leader",
+            "main-leaders",
+            "main leader",
+        ):
+            self.assertFalse(match(title, "main-leader"), title)
+        self.assertTrue(match("a.b-leader", "a.b-leader"))
+        self.assertFalse(match("aXb-leader", "a.b-leader"))  # the label is escaped, not a regex
+
+    # -- pending summary (Issue #302 item 2) -----------------------------------
+
+    def test_pending_summary_is_none_for_an_empty_or_absent_queue(self) -> None:
+        self.assertIsNone(leader_notifier.pending_summary(self.session_dir))
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        leader_notifier.clear_task_records(self.session_dir, "1")
+        self.assertIsNone(leader_notifier.pending_summary(self.session_dir))
+
+    def test_pending_summary_counts_and_ages_the_oldest_record(self) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        def ts(ago: timedelta) -> str:
+            return (datetime.now(timezone.utc) - ago).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        for task_id, ago in (
+            ("1", timedelta(minutes=5)),
+            ("2", timedelta(hours=3)),
+            ("3", timedelta(seconds=9)),
+        ):
+            leader_notifier.enqueue(self.session_dir, dict(self._record(task_id), ts=ts(ago)))
+        summary = leader_notifier.pending_summary(self.session_dir)
+        self.assertEqual(summary["count"], 3)
+        self.assertAlmostEqual(summary["oldest_age_seconds"], 3 * 3600, delta=5)
+        self.assertEqual(
+            leader_notifier.describe_pending(summary),
+            "3 leader notifications pending (oldest 3h ago)",
+        )
+
+    def test_describe_pending_singular_and_missing_timestamp(self) -> None:
+        leader_notifier.enqueue(self.session_dir, dict(self._record("1"), ts="not a timestamp"))
+        summary = leader_notifier.pending_summary(self.session_dir)
+        self.assertEqual(summary["count"], 1)
+        self.assertIsNone(summary["oldest_age_seconds"])
+        self.assertEqual(leader_notifier.describe_pending(summary), "1 leader notification pending")
+        self.assertEqual(
+            leader_notifier.describe_pending({"count": 2, "oldest_age_seconds": 125.0}),
+            "2 leader notifications pending (oldest 2m ago)",
+        )
+
     # -- leader-notifier.log ------------------------------------------------
 
     def test_log_records_start_busy_wait_and_deadline_rearm(self) -> None:

@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 
+from .. import leader_notifier
 from .. import state as state_mod
 from .. import status_data as status_data_mod
 from .. import mux
@@ -44,10 +45,12 @@ def run(args: argparse.Namespace) -> int:
 
     records = _load_session_records()
     tasks_by_label = _scan_inflight_tasks()
+    pending_by_label = status_data_mod.collect_pending_notifications()
 
     # Union: every session with a record, plus every label some in-flight task
-    # claims (a session may own work without a record — or vice versa).
-    labels = sorted(set(records) | set(tasks_by_label))
+    # claims (a session may own work without a record — or vice versa) or holds
+    # undelivered leader notifications.
+    labels = sorted(set(records) | set(tasks_by_label) | set(pending_by_label))
 
     print(_style(f"SESSIONS  {len(labels)}", _BOLD, use_color))
     if not labels:
@@ -79,6 +82,10 @@ def run(args: argparse.Namespace) -> int:
             print(f"    scope: {', '.join(scope)}")
         else:
             print("    scope: (all projects)")
+
+        pending = pending_by_label.get(label)
+        if pending:
+            print("    " + _style("⚠ " + leader_notifier.describe_pending(pending), _YELLOW, use_color))
 
         if not tasks:
             print(_style("    (no in-flight tasks)", _DIM, use_color))

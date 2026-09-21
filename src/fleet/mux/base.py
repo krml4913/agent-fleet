@@ -93,6 +93,22 @@ def parse_key(name: str) -> tuple[str | None, str]:
     )
 
 
+@dataclass(frozen=True)
+class PaneInfo:
+    """One terminal pane, as reported by :meth:`Mux.list_panes`.
+
+    ``window`` is the name of the window (zellij: tab) that holds the pane and
+    ``window_id`` its backend id — the way to address that window when its name
+    is unknown or not unique (:meth:`Mux.rename_window`). ``title`` is the pane
+    title: whatever the program in the pane set via the terminal title escape
+    (``claude --name X`` shows up here), else the backend's default.
+    """
+
+    window: str
+    window_id: str
+    title: str
+
+
 # ---------------------------------------------------------------------------
 # Backend interface
 # ---------------------------------------------------------------------------
@@ -164,6 +180,14 @@ class Mux:
         raise NotImplementedError
 
     def kill_session(self, session: str) -> None:
+        raise NotImplementedError
+
+    def list_panes(self, session: str) -> list[PaneInfo]:
+        """The terminal panes of every window in ``session`` (plugin panes excluded)."""
+        raise NotImplementedError
+
+    def rename_window(self, session: str, window_id: str, new_name: str) -> None:
+        """Rename the window with backend id ``window_id`` (from :meth:`list_panes`)."""
         raise NotImplementedError
 
     # -- input / output -------------------------------------------------------

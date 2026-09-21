@@ -205,6 +205,28 @@ class ZellijLiveTests(unittest.TestCase):
         self.assertEqual(self.m.tab_position(self.session, tab), self.m.list_windows(self.session).index(tab) + 1)
         self.assertIsNone(self.m.tab_position(self.session, "no-such-tab"))
 
+    def test_pane_title_survives_a_rename_and_the_tab_is_found_by_it(self) -> None:
+        # Issue #302: the leader is found by the title its agent set (an OSC 0
+        # escape, like ``claude --name``), and its tab is renamed back by id.
+        tab = self.open_tab("Tab #3", argv=[SH, "-c", "printf '\\033]0;citest-leader\\007'; sleep 60"])
+        self.addCleanup(self._close_tab_quietly, "leader-again")
+        found: list = []
+
+        def titled() -> bool:
+            found[:] = [p for p in self.m.list_panes(self.session) if "citest-leader" in p.title]
+            return bool(found)
+
+        self.assertTrue(wait_until(titled), self.m.list_panes(self.session))
+        self.assertEqual([p.window for p in found], [tab])
+        self.m.rename_window(self.session, found[0].window_id, "leader-again")
+        windows = self.m.list_windows(self.session)
+        self.assertIn("leader-again", windows)
+        self.assertNotIn(tab, windows)
+        self.assertEqual(
+            [p.window for p in self.m.list_panes(self.session) if "citest-leader" in p.title],
+            ["leader-again"],
+        )
+
     def test_new_tab_detached(self) -> None:
         # No client is attached: on 0.45.x this is the #5594 path (temp client).
         self.assertEqual(self.m._clients(self.session), [])

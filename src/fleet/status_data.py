@@ -287,6 +287,30 @@ def load_session_records() -> dict[str, dict]:
     return out
 
 
+def collect_pending_notifications() -> dict[str, dict]:
+    """Map session label → its pending leader notifications (see ``pending_summary``).
+
+    Read straight from each ``global/sessions/<label>/leader-pending.jsonl``; a
+    session with an empty or absent queue is left out. Independent of whether the
+    session has a record or is live — a stranded queue is exactly the case where
+    the leader is not answering.
+    """
+    out: dict[str, dict] = {}
+    sessions_root = state_mod.global_sessions_dir()
+    if not sessions_root.is_dir():
+        return out
+    for child in sorted(sessions_root.iterdir()):
+        if not child.is_dir():
+            continue
+        try:
+            summary = leader_notifier.pending_summary(child)
+        except OSError:
+            continue
+        if summary:
+            out[child.name] = summary
+    return out
+
+
 def session_liveness(label: str, mux_ok: bool) -> bool | None:
     """Return True (live), False (stale), or None (multiplexer unavailable)."""
     if not mux_ok:
@@ -380,7 +404,8 @@ def collect_sessions() -> list[dict]:
     """Return a per-session summary list."""
     records = load_session_records()
     tasks_by_label = scan_inflight_tasks()
-    labels = sorted(set(records) | set(tasks_by_label))
+    pending_by_label = collect_pending_notifications()
+    labels = sorted(set(records) | set(tasks_by_label) | set(pending_by_label))
     mux_ok = mux.get().available()
 
     out: list[dict] = []
@@ -410,6 +435,7 @@ def collect_sessions() -> list[dict]:
                 "since": record.get("started_at", ""),
                 "has_record": label in records,
                 "scope": scope,
+                "pending": pending_by_label.get(label),
                 "tasks": task_views,
             }
         )

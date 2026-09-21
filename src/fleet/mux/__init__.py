@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from typing import Sequence
 
-from .base import Key, Mux, MuxError, disabled_by_env, parse_key
+from .base import Key, Mux, MuxError, PaneInfo, disabled_by_env, parse_key
 
 #: Built-in default on every platform (was tmux off Windows before #299).
 DEFAULT_BACKEND = "zellij"
@@ -147,6 +147,7 @@ __all__ = [
     "Key",
     "Mux",
     "MuxError",
+    "PaneInfo",
     "backend_name",
     "backend_selection",
     "default_backend_name",

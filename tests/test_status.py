@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import state  # noqa: E402
+from fleet import leader_notifier, state  # noqa: E402
 from fleet.commands.status import _unread_tasks  # noqa: E402
 from tests._fleet_test_helpers import run_fleet, make_project  # noqa: E402
 
@@ -270,6 +271,49 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("alpha", result.stdout)
         self.assertIn("beta", result.stdout)
+
+    def _queue(self, label: str, *ages_seconds: int) -> None:
+        now = datetime.now(timezone.utc)
+        for i, age in enumerate(ages_seconds):
+            leader_notifier.enqueue(
+                state.session_dir(label),
+                {
+                    "nonce": f"{label}-{i}",
+                    "ts": (now - timedelta(seconds=age)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "task_id": str(i),
+                    "kind": "done",
+                },
+            )
+
+    def test_status_shows_pending_leader_notifications(self) -> None:
+        make_project(self.fleet_home, "demo", self.project)
+        self._queue("main", 45, 600)
+        result = run_fleet("status", "demo", fleet_home=self.fleet_home, cwd=self.project,
+                           env_extra={"NO_COLOR": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("⚠ session main: 2 leader notifications pending (oldest 10m ago)", result.stdout)
+        # ...above the task list, right under the project header.
+        self.assertLess(result.stdout.index("session main"), result.stdout.index("TASKS"))
+
+    def test_status_all_shows_pending_leader_notifications(self) -> None:
+        make_project(self.fleet_home, "alpha", self.project)
+        self._queue("main", 3 * 3600)
+        self._queue("hotfix", 20 * 60)
+        result = run_fleet("status", "--all", fleet_home=self.fleet_home,
+                           env_extra={"NO_COLOR": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("⚠ session main: 1 leader notification pending (oldest 3h ago)", result.stdout)
+        self.assertIn("⚠ session hotfix: 1 leader notification pending (oldest 20m ago)", result.stdout)
+        self.assertLess(result.stdout.index("session main"), result.stdout.index("▶ alpha"))
+
+    def test_status_says_nothing_about_empty_queues(self) -> None:
+        make_project(self.fleet_home, "demo", self.project)
+        self._queue("main", 45)
+        leader_notifier.clear_records(state.session_dir("main"), {"main-0"})
+        for args in (("status", "demo"), ("status", "--all")):
+            result = run_fleet(*args, fleet_home=self.fleet_home, cwd=self.project)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("pending", result.stdout)
 
     def test_status_all_orphan_warning(self) -> None:
         missing = Path(self._tmp.name) / "gone"

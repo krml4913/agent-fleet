@@ -10,6 +10,7 @@ import contextlib
 import io
 import os
 import sys
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -101,6 +102,23 @@ class TmuxLiveTests(unittest.TestCase):
         self.m.send_text(SESSION, "io", "echo cleared-ok")
         pane = self._wait_for("io", "cleared-ok\n")
         self.assertNotIn("C-uecho", pane)
+
+    def test_pane_title_survives_a_rename_and_the_window_is_found_by_it(self) -> None:
+        # Issue #302: the leader is found by the pane title its agent set, and its
+        # window is renamed back by id — the name it lost is not needed.
+        self.m.new_window(SESSION, "Tab #3", cwd=str(self.tmp))
+        self.m.send_text(SESSION, "Tab #3", "printf '\\033]2;citest-leader\\007'")
+        deadline = time.monotonic() + 5.0
+        found: list = []
+        while not found and time.monotonic() < deadline:
+            found = [p for p in self.m.list_panes(SESSION) if "citest-leader" in p.title]
+            time.sleep(0.1)
+        self.assertEqual([p.window for p in found], ["Tab #3"])
+        self.m.rename_window(SESSION, found[0].window_id, "leader-again")
+        windows = self.m.list_windows(SESSION)
+        self.assertIn("leader-again", windows)
+        self.assertNotIn("Tab #3", windows)
+        self.m.capture(SESSION, "leader-again")  # addressable by its new name
 
     def test_kill_window(self) -> None:
         self.m.new_window(SESSION, "doomed")
@@ -443,6 +461,61 @@ class CaptureMockTests(unittest.TestCase):
         mock_run.return_value.stderr = "can't find pane"
         with self.assertRaises(TmuxError):
             TmuxMux().capture("sess", "win")
+
+
+class PaneMockTests(unittest.TestCase):
+    """``list_panes`` / ``rename_window`` (Issue #302) — no live tmux required."""
+
+    @unittest.mock.patch("fleet.mux.tmux.subprocess.run")
+    def test_list_panes_asks_for_every_pane_of_the_session(self, mock_run) -> None:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = (
+            "@0\tleader\tmain-leader\n"
+            "@3\tnode\t✳ main-leader\n"
+            "@4\t7·driver\ttitle\twith a tab\n"
+            "garbage line\n"
+        )
+        panes = TmuxMux().list_panes("fleet-main")
+        mock_run.assert_called_once_with(
+            [
+                "tmux", "list-panes", "-s", "-t", "fleet-main", "-F",
+                "#{window_id}\t#{window_name}\t#{pane_title}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            panes,
+            [
+                mux.PaneInfo(window="leader", window_id="@0", title="main-leader"),
+                mux.PaneInfo(window="node", window_id="@3", title="✳ main-leader"),
+                mux.PaneInfo(window="7·driver", window_id="@4", title="title\twith a tab"),
+            ],
+        )
+
+    @unittest.mock.patch("fleet.mux.tmux.subprocess.run")
+    def test_list_panes_failure_raises(self, mock_run) -> None:
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "can't find session: fleet-main"
+        with self.assertRaises(TmuxError):
+            TmuxMux().list_panes("fleet-main")
+
+    @unittest.mock.patch("fleet.mux.tmux.subprocess.run")
+    def test_rename_window_targets_the_window_id(self, mock_run) -> None:
+        mock_run.return_value.returncode = 0
+        TmuxMux().rename_window("fleet-main", "@3", "leader")
+        mock_run.assert_called_once_with(
+            ["tmux", "rename-window", "-t", "@3", "leader"],
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.mock.patch("fleet.mux.tmux.subprocess.run")
+    def test_rename_window_failure_raises(self, mock_run) -> None:
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "can't find window: @3"
+        with self.assertRaises(MuxError):
+            TmuxMux().rename_window("fleet-main", "@3", "leader")
 
 
 class AttachHintTests(unittest.TestCase):

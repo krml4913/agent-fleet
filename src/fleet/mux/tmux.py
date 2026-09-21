@@ -14,11 +14,27 @@ import subprocess
 import tempfile
 from typing import Sequence
 
-from .base import Key, Mux, MuxError, disabled_by_env, parse_key
+from .base import Key, Mux, MuxError, PaneInfo, disabled_by_env, parse_key
 
 
 class TmuxError(MuxError):
     """Raised when a tmux subprocess call returns non-zero."""
+
+
+#: ``list-panes -F`` format: window id, window name, pane title (tab separated;
+#: the title comes last so a title that itself holds a tab survives the split).
+_PANE_FORMAT = "#{window_id}\t#{window_name}\t#{pane_title}"
+
+
+def parse_panes(text: str) -> list[PaneInfo]:
+    """:class:`PaneInfo` rows out of ``tmux list-panes -F`` (:data:`_PANE_FORMAT`) output."""
+    panes: list[PaneInfo] = []
+    for line in (text or "").splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3 or not parts[0]:
+            continue
+        panes.append(PaneInfo(window=parts[1], window_id=parts[0], title=parts[2]))
+    return panes
 
 
 #: Normalized named key → tmux key name.
@@ -126,6 +142,21 @@ class TmuxMux(Mux):
 
     def kill_session(self, session: str) -> None:
         _run(["tmux", "kill-session", "-t", session])
+
+    def list_panes(self, session: str) -> list[PaneInfo]:
+        """Every pane of ``session`` (``-s``: all windows), with its window id and title."""
+        r = subprocess.run(
+            ["tmux", "list-panes", "-s", "-t", session, "-F", _PANE_FORMAT],
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            raise TmuxError(r.stderr.strip())
+        return parse_panes(r.stdout)
+
+    def rename_window(self, session: str, window_id: str, new_name: str) -> None:
+        # ``window_id`` (``@3``) is server-unique, so no session qualifier is needed.
+        _run(["tmux", "rename-window", "-t", window_id, new_name])
 
     # -- input / output -------------------------------------------------------
 
@@ -326,4 +357,4 @@ def _run(args: Sequence[str]) -> None:
         )
 
 
-__all__ = ["TmuxMux", "TmuxError", "tmux_key", "CAPTURE_START"]
+__all__ = ["TmuxMux", "TmuxError", "tmux_key", "parse_panes", "CAPTURE_START"]

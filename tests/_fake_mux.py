@@ -30,7 +30,7 @@ if not (os.environ.get("FLEET_LIVE_TMUX") or os.environ.get("FLEET_LIVE_ZELLIJ")
     os.environ.setdefault("FLEET_NO_MUX", "1")
 
 from fleet import mux  # noqa: E402
-from fleet.mux.base import Key, Mux, MuxError, parse_key  # noqa: E402
+from fleet.mux.base import Key, Mux, MuxError, PaneInfo, parse_key  # noqa: E402
 
 
 class FakeMux(Mux):
@@ -46,6 +46,7 @@ class FakeMux(Mux):
         capture: str | list[str] = "",
         attach_rc: int = 0,
         preload_hint: str | None = "inside the pane press C-b ], then Enter",
+        strict_windows: bool = False,
     ) -> None:
         self._available = available
         self.sessions: dict[str, list[str]] = {
@@ -65,6 +66,17 @@ class FakeMux(Mux):
         # after the call is recorded (e.g. to append an ack event on Enter).
         self.on: dict[str, Any] = {}
         self.preloaded: dict[str, str] = {}
+        # Pane title per (session, window), as ``list_panes`` reports it. A window
+        # with no entry has an empty title.
+        self.titles: dict[tuple[str, str], str] = {}
+        # When true, capture / send_* on a window that is not in the session's
+        # window list raise MuxError, like a real backend (tmux / zellij "tab not
+        # found"). Off by default: most tests never model windows that closely.
+        self.strict_windows = strict_windows
+
+    def _check_window(self, session: str, window: str) -> None:
+        if self.strict_windows and window not in self.sessions.get(session, []):
+            raise MuxError(f"tab not found (or has no terminal pane): {session}:{window}")
 
     # -- recording helpers ----------------------------------------------------
 
@@ -149,18 +161,44 @@ class FakeMux(Mux):
         if self.sessions.pop(session, None) is None:
             raise MuxError(f"can't find session: {session}")
 
+    def list_panes(self, session: str) -> list[PaneInfo]:
+        self._record("list_panes", session)
+        if session not in self.sessions:
+            raise MuxError(f"can't find session: {session}")
+        # The window id is its position, like tmux's ``@n``: stable across a rename.
+        return [
+            PaneInfo(window=w, window_id=f"@{i}", title=self.titles.get((session, w), ""))
+            for i, w in enumerate(self.sessions[session])
+        ]
+
+    def rename_window(self, session: str, window_id: str, new_name: str) -> None:
+        self._record("rename_window", session, window_id, new_name)
+        windows = self.sessions.get(session)
+        if windows is None:
+            raise MuxError(f"can't find session: {session}")
+        index = int(window_id.lstrip("@"))
+        if not 0 <= index < len(windows):
+            raise MuxError(f"can't find window: {session}:{window_id}")
+        old = windows[index]
+        windows[index] = new_name
+        if (session, old) in self.titles:
+            self.titles[(session, new_name)] = self.titles.pop((session, old))
+
     def send_text(self, session, window, text, *, enter=True):
         self._record("send_text", session, window, text, enter=enter)
+        self._check_window(session, window)
 
     def send_key(self, session, window, key):
         parse_key(key.name if isinstance(key, Key) else key)  # validate
         self._record("send_key", session, window, key)
+        self._check_window(session, window)
 
     def paste(self, session, window, text):
         self._record("paste", session, window, text)
 
     def capture(self, session, window):
         self._record("capture", session, window)
+        self._check_window(session, window)
         if isinstance(self._capture, list):
             if len(self._capture) > 1:
                 return self._capture.pop(0)
