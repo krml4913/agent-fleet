@@ -60,8 +60,9 @@ All merged to `main` with merge commits, CI green (Linux 3.11–3.13 plus a
 | #262 | `none-pane-cwd` | workspace=none driver panes open in the project root, not the task dir under `fleet-state/` (task dir only as a fallback) |
 | #263 | `windows-handoff` | This handoff note; `windows-support.md` §11 links each open item to its issue |
 
-Backend selection: `FLEET_MUX=tmux|zellij` overrides the default (zellij on
-win32, tmux elsewhere). `FLEET_NO_MUX` disables the multiplexer (tests).
+Backend selection: `FLEET_MUX=tmux|zellij` wins, then the global config's
+`mux` (`fleet config set mux`), then the default (zellij on every platform since
+#299; it was tmux off win32). `FLEET_NO_MUX` disables the multiplexer (tests).
 `FLEET_ZELLIJ` points at a specific zellij binary.
 
 ## 3. Things to know before running fleet on Windows

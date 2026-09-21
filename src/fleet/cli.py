@@ -5,7 +5,8 @@ Each subcommand lives in ``src/fleet/commands/<name>.py`` and exposes an
 
 Two entrypoints:
   fleet        — user-facing (init / preflight / leader / attach / status /
-                 sessions / cost / log / changelog / formation / workspace / notify)
+                 sessions / cost / log / changelog / formation / workspace / notify /
+                 config)
   fleet-agent  — agent-facing (start / inbox / inbox-read / send-prompt /
                  cleanup / ask / event / approve / reject / done)
 """
@@ -21,6 +22,7 @@ from .commands import ask as ask_cmd
 from .commands import attach as attach_cmd
 from .commands import changelog as changelog_cmd
 from .commands import cleanup as cleanup_cmd
+from .commands import config as config_cmd
 from .commands import cost as cost_cmd
 from .commands import dashboard as dashboard_cmd
 from .commands import done as done_cmd
@@ -49,7 +51,7 @@ from .commands import workspace as workspace_cmd
 def build_parser_user() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fleet",
-        description="Hierarchical multi-vendor agent orchestration over tmux or zellij.",
+        description="Hierarchical multi-vendor agent orchestration over zellij or tmux.",
     )
     parser.add_argument(
         "--version",
@@ -73,6 +75,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     role_cmd.add_parser(sub)
     workspace_cmd.add_parser(sub)
     notify_cmd.add_parser(sub)
+    config_cmd.add_parser(sub)
     rm_cmd.add_parser(sub)
     return parser
 

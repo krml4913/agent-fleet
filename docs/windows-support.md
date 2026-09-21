@@ -35,8 +35,9 @@ stage handoff, verify gate, cleanup / merge, and attach.
 
 **Out of scope**
 
-- Changing the default on macOS / Linux. tmux stays the default there. The
-  zellij backend may work on POSIX too, but that is not a goal of this plan.
+- Changing the default on macOS / Linux. This plan left tmux as the default
+  there; #299 later made zellij the default on every platform (tmux stays
+  available via `FLEET_MUX=tmux` or `fleet config set mux tmux`).
 - WSL2. fleet already runs unchanged under WSL2 + tmux. This plan is about
   native Windows.
 
@@ -377,8 +378,10 @@ launcher can serve the leader pane (`fleet leader`).
 
 ### 6.4 Backend selection
 
-`FLEET_MUX` (`tmux` | `zellij`) wins. Otherwise use `zellij` on
-`sys.platform == "win32"` and `tmux` everywhere else. One backend per
+`FLEET_MUX` (`tmux` | `zellij`) wins. Otherwise the `mux` key of the global
+config (`fleet-state/global/config.yaml`, set with `fleet config set mux`)
+wins. Otherwise the built-in default is `zellij` on every platform (it was
+`tmux` off Windows before #299). One backend per
 process, chosen at first use. Once a task records which multiplexer it was
 spawned in, a later process cannot switch backends under it.
 
@@ -735,7 +738,8 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   handling. Still open: a live driver E2E on macOS / Linux with a real agent CLI
   (leader, `start`, prompt delivery, multi-stage handoff, teardown), a macOS
   run, and whether a `fleet-agent done` run by a real agent CLI is hung up when
-  its own tab closes (`window_close_kills_caller`, below).
+  its own tab closes (`window_close_kills_caller`, below). It is the default
+  there too (#299); `FLEET_MUX=tmux` or `fleet config set mux tmux` keeps tmux.
 
   Findings from the Linux run: (1) `zellij attach S` on `/dev/null` stdio never
   registers as a client without a controlling terminal, so the §4.3 temp client

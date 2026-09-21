@@ -17,6 +17,7 @@ FLEET = ROOT / "fleet"
 sys.path.insert(0, str(ROOT / "src"))
 import tests._fleet_test_helpers  # noqa: E402,F401  (hermetic env: FLEET_NO_NOTIFY / FLEET_NO_MUX)
 
+from fleet import config  # noqa: E402
 from fleet.commands import preflight  # noqa: E402
 
 
@@ -30,7 +31,8 @@ class PreflightLibraryTests(unittest.TestCase):
     def test_check_all_returns_results(self) -> None:
         names = [r.name for r in self.all_results]
         self.assertIn("python", names)
-        self.assertIn(preflight._mux_backend_name(), names)
+        # the selected backend and its source, then the backend's own check
+        self.assertLess(names.index("mux"), names.index(preflight._mux_backend_name()))
         self.assertIn("git", names)
 
     def test_python_marked_required(self) -> None:
@@ -169,23 +171,72 @@ def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedPro
 
 
 class MuxBackendCheckTests(unittest.TestCase):
-    def _name(self, *, env: dict[str, str], platform: str) -> str:
-        with (
-            unittest.mock.patch.dict(os.environ, env, clear=False),
-            unittest.mock.patch("fleet.mux.sys.platform", platform),
-        ):
-            if "FLEET_MUX" not in env:
-                os.environ.pop("FLEET_MUX", None)
+    """Backend selection as preflight sees it: env > global config > default (zellij).
+
+    Hermetic: ``FLEET_HOME`` is a throwaway dir (never the host's real config)
+    and nothing depends on the host platform.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.fleet_home = Path(self._tmp.name)
+        config.reset_cache()
+        self.addCleanup(config.reset_cache)
+
+    def _write_config(self, text: str) -> None:
+        path = self.fleet_home / "global" / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        config.reset_cache()
+
+    def _env(self, env: dict[str, str]):
+        merged = {k: v for k, v in os.environ.items() if k != "FLEET_MUX"}
+        merged["FLEET_HOME"] = str(self.fleet_home)
+        merged.update(env)
+        return unittest.mock.patch.dict(os.environ, merged, clear=True)
+
+    def _name(self, *, env: dict[str, str]) -> str:
+        with self._env(env):
             return preflight._mux_backend_name()
 
     def test_backend_name_from_env(self) -> None:
-        self.assertEqual(self._name(env={"FLEET_MUX": " TMUX "}, platform="win32"), "tmux")
-        self.assertEqual(self._name(env={"FLEET_MUX": "zellij"}, platform="linux"), "zellij")
+        self.assertEqual(self._name(env={"FLEET_MUX": " TMUX "}), "tmux")
+        self.assertEqual(self._name(env={"FLEET_MUX": "zellij"}), "zellij")
 
-    def test_backend_name_platform_default(self) -> None:
-        self.assertEqual(self._name(env={}, platform="win32"), "zellij")
-        self.assertEqual(self._name(env={}, platform="linux"), "tmux")
-        self.assertEqual(self._name(env={}, platform="darwin"), "tmux")
+    def test_backend_name_default_is_zellij_on_every_platform(self) -> None:
+        for platform in ("win32", "linux", "darwin"):
+            with unittest.mock.patch("sys.platform", platform):
+                self.assertEqual(self._name(env={}), "zellij", platform)
+
+    def test_backend_name_from_config(self) -> None:
+        self._write_config("mux: tmux\n")
+        self.assertEqual(self._name(env={}), "tmux")
+        # env still wins over the config
+        self.assertEqual(self._name(env={"FLEET_MUX": "zellij"}), "zellij")
+
+    def _selection(self, *, env: dict[str, str]) -> preflight.CheckResult:
+        with self._env(env):
+            return preflight._check_mux_selection()
+
+    def test_selection_line_default_names_the_ways_back_to_tmux(self) -> None:
+        r = self._selection(env={})
+        self.assertEqual(r.name, "mux")
+        self.assertTrue(r.ok)
+        self.assertFalse(r.required)
+        self.assertIn("zellij (from default)", r.detail)
+        self.assertIn("fleet config set mux tmux", r.detail)
+        self.assertIn("FLEET_MUX=tmux", r.detail)
+
+    def test_selection_line_config(self) -> None:
+        self._write_config("mux: tmux\n")
+        r = self._selection(env={})
+        self.assertEqual(r.detail, "tmux (from config)")
+
+    def test_selection_line_env(self) -> None:
+        self._write_config("mux: tmux\n")
+        r = self._selection(env={"FLEET_MUX": "zellij"})
+        self.assertEqual(r.detail, "zellij (from env)")
 
     def test_backend_name_is_mux_backend_name(self) -> None:
         with unittest.mock.patch("fleet.mux.backend_name", return_value="zellij"):
@@ -308,7 +359,8 @@ class WindowsChecksTests(unittest.TestCase):
         with (
             unittest.mock.patch("fleet.commands.preflight.sys.platform", platform),
             unittest.mock.patch("fleet.commands.preflight._check_python", return_value=ok._replace(name="python")),
-            unittest.mock.patch("fleet.commands.preflight._check_mux", return_value=ok._replace(name="mux")),
+            unittest.mock.patch("fleet.commands.preflight._check_mux_selection", return_value=ok._replace(name="mux")),
+            unittest.mock.patch("fleet.commands.preflight._check_mux", return_value=ok._replace(name="zellij")),
             unittest.mock.patch("fleet.commands.preflight._check_command", return_value=ok._replace(name="git")),
             unittest.mock.patch("fleet.commands.preflight._check_clone_path", return_value=ok._replace(name="clone-path")),
             unittest.mock.patch("fleet.commands.preflight._check_longpaths", return_value=ok._replace(name="longpaths")),

@@ -3,8 +3,8 @@
 *[日本語版 README](README.ja.md)*
 
 **agent-fleet** is a hierarchical, multi-vendor agent orchestrator that runs
-driver agents (claude / codex) inside terminal-multiplexer panes (tmux on
-macOS/Linux, zellij on Windows). You talk to a single
+driver agents (claude / codex) inside terminal-multiplexer panes (zellij by
+default, tmux optional). You talk to a single
 **leader** agent and lightly toss it tasks; the leader spins up **driver**
 agents to do the work, each in its own pane, following a per-project **team
 formation** defined in YAML. Many tasks run concurrently. Everything is
@@ -12,8 +12,10 @@ keyboard-only inside the multiplexer, and at any moment you can attach into a dr
 to read what it's doing, nudge it, or take over mid-task. It is built for
 humans-in-the-loop coding work, not lights-out autonomy.
 
-Requires **Python ≥ 3.11** and a terminal multiplexer: **tmux** on
-macOS/Linux, **zellij ≥ 0.45.0** on Windows (see [Windows](#windows)). There is
+Requires **Python ≥ 3.11** and a terminal multiplexer: **zellij ≥ 0.45.0**
+(the default on every platform) or **tmux** (opt-in; see
+[Choosing the multiplexer](#choosing-the-multiplexer) and
+[Windows](#windows)). There is
 **no `pip install`** — clone the repo and run `./fleet` (`fleet.cmd` on
 Windows). Any Python dependency is vendored under `vendor/`.
 
@@ -56,8 +58,9 @@ cd agent-fleet
 ./fleet preflight
 ```
 
-`preflight` checks Python, the terminal multiplexer (tmux, or zellij on
-Windows), git, and the agent CLIs (`claude`, `codex`) on your `PATH`. It also warns if your Codex CLI is out of date or if its
+`preflight` checks Python, the terminal multiplexer (and prints which backend
+is selected and where that choice came from: `env` / `config` / `default`), git,
+and the agent CLIs (`claude`, `codex`) on your `PATH`. It also warns if your Codex CLI is out of date or if its
 directory trust is not set up. Resolve anything it flags before continuing.
 
 ### 2. Initialize a project
@@ -226,7 +229,8 @@ not killed for you — fleet warns if it spots one still running.
 
 | Command | Purpose |
 |---|---|
-| `fleet preflight` | Check Python / multiplexer (tmux or zellij) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
+| `fleet preflight` | Check Python / multiplexer (zellij or tmux; shows which is selected and why) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
+| `fleet config [get <key> \| set <key> <value>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Only key today: `mux` = `zellij` \| `tmux`. See [Choosing the multiplexer](#choosing-the-multiplexer). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`, default agent `claude:opus`). |
 | `fleet attach [target] [--project P] [--session LABEL]` | Attach to a task's driver pane (in the session that owns the task, `fleet-<owner_session>`; `--project` locates the task) or, by default, to the `leader` pane of `fleet-<LABEL>` (`--session`, default `$FLEET_SESSION`, else `main`). Lists the live sessions if the target one isn't running. |
@@ -313,6 +317,46 @@ agent-fleet/fleet-state/
 
 ---
 
+## Choosing the multiplexer
+
+> **Changed default — existing macOS/Linux users, read this.** The built-in
+> default multiplexer is now **zellij on every platform**. It used to be tmux
+> everywhere except Windows. To keep using tmux, do **one** of these:
+>
+> ```bash
+> ./fleet config set mux tmux     # persistent (writes fleet-state/global/config.yaml)
+> FLEET_MUX=tmux ./fleet ...      # per shell / per command
+> ```
+>
+> Do this **before** your next fleet command if you have live tmux sessions:
+> fleet only looks for sessions in the selected backend, so under the new
+> default it would not see your running `fleet-<label>` tmux sessions.
+> zellij on macOS/Linux is less exercised than tmux there
+> ([#258](https://github.com/krml4913/agent-fleet/issues/258)).
+
+The backend is chosen once per process; the first hit wins:
+
+1. **`FLEET_MUX=tmux|zellij`** in the environment.
+2. **`mux:`** in the global config, `fleet-state/global/config.yaml`
+   (`$FLEET_HOME/global/config.yaml`).
+3. The built-in default: **zellij**, on all platforms.
+
+Manage the config with the CLI rather than by hand:
+
+```bash
+./fleet config                  # print every key, its value and where it comes from
+./fleet config get mux          # print one value
+./fleet config set mux tmux     # tmux | zellij; unknown keys / values are rejected
+```
+
+`fleet config` / `get` report the config layer (the file, else the default); an
+active `FLEET_MUX` is noted, and `fleet preflight` shows the backend actually
+selected and its source. `FLEET_NO_MUX` and `FLEET_ZELLIJ` are unchanged. A
+missing config file just means the defaults; an unreadable or invalid one only
+prints a warning and is ignored — it never stops a command.
+
+---
+
 ## Windows
 
 fleet runs natively on Windows (no WSL), using
@@ -354,8 +398,9 @@ D:\dev\agent-fleet\fleet.cmd preflight
   an entry like `~/.local/bin` works in Git Bash but not in PowerShell, cmd,
   or a zellij pane. Add the real directory (e.g. `%USERPROFILE%\.local\bin`)
   instead.
-- **`FLEET_MUX=tmux|zellij`** overrides the backend. The default is zellij on
-  Windows and tmux everywhere else.
+- **`FLEET_MUX=tmux|zellij`** overrides the backend (see
+  [Choosing the multiplexer](#choosing-the-multiplexer)). The default is zellij
+  on every platform.
 
 ### What `fleet preflight` checks on Windows
 

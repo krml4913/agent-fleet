@@ -51,7 +51,7 @@ def tmux_key(key: str | Key) -> str:
 
 
 class TmuxMux(Mux):
-    """The tmux backend (the default on macOS / Linux)."""
+    """The tmux backend (opt-in: ``FLEET_MUX=tmux`` or ``fleet config set mux tmux``)."""
 
     name = "tmux"
 
