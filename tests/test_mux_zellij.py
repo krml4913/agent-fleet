@@ -270,7 +270,8 @@ class SimZellij(ZellijMux):
                               "tab_position": i, "tab_name": t["name"]})
                 if t["terminal"]:
                     panes.append({"id": t["pane"], "is_plugin": False, "tab_id": t["id"],
-                                  "tab_position": i, "tab_name": t["name"]})
+                                  "tab_position": i, "tab_name": t["name"],
+                                  "title": t.get("title", ""), "exited": t.get("exited", False)})
             return out(json.dumps(panes))
         if cmd == "new-tab":
             name = a[a.index("--name") + 1]
@@ -554,6 +555,51 @@ class NewWindowTests(ZellijSimTestCase):
     def test_missing_session_raises(self) -> None:
         with self.assertRaises(ZellijError):
             self.z.new_window("fleet-none", "7·driver", argv=["claude"])
+
+
+class PaneTests(ZellijSimTestCase):
+    """``list_panes`` / ``rename_window``: finding a leader tab that lost its name (#302)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.z.add_session("fleet-p", ["Tab #3", "7·driver"])
+        tabs = self.z.sessions["fleet-p"]["tabs"]
+        tabs[0]["title"] = "✳ main-leader"
+        tabs[1]["title"] = "claude"
+
+    def test_list_panes_reports_terminal_panes_with_tab_name_id_and_title(self) -> None:
+        tabs = self.z.sessions["fleet-p"]["tabs"]
+        self.assertEqual(
+            self.z.list_panes("fleet-p"),
+            [
+                mux.PaneInfo(window="Tab #3", window_id=str(tabs[0]["id"]), title="✳ main-leader"),
+                mux.PaneInfo(window="7·driver", window_id=str(tabs[1]["id"]), title="claude"),
+            ],
+        )  # the plugin (tab-bar) panes are not listed
+
+    def test_list_panes_skips_exited_panes(self) -> None:
+        self.z.sessions["fleet-p"]["tabs"][0]["exited"] = True
+        self.assertEqual([p.window for p in self.z.list_panes("fleet-p")], ["7·driver"])
+
+    def test_list_panes_missing_session_raises(self) -> None:
+        with self.assertRaises(ZellijError):
+            self.z.list_panes("fleet-none")
+
+    def test_rename_window_renames_the_tab_by_id(self) -> None:
+        pane = self.z.list_panes("fleet-p")[0]
+        self.z.rename_window("fleet-p", pane.window_id, "leader")
+        self.assertEqual(self.z.list_windows("fleet-p"), ["leader", "7·driver"])
+        self.assertEqual(self.z.actions("rename-tab-by-id")[0][5:], [pane.window_id, "leader"])
+        # ...and the renamed tab is addressable by name again.
+        self.assertEqual(self.z.capture("fleet-p", "leader"), "❯ \n")
+
+    def test_rename_window_fails_when_the_tab_does_not_take_the_name(self) -> None:
+        with self.assertRaises(ZellijError):
+            self.z.rename_window("fleet-p", "9999", "leader")  # no such tab id
+
+    def test_rename_window_missing_session_raises(self) -> None:
+        with self.assertRaises(ZellijError):
+            self.z.rename_window("fleet-none", "0", "leader")
 
 
 class IoTests(ZellijSimTestCase):

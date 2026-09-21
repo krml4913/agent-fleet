@@ -51,6 +51,15 @@ gone by :data:`SESSION_RECHECKS` checks in a row. Its decisions (spawn, lock
 contention, non-idle reasons, flush result, deadline / re-arm, exit reason) are
 appended at low volume to ``leader-notifier.log`` next to the queue so a delayed
 notification can be explained after the fact.
+
+The leader pane is addressed as ``fleet-<label>:leader``, and a window name is
+easy to lose: closing the leader tab and starting the leader again leaves a new
+tab with the multiplexer's default name (Issue #302), so every capture failed
+for a day. When ``capture`` fails and the ``leader`` window is missing,
+:func:`heal_leader_window` looks for the pane titled with the leader agent's
+session name (``<label>-leader``, which survives a rename), renames its window
+back to ``leader`` and carries on. :func:`pending_summary` exposes what is still
+queued so ``fleet status`` / ``fleet sessions`` can show a stranded queue.
 """
 from __future__ import annotations
 
@@ -63,9 +72,10 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
-from . import agents, formation, mux, state as state_mod
+from . import agents, formation, heartbeat, mux, state as state_mod
 from .adapters import REGISTRY, VendorAdapter
 from .events import append_event, utcnow_iso
 from .locking import atomic_update, lock_file, unlock_file
@@ -802,7 +812,11 @@ def _poll_until_idle(
         try:
             pane = backend.capture(session, window)
         except mux.MuxError as e:
-            reasons.note(f"capture failed (transient, retrying until the deadline): {e}")
+            healed, note = heal_leader_window(backend, session, window, session_dir)
+            if healed:
+                continue  # the window is back under its name: capture again at once
+            reason = f"capture failed (transient, retrying until the deadline): {e}"
+            reasons.note(f"{reason}; {note}" if note else reason)
             time.sleep(max(0.1, poll_interval))
             continue
 
@@ -850,6 +864,106 @@ def session_confirmed_gone(backend, session: str) -> bool:
         if attempt < SESSION_RECHECKS - 1:
             time.sleep(SESSION_RECHECK_SECONDS)
     return True
+
+
+def _session_label(session: str) -> str | None:
+    """The label of a ``fleet-<label>`` session; ``None`` for any other session."""
+    prefix = "fleet-"
+    return session[len(prefix):] if session.startswith(prefix) and len(session) > len(prefix) else None
+
+
+def title_names_agent(title: str, name: str) -> bool:
+    """True if ``title`` carries ``name`` as a whole token (case-insensitive).
+
+    A terminal title is usually decorated (``✳ main-leader``, ``main-leader -
+    Claude``), so this is a token match rather than equality. ``-`` and word
+    characters are not boundaries, which keeps ``main-leader`` from matching a
+    driver's ``<project>-<task>-<role>`` name such as ``main-leader-implementer``.
+    """
+    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", title, re.IGNORECASE) is not None
+
+
+def heal_leader_window(
+    backend, session: str, window: str, session_dir: Path
+) -> tuple[bool, str | None]:
+    """Find a renamed / recreated leader window by its pane title and rename it back.
+
+    Called when the leader pane cannot be reached by ``session:window`` (Issue
+    #302: a closed and recreated tab keeps the multiplexer's default name, and
+    the name was the only thing the notifier looked the leader up by). The
+    leader agent is launched with the session name ``<label>-leader``
+    (:func:`state.leader_agent_name`), which shows as the pane title and survives
+    a window rename, so the pane whose title carries that name is the leader.
+
+    Returns ``(healed, note)``: ``healed`` is True once the window has been
+    renamed to ``window`` (logged); otherwise ``note`` says why not (``None``
+    when the window is present — the failure was something else — or when the
+    session is not a ``fleet-<label>`` one, which is never touched). Deliberately
+    conservative: it renames only when exactly one window holds a matching pane,
+    so a driver pane is never adopted and an ambiguous match is left alone.
+    Never raises.
+    """
+    label = _session_label(session)
+    if label is None:
+        return False, None
+    name = state_mod.leader_agent_name(label)
+    try:
+        if window in backend.list_windows(session):
+            return False, None
+        matches = [p for p in backend.list_panes(session) if title_names_agent(p.title, name)]
+        if not matches:
+            return False, f"window {window!r} is missing and no pane is titled {name!r}"
+        found = {p.window_id: p.window for p in matches}
+        if len(found) > 1:
+            return False, (
+                f"window {window!r} is missing and {len(found)} windows hold a pane "
+                f"titled {name!r} ({', '.join(sorted(found.values()))}); not renaming any"
+            )
+        (window_id, old_name), = found.items()
+        backend.rename_window(session, window_id, window)
+    except mux.MuxError as e:
+        return False, f"could not recover the leader window {window!r}: {e}"
+    _log(
+        session_dir,
+        f"leader window {window!r} was missing; the pane titled {name!r} is in window "
+        f"{old_name!r} (id {window_id}): renamed it back to {window!r}",
+    )
+    return True, None
+
+
+def pending_summary(session_dir: Path) -> dict | None:
+    """Count and age of a session's pending notifications, or ``None`` when none.
+
+    ``{"count": n, "oldest_ts": <iso or None>, "oldest_age_seconds": <float or None>}``.
+    The age is of the oldest record with a parseable ``ts`` — how long the leader
+    has been unaware of it; surfaced by ``fleet status`` / ``fleet sessions`` so a
+    stranded queue is visible without reading the notifier log.
+    """
+    records = read_queue(session_dir)
+    if not records:
+        return None
+    now = datetime.now(timezone.utc)
+    oldest: tuple[datetime, str] | None = None
+    for rec in records:
+        ts = rec.get("ts")
+        parsed = heartbeat.parse_ts(ts) if isinstance(ts, str) else None
+        if parsed is not None and (oldest is None or parsed < oldest[0]):
+            oldest = (parsed, ts)
+    return {
+        "count": len(records),
+        "oldest_ts": oldest[1] if oldest else None,
+        "oldest_age_seconds": max(0.0, (now - oldest[0]).total_seconds()) if oldest else None,
+    }
+
+
+def describe_pending(summary: dict) -> str:
+    """``2 leader notifications pending (oldest 3h ago)`` for a :func:`pending_summary`."""
+    n = summary["count"]
+    text = f"{n} leader notification{'' if n == 1 else 's'} pending"
+    age = summary.get("oldest_age_seconds")
+    if age is not None:
+        text += f" (oldest {heartbeat.humanize_age(age)})"
+    return text
 
 
 def _refill_pr_urls(records: list[dict]) -> None:

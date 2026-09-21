@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 
 import yaml  # noqa: E402
 
+from fleet import leader_notifier  # noqa: E402
 from fleet import state  # noqa: E402
 from fleet import status_data  # noqa: E402
 from tests._fleet_test_helpers import make_project  # noqa: E402
@@ -220,6 +221,58 @@ class ScanInflightTasksTests(unittest.TestCase):
             )
         result = status_data.scan_inflight_tasks()
         self.assertEqual(result, {})
+
+
+class PendingNotificationsTests(unittest.TestCase):
+    """Per-session pending leader notifications (Issue #302)."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        self._old = os.environ.get("FLEET_HOME")
+        os.environ["FLEET_HOME"] = str(self.fleet_home)
+
+    def tearDown(self) -> None:
+        if self._old is None:
+            os.environ.pop("FLEET_HOME", None)
+        else:
+            os.environ["FLEET_HOME"] = self._old
+        self._tmp.cleanup()
+
+    def _queue(self, label: str, n: int, age: timedelta) -> None:
+        for i in range(n):
+            leader_notifier.enqueue(
+                state.session_dir(label),
+                {"nonce": f"{label}-{i}", "ts": _iso(datetime.now(timezone.utc) - age), "task_id": str(i)},
+            )
+
+    def test_only_sessions_with_a_non_empty_queue_are_reported(self) -> None:
+        self._queue("main", 2, timedelta(minutes=7))
+        state.session_dir("idle").mkdir(parents=True)  # a session with no queue file
+        pending = status_data.collect_pending_notifications()
+        self.assertEqual(list(pending), ["main"])
+        self.assertEqual(pending["main"]["count"], 2)
+        self.assertAlmostEqual(pending["main"]["oldest_age_seconds"], 7 * 60, delta=5)
+
+    def test_no_sessions_dir_yields_nothing(self) -> None:
+        self.assertEqual(status_data.collect_pending_notifications(), {})
+
+    def test_collect_sessions_carries_the_pending_summary(self) -> None:
+        state.session_record_path("main").parent.mkdir(parents=True, exist_ok=True)
+        state.session_record_path("main").write_text(json.dumps({"label": "main"}), encoding="utf-8")
+        self._queue("main", 1, timedelta(hours=1))
+        self._queue("ghost", 1, timedelta(seconds=30))  # a queue with no session record
+        by_label = {s["label"]: s for s in status_data.collect_sessions()}
+        self.assertEqual(by_label["main"]["pending"]["count"], 1)
+        self.assertEqual(by_label["ghost"]["pending"]["count"], 1)
+        self.assertFalse(by_label["ghost"]["has_record"])
+
+    def test_collect_sessions_pending_is_none_for_an_empty_queue(self) -> None:
+        state.session_record_path("main").parent.mkdir(parents=True, exist_ok=True)
+        state.session_record_path("main").write_text(json.dumps({"label": "main"}), encoding="utf-8")
+        (s,) = status_data.collect_sessions()
+        self.assertIsNone(s["pending"])
 
 
 def _iso(dt: datetime) -> str:

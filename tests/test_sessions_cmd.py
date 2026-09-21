@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import state  # noqa: E402
+from fleet import leader_notifier, state  # noqa: E402
 from tests._fleet_test_helpers import make_project, run_fleet  # noqa: E402
 
 
@@ -122,6 +123,53 @@ class SessionsCmdTests(unittest.TestCase):
         r = self._run()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("all projects", r.stdout)
+
+    def _queue(self, label: str, *ages_seconds: int) -> None:
+        """Enqueue one leader notification per age (seconds ago) into ``label``'s queue."""
+        now = datetime.now(timezone.utc)
+        for i, age in enumerate(ages_seconds):
+            leader_notifier.enqueue(
+                state.session_dir(label),
+                {
+                    "nonce": f"{label}-{i}",
+                    "ts": (now - timedelta(seconds=age)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "task_id": str(i),
+                    "kind": "done",
+                },
+            )
+
+    def test_pending_notifications_shown_with_count_and_oldest_age(self) -> None:
+        self._write_session("main")
+        self._queue("main", 30, 2 * 3600, 90)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("3 leader notifications pending (oldest 2h ago)", r.stdout)
+
+    def test_no_pending_line_for_an_empty_queue(self) -> None:
+        self._write_session("main")
+        self._queue("main", 30)
+        leader_notifier.clear_records(state.session_dir("main"), {"main-0"})
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("pending", r.stdout)
+
+    def test_pending_is_reported_per_session(self) -> None:
+        self._write_session("main")
+        self._write_session("hotfix")
+        self._queue("hotfix", 300)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("leader notification"), 1)
+        hotfix = r.stdout[r.stdout.index("hotfix"):]
+        self.assertIn("1 leader notification pending (oldest 5m ago)", hotfix)
+
+    def test_session_with_only_a_queue_is_still_listed(self) -> None:
+        # No session.json and no in-flight task, but records are stranded.
+        self._queue("ghost", 120)
+        r = self._run()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ghost", r.stdout)
+        self.assertIn("1 leader notification pending (oldest 2m ago)", r.stdout)
 
 
 if __name__ == "__main__":

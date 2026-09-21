@@ -146,6 +146,12 @@ def run(args: argparse.Namespace) -> int:
         )
     )
 
+    pending_lines = _pending_notification_lines(use_color)
+    if pending_lines:
+        print()
+        for line in pending_lines:
+            print(line)
+
     awaiting_orders = [t for t in tasks if t.get("status") == "awaiting_orders"]
     if awaiting_orders:
         print()
@@ -375,6 +381,12 @@ def _run_all(args: argparse.Namespace) -> int:
         print(scope_header)
         print()
 
+    pending_lines = _pending_notification_lines(use_color)
+    if pending_lines:
+        for line in pending_lines:
+            print(line)
+        print()
+
     if not projects:
         print("(no projects in scope — use --unscoped to see all)")
         return 0
@@ -422,6 +434,24 @@ def _run_all(args: argparse.Namespace) -> int:
         print()
 
     return 0
+
+
+def _pending_notification_lines(use_color: bool) -> list[str]:
+    """One warning line per leader session with undelivered notifications.
+
+    A session's queue spans every project it spawned, so this is per session,
+    not per project. Empty in the normal case of empty queues; a queue that stays
+    non-empty means the leader is not being reached (see ``leader-notifier.log``
+    next to the queue).
+    """
+    return [
+        _style(
+            f"⚠ session {label}: {leader_notifier.describe_pending(summary)}",
+            _YELLOW + _BOLD,
+            use_color,
+        )
+        for label, summary in status_data_mod.collect_pending_notifications().items()
+    ]
 
 
 def _style(text: str, code: str, enabled: bool) -> str:

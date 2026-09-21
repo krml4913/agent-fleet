@@ -16,7 +16,7 @@ import os
 import sys
 from typing import Sequence
 
-from .base import Key, Mux, MuxError, disabled_by_env, parse_key
+from .base import Key, Mux, MuxError, PaneInfo, disabled_by_env, parse_key
 
 DEFAULT_BACKEND = "tmux"
 #: Default on native Windows (no tmux there; docs/windows-support.md §6.4).
@@ -137,6 +137,7 @@ __all__ = [
     "Key",
     "Mux",
     "MuxError",
+    "PaneInfo",
     "backend_name",
     "default_backend_name",
     "disabled_by_env",

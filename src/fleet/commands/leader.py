@@ -127,7 +127,7 @@ def run(args: argparse.Namespace) -> int:
     session_dir.mkdir(parents=True, exist_ok=True)
 
     # Session display name so the leader is identifiable in the session picker.
-    session_name = f"{label}-leader"
+    session_name = state_mod.leader_agent_name(label)
 
     cli = agents_mod.cli_command(args.agent)
     cli = cli + agents_mod.session_name_launch_args(args.agent, session_name)
