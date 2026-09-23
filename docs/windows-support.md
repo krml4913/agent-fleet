@@ -727,9 +727,14 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
 - **codex under zellij is unverified** (#256; §5 #15, §7 Phase 0 item 7, §8
   step 10): ready / gate regexes against `dump-screen`, the `/rename` flow with
   `Ctrl u`, and the `config.toml` trust-key format on Windows.
-- **Visible-terminal attach is not exercised by automation** (#257). Phase 0
-  checked attach focus with hidden clients only; `fleet attach <task>` with and
-  without another client in a real, visible terminal (§8 step 8) is manual only.
+- ~~Visible-terminal attach~~ **done** (#257, verified 2026-09-20). `fleet
+  attach <task>` was exercised in a real terminal, with and without another
+  client attached: with no other client the task tab is focused automatically;
+  with one, the other client is not moved and `Ctrl t` + the tab number reaches
+  the driver pane. Two defects found and fixed: `fleet attach` resolved
+  `fleet-<project>` instead of `fleet-<owner_session>` (#295), and the "another
+  client is attached" note was unreadable — it now waits for Enter on a TTY
+  (#297). Still automation-free by nature.
 - **zellij on macOS / Linux is only covered at the mux layer** (#258). The
   `unittest-zellij-linux` CI job runs `tests/test_mux_zellij_live.py` (real
   zellij 0.45.1 on ubuntu-latest, a plain `/bin/sh` as the pane command; no
@@ -751,11 +756,13 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   with its own session (an agent's tool-call shell) survives, which is what
   `window_close_kills_caller = False` on POSIX relies on. That is checked with
   a caller in its own session; how claude / codex spawn their shells is not.
-- **claude's workspace-trust dialog** (#259). claude's first run in a fresh
-  worktree asks whether to trust the folder. The adapter's `gate` regex
-  catches it, so the deliverer holds back and the task is surfaced as a boot
-  gate (`awaiting_orders` + notification), but a human still has to attach
-  and confirm it once per worktree.
+- ~~claude's workspace-trust dialog~~ **closed as not needed** (#259). With the
+  default layout every project's worktrees live under the fleet clone
+  (`fleet-state/projects/<name>/worktrees/`), and claude treats subdirectories of
+  a trusted directory as trusted: 7 worktree tasks in the 2026-09-19 leader run
+  needed no attach. The `gate` regex still catches the dialog if a layout puts a
+  worktree outside a trusted tree. The opt-in `--trust-claude` idea stays
+  unbuilt.
 - **Re-check multi-stage handoff on tmux** (#261). #253 changed the handoff
   path for zellij only; tmux is covered by unit tests but was not re-run live.
 
