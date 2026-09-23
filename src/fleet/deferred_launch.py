@@ -5,12 +5,12 @@ is killed, then the next stage's window is opened. The advance normally runs
 inside ``fleet-agent done`` (or an in-pane ``approve``) — i.e. *inside* the
 very window that gets killed.
 
-On Windows (zellij) closing a tab ends every process attached to its console,
-including that ``fleet-agent done`` process. It died inside ``kill_window``,
-before the next stage's tab was opened: the task stayed ``running`` on a stage
-with no window, the ``done`` event and notification were lost, and the
-pane-env file was left behind (found in the Windows E2E of a two-stage
-formation).
+On zellij, on every platform, closing a tab ends every process attached to
+it, including that ``fleet-agent done`` process. It died inside
+``kill_window``, before the next stage's tab was opened: the task stayed
+``running`` on a stage with no window, the ``done`` event and notification
+were lost, and the pane-env file was left behind (found in the Windows E2E of
+a two-stage formation, and again on macOS in #313).
 
 So when the backend reports :attr:`fleet.mux.Mux.window_close_kills_caller`
 and the caller runs in one of the task's own panes, the orchestrator hands the

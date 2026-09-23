@@ -408,27 +408,59 @@ class ZellijLiveTests(unittest.TestCase):
 
     # -- window_close_kills_caller ----------------------------------------------
 
-    def test_stage_advance_from_a_caller_inside_the_closing_tab(self) -> None:
-        """``done`` in the old stage's tab: kill that tab, then open the next one.
-
-        This is the orchestrator's cross-stage advance run from a driver pane,
-        with the agent's tool-call process as the caller. Such a caller is not a
-        job of the pane's terminal (it has its own session, as an agent's shell
-        does), so closing the tab must not end it: ``window_close_kills_caller``
-        is False on POSIX and the advance has to complete. (A foreground job of
-        the pane's own shell *is* hung up when the tab closes; that is why the
-        Windows backend defers the launch to a detached helper.)
+    def test_a_plain_caller_does_not_survive_closing_its_own_tab(self) -> None:
+        """``fleet-agent done`` runs as a plain foreground job of the pane's
+        shell -- no forking, no detaching. Closing its own tab (a pty close)
+        sends SIGHUP to that foreground process group on POSIX exactly as it
+        ends every console process on Windows (#313, found on a real macOS
+        run: the designer's own tab closed and the implementer's never
+        opened). This is why ``window_close_kills_caller`` is True for zellij
+        on every platform, and why the orchestrator never runs the
+        cross-stage advance in-pane -- see the detached-helper test below.
         """
-        self.assertFalse(self.m.window_close_kills_caller)
-        old, new = "15·stage1", "15·stage2"
-        done = self.tmp / "advance.done"
-        log = self.tmp / "advance.log"
-        script = self.tmp / "advance.py"
+        self.assertTrue(self.m.window_close_kills_caller)
+        old = "15·naive"
+        before_marker = self.tmp / "naive-before.marker"
+        after_marker = self.tmp / "naive-after.marker"
+        log = self.tmp / "naive.log"
+        script = self.tmp / "naive.py"
         script.write_text(
-            "import os, sys\n"
-            "if os.fork():\n"  # the pane's shell job returns at once ...
-            "    os._exit(0)\n"
-            "os.setsid()\n"  # ... the caller lives on in a session of its own
+            "import sys\n"
+            f"sys.path.insert(0, {str(ROOT / 'src')!r})\n"
+            "from fleet.mux.zellij import ZellijMux\n"
+            f"m = ZellijMux(pane_env_dir={str(self.tmp / 'pane-env')!r})\n"
+            f"open({str(before_marker)!r}, 'w').write('ok')\n"
+            f"m.kill_window({self.session!r}, {old!r})\n"  # closes the tab this runs in
+            f"open({str(after_marker)!r}, 'w').write('ok')\n",  # must never run
+            encoding="utf-8",
+        )
+        self.open_tab(old)
+        self.m.send_text(self.session, old, f"{sys.executable} {script} >{log} 2>&1")
+        self.assertTrue(wait_until(before_marker.exists, timeout=20), "the caller never started")
+        self.assertTrue(
+            wait_until(lambda: old not in self.m.list_windows(self.session), timeout=20),
+            "the caller's own kill_window(old) never closed its tab",
+        )
+        time.sleep(1.0)  # give a survivor a beat to reach the unreachable second write
+        self.assertFalse(after_marker.exists(), "the caller survived closing its own tab")
+
+    def test_a_spawn_detached_helper_survives_the_callers_tab_closing(self) -> None:
+        """The production recovery path: :func:`fleet.deferred_launch.start_detached`
+        hands the advance to a helper started with :func:`fleet.proc.spawn_detached`
+        (``start_new_session=True`` on POSIX). Unlike the plain caller above,
+        that helper is not a foreground job of the tab's pty -- its stdio is
+        redirected away and it runs in a session of its own -- so it survives
+        even though it is the one that closes the tab it was launched from,
+        and finishes replacing it with the next stage's tab (#313).
+        """
+        old, new = "16·stage1", "16·stage2"
+        done = self.tmp / "spawn-detached.done"
+        helper_log = self.tmp / "spawn-detached-helper.log"
+        parent_log = self.tmp / "spawn-detached-parent.log"
+        helper = self.tmp / "spawn_helper.py"
+        parent = self.tmp / "spawn_parent.py"
+        helper.write_text(
+            "import sys\n"
             f"sys.path.insert(0, {str(ROOT / 'src')!r})\n"
             "from fleet.mux.zellij import ZellijMux\n"
             f"m = ZellijMux(pane_env_dir={str(self.tmp / 'pane-env')!r})\n"
@@ -437,12 +469,20 @@ class ZellijLiveTests(unittest.TestCase):
             f"open({str(done)!r}, 'w').write('ok')\n",
             encoding="utf-8",
         )
+        parent.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(ROOT / 'src')!r})\n"
+            "from fleet.proc import spawn_detached\n"
+            f"spawn_detached([sys.executable, {str(helper)!r}], cwd={str(self.tmp)!r}, "
+            f"env=None, log_path={str(helper_log)!r})\n",
+            encoding="utf-8",
+        )
         self.addCleanup(self._close_tab_quietly, new)
         self.open_tab(old)
-        self.m.send_text(self.session, old, f"{sys.executable} {script} >{log} 2>&1")
+        self.m.send_text(self.session, old, f"{sys.executable} {parent} >{parent_log} 2>&1")
         completed = wait_until(done.exists, timeout=60)
-        out = log.read_text(encoding="utf-8", errors="replace") if log.exists() else "<no log>"
-        self.assertTrue(completed, f"the caller did not survive its tab closing; log: {out!r}")
+        out = helper_log.read_text(encoding="utf-8", errors="replace") if helper_log.exists() else "<no log>"
+        self.assertTrue(completed, f"the detached helper did not survive its tab closing; log: {out!r}")
         self.assertIn(new, self.m.list_windows(self.session))
         self.assertNotIn(old, self.m.list_windows(self.session))
         self.say(new, "NEXT", "ok")
