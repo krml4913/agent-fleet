@@ -110,6 +110,10 @@ class PreflightLibraryTests(unittest.TestCase):
                 side_effect=lambda name: f"/bin/{name}",
             ),
             unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=None,
+            ),
+            unittest.mock.patch(
                 "fleet.commands.preflight._codex_version",
                 return_value="0.132.0",
             ),
@@ -137,6 +141,10 @@ class PreflightLibraryTests(unittest.TestCase):
                 side_effect=lambda name: f"/bin/{name}",
             ),
             unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=None,
+            ),
+            unittest.mock.patch(
                 "fleet.commands.preflight._codex_version",
                 return_value="0.133.0",
             ),
@@ -161,6 +169,27 @@ class PreflightLibraryTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertIn("skipped", result.detail)
 
+    def test_codex_update_quarantined_never_execs(self) -> None:
+        # #309 review B1: a quarantined codex must fail here too, before
+        # `_codex_version()` execs `codex --version`.
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which", return_value="/bin/codex"
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value="/bin/codex",
+            ),
+            unittest.mock.patch("fleet.commands.preflight.subprocess.run") as run,
+        ):
+            result = preflight._check_codex_update()
+
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("Gatekeeper", result.detail)
+        self.assertNotIn("brew install", result.detail)
+
     def test_extract_version_from_codex_output(self) -> None:
         self.assertEqual(preflight._extract_version("codex-cli 0.132.0"), "0.132.0")
         self.assertIsNone(preflight._extract_version("codex-cli dev"))
@@ -173,12 +202,29 @@ def _completed(
 
 
 class CheckCommandFailureDetailTests(unittest.TestCase):
-    """`_check_command` failure details: timeout / killed-by-signal / non-zero exit."""
+    """`_check_command` failure details: timeout / killed-by-signal / non-zero exit.
 
-    def _check(self, *, side_effect=None, run_return=None, platform: str = "linux"):
+    ``macos_quarantine.quarantined_path`` is patched to ``None`` by default so
+    these tests never touch the host's real xattrs on a fake ``/bin/zellij``
+    path; the quarantine guard itself is covered by ``QuarantineGuardTests``.
+    """
+
+    def _check(
+        self,
+        *,
+        side_effect=None,
+        run_return=None,
+        platform: str = "linux",
+        quarantined: str | None = None,
+        brew_formula: str | None = None,
+    ):
         with (
             unittest.mock.patch("fleet.commands.preflight.sys.platform", platform),
             unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value="/bin/zellij"),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=quarantined,
+            ),
             unittest.mock.patch(
                 "fleet.commands.preflight.subprocess.run",
                 side_effect=side_effect,
@@ -186,7 +232,7 @@ class CheckCommandFailureDetailTests(unittest.TestCase):
             ),
         ):
             return preflight._check_command(
-                "zellij", ["zellij", "--version"], required=True
+                "zellij", ["zellij", "--version"], required=True, brew_formula=brew_formula
             )
 
     def test_timeout_reports_duration_and_command(self) -> None:
@@ -197,22 +243,47 @@ class CheckCommandFailureDetailTests(unittest.TestCase):
         self.assertTrue(result.required)
         self.assertEqual(result.detail, "timed out after 5s running `zellij --version`")
 
+    def test_timeout_on_macos_hints_gatekeeper_dialog(self) -> None:
+        result = self._check(
+            side_effect=subprocess.TimeoutExpired(cmd=["zellij", "--version"], timeout=5),
+            platform="darwin",
+            brew_formula="zellij",
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("timed out after 5s running `zellij --version`", result.detail)
+        self.assertIn("Gatekeeper dialog may be waiting on screen", result.detail)
+        self.assertIn('do not', result.detail)
+        self.assertIn("Move to Trash", result.detail)
+        self.assertIn("xattr -l /bin/zellij", result.detail)
+        self.assertIn("brew install zellij", result.detail)
+
+    def test_timeout_off_macos_has_no_hint(self) -> None:
+        result = self._check(
+            side_effect=subprocess.TimeoutExpired(cmd=["zellij", "--version"], timeout=5),
+            platform="linux",
+        )
+        self.assertNotIn("Gatekeeper", result.detail)
+
     def test_killed_by_signal_names_it(self) -> None:
         result = self._check(run_return=_completed(returncode=-9), platform="linux")
         self.assertFalse(result.ok)
         self.assertEqual(result.detail, "killed by SIGKILL running `zellij --version`")
 
     def test_killed_by_signal_on_macos_hints_quarantine(self) -> None:
-        result = self._check(run_return=_completed(returncode=-9), platform="darwin")
+        result = self._check(
+            run_return=_completed(returncode=-9), platform="darwin", brew_formula="zellij"
+        )
         self.assertFalse(result.ok)
         self.assertIn("killed by SIGKILL running `zellij --version`", result.detail)
-        self.assertIn("macOS may have blocked the binary", result.detail)
-        self.assertIn("Homebrew", result.detail)
+        self.assertIn("Gatekeeper quarantine", result.detail)
+        self.assertIn("re-signing does not help", result.detail)
+        self.assertIn("xattr -l /bin/zellij", result.detail)
+        self.assertIn("brew install zellij", result.detail)
 
     def test_killed_by_signal_off_macos_has_no_hint(self) -> None:
         result = self._check(run_return=_completed(returncode=-9), platform="linux")
         self.assertNotIn("macOS", result.detail)
-        self.assertNotIn("Homebrew", result.detail)
+        self.assertNotIn("Gatekeeper", result.detail)
 
     def test_positive_exit_code_includes_code_and_stderr(self) -> None:
         result = self._check(
@@ -236,6 +307,70 @@ class CheckCommandFailureDetailTests(unittest.TestCase):
         result = self._check(run_return=_completed(stdout="zellij 0.46.0\n"))
         self.assertTrue(result.ok)
         self.assertEqual(result.detail, "zellij 0.46.0")
+
+
+class QuarantineGuardTests(unittest.TestCase):
+    """`_check_command` refuses to exec a quarantined binary (#309)."""
+
+    def _check(
+        self,
+        *,
+        which: str | None = "/opt/homebrew/bin/zellij",
+        quarantined: str | None = "/opt/homebrew/Cellar/zellij/0.46.0/bin/zellij",
+        brew_formula: str | None = "zellij",
+    ):
+        with (
+            unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=which),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=quarantined,
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.subprocess.run"
+            ) as run,
+        ):
+            result = preflight._check_command(
+                "zellij", ["zellij", "--version"], required=True, brew_formula=brew_formula
+            )
+            return result, run
+
+    def test_quarantined_fails_without_exec(self) -> None:
+        result, run = self._check()
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertTrue(result.required)
+        self.assertIn("/opt/homebrew/Cellar/zellij/0.46.0/bin/zellij", result.detail)
+        self.assertIn("Gatekeeper", result.detail)
+        self.assertIn("Move to Trash", result.detail)
+        self.assertIn("brew install zellij", result.detail)
+        self.assertIn("xattr -d com.apple.quarantine", result.detail)
+
+    def test_quarantined_without_brew_formula_omits_brew_clause(self) -> None:
+        result, run = self._check(brew_formula=None)
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertNotIn("brew install", result.detail)
+        self.assertIn("xattr -d com.apple.quarantine", result.detail)
+
+    def test_not_quarantined_execs_normally(self) -> None:
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which", return_value="/bin/zellij"
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=None,
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.subprocess.run",
+                return_value=_completed(stdout="zellij 0.46.0\n"),
+            ) as run,
+        ):
+            result = preflight._check_command(
+                "zellij", ["zellij", "--version"], required=True, brew_formula="zellij"
+            )
+        run.assert_called_once()
+        self.assertTrue(result.ok)
 
 
 class MuxBackendCheckTests(unittest.TestCase):
@@ -310,18 +445,46 @@ class MuxBackendCheckTests(unittest.TestCase):
         with unittest.mock.patch("fleet.mux.backend_name", return_value="zellij"):
             self.assertEqual(preflight._mux_backend_name(), "zellij")
 
-    def _check_mux(self, backend: str, *, which: str | None, stdout: str = "", rc: int = 0):
+    def _check_mux(
+        self,
+        backend: str,
+        *,
+        which: str | None,
+        stdout: str = "",
+        rc: int = 0,
+        quarantined: str | None = None,
+    ):
         with (
             unittest.mock.patch(
                 "fleet.commands.preflight._mux_backend_name", return_value=backend
             ),
             unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=which),
             unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=quarantined,
+            ),
+            unittest.mock.patch(
                 "fleet.commands.preflight.subprocess.run",
                 return_value=_completed(stdout, rc),
             ) as run,
         ):
             return preflight._check_mux(), run
+
+    def test_zellij_quarantined_hints_brew_formula(self) -> None:
+        result, run = self._check_mux(
+            "zellij", which="/opt/homebrew/bin/zellij", quarantined="/real/zellij"
+        )
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertIn("brew install zellij", result.detail)
+
+    def test_tmux_quarantined_hints_brew_formula(self) -> None:
+        result, run = self._check_mux(
+            "tmux", which="/opt/homebrew/bin/tmux", quarantined="/real/tmux"
+        )
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertIn("brew install tmux", result.detail)
 
     def test_tmux_uses_dash_v(self) -> None:
         result, run = self._check_mux("tmux", which="/usr/bin/tmux", stdout="tmux 3.4\n")
@@ -592,6 +755,25 @@ class AgentCliTests(unittest.TestCase):
         )
         self.assertFalse(result.ok)
         self.assertEqual(result.detail, "not on PATH")
+
+    def test_quarantined_agent_cli_has_no_brew_clause(self) -> None:
+        # claude/codex are not plain brew formulae, so _check_agent_cli passes
+        # no brew_formula; the quarantine hint must omit the brew clause.
+        exe = os.path.abspath("/opt/bin/claude")
+        with (
+            unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=exe),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=exe,
+            ),
+            unittest.mock.patch("fleet.commands.preflight.subprocess.run") as run,
+        ):
+            result = preflight._check_agent_cli("claude")
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("Gatekeeper", result.detail)
+        self.assertNotIn("brew install", result.detail)
 
 
 class PreflightRunOutputTests(unittest.TestCase):

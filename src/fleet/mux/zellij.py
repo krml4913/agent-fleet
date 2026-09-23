@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .. import macos_quarantine
 from .base import Key, Mux, MuxError, PaneInfo, disabled_by_env, parse_key
 
 
@@ -211,6 +212,8 @@ class ZellijMux(Mux):
         self._binary_resolved = False
         self._version: tuple[int, int, int] | None = None
         self._version_probed = False
+        self._quarantine_checked = False
+        self._quarantined: str | None = None
         self._pane_env_dir = Path(pane_env_dir) if pane_env_dir else None
 
     # -- binary / version -----------------------------------------------------
@@ -234,16 +237,28 @@ class ZellijMux(Mux):
 
     @property
     def version(self) -> tuple[int, int, int] | None:
-        """Parsed ``zellij --version`` (cached), or ``None`` if unknown."""
+        """Parsed ``zellij --version`` (cached), or ``None`` if unknown.
+
+        Never execs a quarantined binary (#309): a quarantined zellij just
+        reports an unknown version, same as any other probe failure.
+        """
         if not self._version_probed:
             self._version_probed = True
-            if self.binary:
+            if self.binary and not self._quarantine():
                 try:
                     r = self._run([self.binary, "--version"], timeout=10)
                     self._version = parse_version(r.stdout or r.stderr)
                 except (OSError, subprocess.SubprocessError):
                     self._version = None
         return self._version
+
+    def _quarantine(self) -> str | None:
+        """``self.binary``'s quarantine path (cached), or ``None`` if clear."""
+        if not self._quarantine_checked:
+            self._quarantine_checked = True
+            if self.binary:
+                self._quarantined = macos_quarantine.quarantined_path(self.binary)
+        return self._quarantined
 
     def needs_temp_client(self) -> bool:
         """Whether ``new-tab`` needs the #5594 temp-client workaround."""
@@ -262,6 +277,13 @@ class ZellijMux(Mux):
         b = self.binary
         if not b:
             raise ZellijError("zellij not on PATH (set FLEET_ZELLIJ to its path)")
+        quarantined = self._quarantine()
+        if quarantined is not None:
+            raise ZellijError(
+                f"zellij binary is quarantined by macOS Gatekeeper: {quarantined} "
+                f"(not executed) — "
+                f"{macos_quarantine.fix_hint(quarantined, brew_formula='zellij')}"
+            )
         return b
 
     # -- subprocess plumbing (patched in tests) -------------------------------

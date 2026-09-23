@@ -4,8 +4,11 @@ Verifies the toolbelt fleet relies on: Python version, the configured
 multiplexer backend (tmux / zellij, with a version gate for zellij), workspace
 dependencies, and the agent CLIs (claude / codex, resolved to absolute paths).
 On Windows it also checks the clone path, ``core.longpaths`` and the
-``fleet-agent.cmd`` shim. Required tools missing → exit 1; optional tools
-missing → warn but continue.
+``fleet-agent.cmd`` shim. On macOS every tool is checked for a Gatekeeper
+quarantine xattr before it is exec'd (:mod:`fleet.macos_quarantine`, #309) —
+a quarantined binary fails the check instead of popping a dialog whose "Move
+to Trash" button would delete it. Required tools missing → exit 1; optional
+tools missing → warn but continue.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from .. import agents as agents_mod
+from .. import macos_quarantine
 from .. import mux
 from .. import workspace as workspace_mod
 # Constants only: importing the backend module runs no zellij command.
@@ -152,7 +156,7 @@ def _check_mux() -> CheckResult:
     """Check the selected multiplexer backend's binary (and version)."""
     name = _mux_backend_name()
     if name == "tmux":
-        return _check_command("tmux", ["tmux", "-V"], required=True)
+        return _check_command("tmux", ["tmux", "-V"], required=True, brew_formula="tmux")
     if name == "zellij":
         return _check_zellij()
     return CheckResult(
@@ -164,7 +168,9 @@ def _check_mux() -> CheckResult:
 
 
 def _check_zellij() -> CheckResult:
-    base = _check_command("zellij", ["zellij", "--version"], required=True)
+    base = _check_command(
+        "zellij", ["zellij", "--version"], required=True, brew_formula="zellij"
+    )
     if not base.ok:
         return base
     version = _parse_version(base.detail)
@@ -342,15 +348,35 @@ def _signal_name(signum: int) -> str:
         return f"signal {signum}"
 
 
+def _quarantine_result(
+    name: str, path: str, required: bool, *, brew_formula: str | None = None
+) -> CheckResult | None:
+    """``CheckResult`` refusing to exec ``path`` if it is quarantined, else ``None``."""
+    quarantined = macos_quarantine.quarantined_path(path)
+    if quarantined is None:
+        return None
+    detail = (
+        f"quarantined by macOS Gatekeeper: {quarantined} (not executed: "
+        f"running it would show a Gatekeeper dialog whose \"Move to Trash\" "
+        f"button deletes it) — {macos_quarantine.fix_hint(quarantined, brew_formula=brew_formula)}"
+    )
+    return CheckResult(name, False, detail, required)
+
+
 def _check_command(
     name: str,
     version_argv: list[str],
     *,
     required: bool,
     which: str | None = None,
+    brew_formula: str | None = None,
 ) -> CheckResult:
-    if not (which or shutil.which(name)):
+    path = which or shutil.which(name)
+    if not path:
         return CheckResult(name, False, "not on PATH", required)
+    blocked = _quarantine_result(name, path, required, brew_formula=brew_formula)
+    if blocked is not None:
+        return blocked
     cmd = " ".join([name, *version_argv[1:]])
     try:
         r = subprocess.run(
@@ -365,15 +391,21 @@ def _check_command(
         return CheckResult(name, False, f"{type(e).__name__}", required)
     except subprocess.TimeoutExpired as e:
         timeout = f"{e.timeout:g}" if e.timeout is not None else "5"
-        return CheckResult(
-            name, False, f"timed out after {timeout}s running `{cmd}`", required
-        )
+        detail = f"timed out after {timeout}s running `{cmd}`"
+        if sys.platform == "darwin":
+            detail += (
+                f"; a Gatekeeper dialog may be waiting on screen — do not "
+                f"click \"Move to Trash\"; check `xattr -l {path}`; fix: "
+                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
+            )
+        return CheckResult(name, False, detail, required)
     if r.returncode < 0:
         detail = f"killed by {_signal_name(-r.returncode)} running `{cmd}`"
         if sys.platform == "darwin":
             detail += (
-                "; macOS may have blocked the binary (quarantine / code "
-                "signing) — installing via Homebrew avoids this"
+                f"; on macOS this is usually Gatekeeper quarantine "
+                f"(re-signing does not help) — check `xattr -l {path}`; fix: "
+                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
             )
         return CheckResult(name, False, detail, required)
     if r.returncode != 0:
@@ -452,6 +484,9 @@ def _check_codex_update() -> CheckResult:
             "skipped (codex not on PATH)",
             required=False,
         )
+    blocked = _quarantine_result("codex-update", codex_path, False)
+    if blocked is not None:
+        return blocked
 
     current = _codex_version()
     if current is None:

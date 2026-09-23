@@ -144,6 +144,9 @@ class SimZellij(ZellijMux):
         super().__init__(binary="zellij", pane_env_dir=tmp / "pane-env")
         self._binary = "/opt/zellij/zellij"
         self._binary_resolved = True
+        # Never touch the real host's xattrs for a path that doesn't exist.
+        self._quarantine_checked = True
+        self._quarantined = None
         self.version_text = version
         self.clock = 0.0
         self.calls: list[list[str]] = []
@@ -823,6 +826,70 @@ class BinaryTests(unittest.TestCase):
             self.assertEqual(m.version, (0, 45, 1))
         self.assertEqual(run.call_count, 1)
         self.assertTrue(m.needs_temp_client())
+
+    def test_quarantined_binary_never_execs(self) -> None:
+        """#309: a quarantined zellij must never be exec'd — no --version probe,
+        no new-tab/list-sessions/etc. ``available()`` stays True (only the
+        exec attempt is refused, with an explicit error)."""
+        m = ZellijMux(binary=sys.executable)
+        no_disable_env = {
+            k: v for k, v in os.environ.items() if k not in ("FLEET_NO_MUX", "FLEET_NO_TMUX")
+        }
+        with unittest.mock.patch.dict(
+            os.environ, no_disable_env, clear=True
+        ), unittest.mock.patch(
+            "fleet.mux.zellij.macos_quarantine.quarantined_path",
+            return_value="/real/zellij",
+        ) as quarantined_path, unittest.mock.patch.object(
+            m, "_run"
+        ) as run, unittest.mock.patch.object(
+            m, "_spawn_client"
+        ) as spawn:
+            self.assertTrue(m.available())
+
+            self.assertIsNone(m.version)
+            run.assert_not_called()
+
+            with self.assertRaises(ZellijError) as cm:
+                m._bin()
+            self.assertIn("quarantine", str(cm.exception).lower())
+            self.assertIn("/real/zellij", str(cm.exception))
+
+            self.assertFalse(m.session_exists("fleet-x"))
+            run.assert_not_called()
+
+            with self.assertRaises(ZellijError):
+                m.new_session("fleet-x")
+            run.assert_not_called()
+            spawn.assert_not_called()
+
+            with self.assertRaises(ZellijError):
+                m.new_window("fleet-x", "tab")
+            with self.assertRaises(ZellijError):
+                m.kill_session("fleet-x")
+            with self.assertRaises(ZellijError):
+                m.attach("fleet-x")
+
+        # binary resolved once; quarantine checked once and cached (shared
+        # cache with the earlier calls in this test, not just this block).
+        quarantined_path.assert_called_once_with(m.binary)
+
+    def test_not_quarantined_unaffected(self) -> None:
+        m = ZellijMux(binary=sys.executable)
+        no_disable_env = {
+            k: v for k, v in os.environ.items() if k not in ("FLEET_NO_MUX", "FLEET_NO_TMUX")
+        }
+        with unittest.mock.patch.dict(
+            os.environ, no_disable_env, clear=True
+        ), unittest.mock.patch(
+            "fleet.mux.zellij.macos_quarantine.quarantined_path", return_value=None
+        ) as quarantined_path, unittest.mock.patch.object(
+            m, "_run", return_value=subprocess.CompletedProcess([], 0, "zellij 0.45.1\n", "")
+        ) as run:
+            self.assertEqual(m.version, (0, 45, 1))
+            self.assertEqual(m._bin(), m.binary)
+        run.assert_called_once()
+        quarantined_path.assert_called_once_with(m.binary)
 
 
 class SpawnFlagsTests(unittest.TestCase):
