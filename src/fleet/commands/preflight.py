@@ -377,10 +377,6 @@ def _check_command(
     blocked = _quarantine_result(name, path, required, brew_formula=brew_formula)
     if blocked is not None:
         return blocked
-    # Resolved path (realpath, like the quarantine check above): the fail-open
-    # darwin hints below name the same file `xattr -l`/`-d` would act on, not
-    # a Homebrew symlink into Cellar.
-    resolved = os.path.realpath(path)
     cmd = " ".join([name, *version_argv[1:]])
     try:
         r = subprocess.run(
@@ -399,8 +395,8 @@ def _check_command(
         if sys.platform == "darwin":
             detail += (
                 f"; a Gatekeeper dialog may be waiting on screen — do not "
-                f"click \"Move to Trash\"; check `xattr -l {resolved}`; fix: "
-                f"{macos_quarantine.fix_hint(resolved, brew_formula=brew_formula)}"
+                f"click \"Move to Trash\"; check `xattr -l {path}`; fix: "
+                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
             )
         return CheckResult(name, False, detail, required)
     if r.returncode < 0:
@@ -408,8 +404,8 @@ def _check_command(
         if sys.platform == "darwin":
             detail += (
                 f"; on macOS this is usually Gatekeeper quarantine "
-                f"(re-signing does not help) — check `xattr -l {resolved}`; fix: "
-                f"{macos_quarantine.fix_hint(resolved, brew_formula=brew_formula)}"
+                f"(re-signing does not help) — check `xattr -l {path}`; fix: "
+                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
             )
         return CheckResult(name, False, detail, required)
     if r.returncode != 0:
