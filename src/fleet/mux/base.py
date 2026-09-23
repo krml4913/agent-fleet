@@ -131,8 +131,8 @@ class Mux:
     #: When true, a cross-stage advance run from a task pane is deferred to a
     #: detached helper (:mod:`fleet.deferred_launch`) so the caller is not
     #: killed before the next stage's window exists. False for tmux (the
-    #: existing behavior is kept); true for zellij on Windows, where closing a
-    #: tab ends every process attached to its console.
+    #: existing behavior is kept); true for zellij on every platform, where
+    #: closing a tab ends every process attached to it.
     window_close_kills_caller: bool = False
 
     # -- lifecycle -----------------------------------------------------------

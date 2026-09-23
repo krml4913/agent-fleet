@@ -195,10 +195,17 @@ class ZellijMux(Mux):
 
     @property
     def window_close_kills_caller(self) -> bool:  # type: ignore[override]
-        """Windows: ``close-tab-by-id`` ends every process on the tab's console,
-        including a ``fleet-agent done`` run from that tab (verified in the
-        two-stage E2E). Not observed on POSIX, which keeps tmux's behavior."""
-        return _is_windows()
+        """True on every platform: ``close-tab-by-id`` ends every process on
+        the tab, including a ``fleet-agent done`` run from that tab.
+
+        Verified on Windows in the two-stage E2E, and on macOS in #313: the
+        tab close is a pty close, which sends SIGHUP to the tab's foreground
+        process group — a plain (non-detached) caller like ``fleet-agent
+        done`` is in it, so it dies before it can finish the advance. Earlier
+        POSIX testing only exercised a caller that had detached into its own
+        session first, which does survive but is not what a real caller
+        does."""
+        return True
 
     def __init__(
         self,

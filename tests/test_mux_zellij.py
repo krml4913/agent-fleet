@@ -883,12 +883,15 @@ class SpawnFlagsTests(unittest.TestCase):
         env = zmod.client_env({"zellij_session_name": "s", "Zellij": "0", "KEEP": "1"})
         self.assertEqual(env, {"KEEP": "1"})
 
-    def test_window_close_kills_caller_only_on_windows(self) -> None:
+    def test_window_close_kills_caller_on_every_platform(self) -> None:
+        # #313: verified on macOS too, not just Windows — a plain (non-detached)
+        # caller like `fleet-agent done` is in the tab's foreground process
+        # group on POSIX as well, so it is hung up (SIGHUP) when the tab closes.
         m = ZellijMux(binary=sys.executable)
         with unittest.mock.patch.object(zmod, "_is_windows", return_value=True):
             self.assertTrue(m.window_close_kills_caller)
         with unittest.mock.patch.object(zmod, "_is_windows", return_value=False):
-            self.assertFalse(m.window_close_kills_caller)
+            self.assertTrue(m.window_close_kills_caller)
 
     def test_run_uses_utf8_and_no_window_on_windows(self) -> None:
         m = ZellijMux(binary=sys.executable)

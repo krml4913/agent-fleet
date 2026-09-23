@@ -741,10 +741,9 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   agent CLI). It covers session / tab lifecycle, detached and attached
   `new-tab`, per-pane env, input / capture and the exit-0-on-missing-target
   handling. Still open: a live driver E2E on macOS / Linux with a real agent CLI
-  (leader, `start`, prompt delivery, multi-stage handoff, teardown), a macOS
-  run, and whether a `fleet-agent done` run by a real agent CLI is hung up when
-  its own tab closes (`window_close_kills_caller`, below). It is the default
-  there too (#299); `FLEET_MUX=tmux` or `fleet config set mux tmux` keeps tmux.
+  (leader, `start`, prompt delivery, multi-stage handoff, teardown). It is the
+  default there too (#299); `FLEET_MUX=tmux` or `fleet config set mux tmux`
+  keeps tmux.
 
   Findings from the Linux run: (1) `zellij attach S` on `/dev/null` stdio never
   registers as a client without a controlling terminal, so the §4.3 temp client
@@ -752,10 +751,14 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   SIGINT before spawning, and an ignored signal survives exec, so nothing in a
   POSIX pane could be interrupted with Ctrl+C (fixed: ignored after the spawn);
   (3) closing a tab hangs up (SIGHUP) the *foreground jobs of the pane's
-  terminal* on Linux as it ends every console process on Windows, but a caller
-  with its own session (an agent's tool-call shell) survives, which is what
-  `window_close_kills_caller = False` on POSIX relies on. That is checked with
-  a caller in its own session; how claude / codex spawn their shells is not.
+  terminal*, same as it ends every console process on Windows. A real
+  `fleet-agent done`, run in the foreground of its pane's shell like any other
+  command, is one of those jobs: a real macOS run (#313) found it hung up
+  mid-advance, stranding the task. Earlier POSIX testing only checked a caller
+  that had already detached into its own session (which does survive), not
+  how claude / codex actually spawn a tool-call shell — so
+  `window_close_kills_caller` is now `True` for zellij on every platform, not
+  just Windows.
 - ~~claude's workspace-trust dialog~~ **closed as not needed** (#259). With the
   default layout every project's worktrees live under the fleet clone
   (`fleet-state/projects/<name>/worktrees/`), and claude treats subdirectories of
