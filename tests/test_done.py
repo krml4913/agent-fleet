@@ -72,6 +72,13 @@ class DoneTests(unittest.TestCase):
         ]
         self.assertTrue(any(e["type"] == "done" for e in events))
 
+    def test_done_with_task_prefixed_id_normalized(self) -> None:
+        # `fleet-agent done task-1` must not look for task-task-1 (Issue #315).
+        r = self._run("done", "task-1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        task = state.load_task(self.state_dir, "1")
+        self.assertEqual(task["status"], "completed")
+
     def test_done_from_cwd(self) -> None:
         task_dir = self.state_dir / "tasks" / "task-1"
         r = self._run("done", cwd=task_dir)

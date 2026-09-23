@@ -265,6 +265,7 @@ def _run_json(args: argparse.Namespace) -> int:
     if not task_id:
         print("error: --json requires a task id (positional argument)", file=sys.stderr)
         return 1
+    task_id = task_context.normalize_task_id(task_id)
 
     project_name = getattr(args, "project", None)
     try:

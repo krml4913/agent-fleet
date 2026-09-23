@@ -120,14 +120,74 @@ class TaskContextTests(unittest.TestCase):
         self.assertIn("nope", str(cm.exception))
 
     def test_session_dir_state_dir_demands_project(self) -> None:
-        # FLEET_STATE_DIR = a leader session dir, no --project → clear error
-        # that points at --project (no silent cwd fallback for the leader path).
+        # FLEET_STATE_DIR = a leader session dir, no --project, and cwd (an
+        # unregistered dir) can't self-heal either → clear error pointing at
+        # --project.
         session = state.session_dir("main")
         session.mkdir(parents=True, exist_ok=True)
         os.environ["FLEET_STATE_DIR"] = str(session)
         with self.assertRaises(task_context.TaskNotFound) as cm:
             task_context.resolve(explicit_id="7", cwd=Path("/tmp"))
         self.assertIn("--project", str(cm.exception))
+
+    def test_session_dir_state_dir_self_heals_via_cwd(self) -> None:
+        # A leaked leader FLEET_STATE_DIR (Issue #315) must not block a
+        # driver pane (FLEET_TASK_ID set) whose cwd (its worktree) still
+        # resolves the real project through the registry.
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        os.environ["FLEET_TASK_ID"] = "42"
+        sd, tid = task_context.resolve(cwd=self.project)
+        self.assertEqual(sd, self.state_dir.resolve())
+        self.assertEqual(tid, "42")
+
+    def test_session_dir_state_dir_does_not_self_heal_for_unowned_task(self) -> None:
+        # The healed cwd-resolved project must actually own the task id, or
+        # self-heal refuses too — never silently act on the wrong task.
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        os.environ["FLEET_TASK_ID"] = "no-such-task"
+        with self.assertRaises(task_context.TaskNotFound) as cm:
+            task_context.resolve(cwd=self.project)
+        self.assertIn("--project", str(cm.exception))
+
+    def test_session_dir_state_dir_explicit_id_alone_does_not_self_heal(self) -> None:
+        # An explicit --task-id CLI argument is not the driver-pane signal —
+        # only FLEET_TASK_ID is (a leader-side command like `cleanup <id>
+        # --project` also takes an explicit id but never sets it, and must
+        # keep demanding --project rather than leaning on cwd).
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        with self.assertRaises(task_context.TaskNotFound) as cm:
+            task_context.resolve(explicit_id="42", cwd=self.project)
+        self.assertIn("--project", str(cm.exception))
+
+    def test_explicit_id_with_task_prefix_normalized(self) -> None:
+        # `fleet-agent done task-42` and `fleet-agent done 42` resolve alike
+        # (Issue #315) — task_dir() would otherwise double the prefix.
+        os.environ["FLEET_STATE_DIR"] = str(self.state_dir)
+        sd, tid = task_context.resolve(explicit_id="task-42", cwd=self.project)
+        self.assertEqual(tid, "42")
+
+    def test_fleet_task_id_env_with_task_prefix_normalized(self) -> None:
+        os.environ["FLEET_STATE_DIR"] = str(self.state_dir)
+        os.environ["FLEET_TASK_ID"] = "task-42"
+        sd, tid = task_context.resolve(cwd=self.project)
+        self.assertEqual(tid, "42")
+
+
+class NormalizeTaskIdTests(unittest.TestCase):
+    def test_strips_leading_task_prefix(self) -> None:
+        self.assertEqual(task_context.normalize_task_id("task-q-guard"), "q-guard")
+
+    def test_leaves_unprefixed_id_alone(self) -> None:
+        self.assertEqual(task_context.normalize_task_id("q-guard"), "q-guard")
+
+    def test_only_strips_one_leading_prefix(self) -> None:
+        self.assertEqual(task_context.normalize_task_id("task-task-x"), "task-x")
 
 
 class ResolveProjectStateDirTests(unittest.TestCase):
@@ -179,6 +239,17 @@ class ResolveProjectStateDirTests(unittest.TestCase):
         os.environ["FLEET_STATE_DIR"] = str(session)
         with self.assertRaises(task_context.ProjectNotFound) as cm:
             task_context.resolve_project_state_dir(cwd=Path("/tmp"))
+        self.assertIn("--project", str(cm.exception))
+
+    def test_leader_session_dir_never_self_heals_via_cwd(self) -> None:
+        # Unlike task_context.resolve() (Issue #315), the project-centric,
+        # leader-side resolver never falls back to cwd for a session dir — it
+        # always demands --project outright, even when cwd would resolve.
+        session = state.session_dir("main")
+        session.mkdir(parents=True, exist_ok=True)
+        os.environ["FLEET_STATE_DIR"] = str(session)
+        with self.assertRaises(task_context.ProjectNotFound) as cm:
+            task_context.resolve_project_state_dir(cwd=self.project)
         self.assertIn("--project", str(cm.exception))
 
     def test_cwd_fallback_resolves_registered_project(self) -> None:

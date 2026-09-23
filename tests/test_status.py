@@ -408,6 +408,20 @@ class StatusJsonTests(unittest.TestCase):
         self.assertIsNone(obj["last_event"])
         self.assertIsNone(obj["result"])
 
+    def test_json_task_prefixed_id_normalized(self) -> None:
+        # `fleet status task-1 --json` must not look for task-task-1 (#315).
+        sd = make_project(self.fleet_home, "demo", self.project)
+        state.save_task(sd, "1", {
+            "title": "bare", "status": "spawning", "formation": "solo",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus", "status": "running"}],
+        })
+        result = run_fleet("status", "task-1", "--json", "--project", "demo",
+                           fleet_home=self.fleet_home, cwd=self.project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        obj = json.loads(result.stdout)
+        self.assertEqual(obj["task_id"], "1")
+
     def test_json_reports_gate_result(self) -> None:
         sd = make_project(self.fleet_home, "demo", self.project)
         state.save_task(sd, "1", {

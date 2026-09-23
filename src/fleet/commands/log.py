@@ -57,9 +57,11 @@ def run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
+    task_id = task_context.normalize_task_id(args.task_id) if args.task_id else None
+
     events = read_events(state_dir / "events.jsonl")
-    if args.task_id is not None:
-        events = [e for e in events if str(e.get("task_id", "")) == args.task_id]
+    if task_id is not None:
+        events = [e for e in events if str(e.get("task_id", "")) == task_id]
     if args.type:
         types = set(args.type)
         events = [e for e in events if e.get("type") in types]

@@ -56,6 +56,16 @@ class SendPromptTests(unittest.TestCase):
         self.assertIn("no driver-prompt.md", r.stderr)
 
     @requires_live_tmux
+    def test_task_prefixed_id_normalized(self) -> None:
+        # `fleet-agent send-prompt task-999` must not look for task-task-999
+        # (Issue #315): same "no driver-prompt.md" error, unprefixed path.
+        r = run_fleet_agent("send-prompt", "task-999", "--project", self.project_name,
+                            fleet_home=self.fleet_home)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no driver-prompt.md", r.stderr)
+        self.assertNotIn("task-task-999", r.stderr)
+
+    @requires_live_tmux
     def test_no_session(self) -> None:
         td = state.task_dir(self.state_dir, "1")
         td.mkdir(parents=True)
