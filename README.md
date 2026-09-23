@@ -428,10 +428,12 @@ Install zellij with `brew install zellij` — Homebrew bottles are fetched with
 curl and carry no quarantine attribute.
 
 A zellij release binary downloaded with a browser instead inherits Apple's
-`com.apple.quarantine` attribute. Gatekeeper then blocks the first exec with a
-"cannot verify developer" dialog and kills the process (`fleet preflight`
-reports the kill, with a quarantine hint). The dialog's **Move to Trash**
-button deletes the binary — don't click it.
+`com.apple.quarantine` attribute. Left unchecked, Gatekeeper would block the
+first exec with a "cannot verify developer" dialog and kill the process —
+whose **Move to Trash** button deletes the binary. `fleet preflight` (and the
+zellij backend itself) checks for the attribute *before* exec'ing and refuses
+to run a quarantined binary instead, reporting the fix below — so that dialog
+should never appear from fleet.
 
 - **Fix:** confirm where the binary came from, then either clear the flag
   (`xattr -d com.apple.quarantine <path>`) or re-download with `curl` instead

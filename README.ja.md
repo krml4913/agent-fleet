@@ -430,10 +430,12 @@ zellij は `brew install zellij` でインストールする — Homebrew の bo
 取得されるため quarantine 属性が付かない。
 
 ブラウザでダウンロードした zellij のリリースバイナリには、代わりに Apple の
-`com.apple.quarantine` 属性が付く。Gatekeeper は初回実行時に「開発元を確認できません」
-という趣旨のダイアログを出してプロセスを kill する（`fleet preflight` はこの kill を
-quarantine のヒント付きで報告する）。ダイアログの **ゴミ箱に入れる** ボタンは
-バイナリを削除するので押さないこと。
+`com.apple.quarantine` 属性が付く。何も対策しなければ、Gatekeeper は初回実行時に
+「開発元を確認できません」という趣旨のダイアログを出してプロセスを kill する —
+このダイアログの **ゴミ箱に入れる** ボタンはバイナリを削除する。`fleet preflight`
+（および zellij バックエンド自体）は exec する**前**に quarantine 属性の有無を
+チェックし、付いていれば実行を拒否して下記の対処法を報告する — fleet からはこの
+ダイアログが出ないはず。
 
 - **対処:** バイナリの入手元を確認したうえで、フラグを外す
   （`xattr -d com.apple.quarantine <path>`）か、ブラウザではなく `curl` で
