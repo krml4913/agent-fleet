@@ -291,7 +291,7 @@ A project that is no longer needed can be removed from the registry with
     projects.yaml                      ← global registry (name → repo map)
     projects.yaml.lock                 ← for flock
     global/                            ← reserved namespace for cross-project concerns (§6, §5.6)
-      config.yaml                      ← global config (`mux: zellij|tmux`; `fleet config`; see below)
+      config.yaml                      ← global config (`mux`, `leader_agent`; `fleet config`; see below)
       leader-memory/                   ← two-tier leader memory: GLOBAL layer (loaded every session)
         MEMORY.md      # index
         GUIDE.md       # discipline
@@ -343,12 +343,22 @@ Settings that are not per-project live in `fleet-state/global/config.yaml`
 | Key | Values | Built-in default |
 |---|---|---|
 | `mux` | `zellij` \| `tmux` | `zellij` (every platform) |
+| `leader_agent` | `vendor:model` (validated like `fleet leader --agent`, via `fleet.agents.parse_spec`) | `claude:opus` |
 
-- **Selection rule** (`fleet.mux.backend_selection()`), first hit wins:
-  `FLEET_MUX` env → `mux` in `config.yaml` → the built-in default. `fleet
-  preflight` prints the selected backend and the source (`env` / `config` /
-  `default`). `FLEET_NO_MUX` / `FLEET_ZELLIJ` are separate switches and are not
-  part of this rule. Before #299 the built-in default was tmux off Windows.
+- `mux` is **enumerable** (`config.KEYS`): the value must be one of a fixed,
+  known set. `leader_agent` is **free-form** (`config.FREEFORM`): any value
+  `fleet.agents.parse_spec` accepts is valid, so it can't be enumerated —
+  unknown vendors are rejected with the supported list, same as `--agent`.
+- **Selection rule for `mux`** (`fleet.mux.backend_selection()`), first hit
+  wins: `FLEET_MUX` env → `mux` in `config.yaml` → the built-in default.
+  `fleet preflight` prints the selected backend and the source (`env` /
+  `config` / `default`). `FLEET_NO_MUX` / `FLEET_ZELLIJ` are separate switches
+  and are not part of this rule. Before #299 the built-in default was tmux off
+  Windows.
+- **Selection rule for `leader_agent`** (issue #305), first hit wins: `fleet
+  leader --agent` (the flag itself) → `leader_agent` in `config.yaml` → the
+  built-in default `claude:opus`. No env layer — `--agent` is the consumer's
+  own override, parallel to `FLEET_MUX` for `mux`.
 - **Reads are tolerant**, like `notify.load_config`: a missing file means the
   defaults; an unreadable / non-mapping / invalid-YAML file or an invalid value
   prints one `warn:` to stderr and is ignored. Unknown keys in the file are
@@ -361,6 +371,7 @@ Settings that are not per-project live in `fleet-state/global/config.yaml`
   file that is not a valid mapping is refused rather than overwritten.
 - `fleet config` / `get` report the config layer (file, else default) and only
   *note* an active `FLEET_MUX`; the env layer is applied by `fleet.mux`.
+  `leader_agent` has no such env note (it has no env layer).
 
 #### Project Resolution Logic
 

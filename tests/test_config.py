@@ -152,6 +152,50 @@ class ConfigLoadTests(_ConfigTestCase):
         self.assertIn("mux", str(cm.exception))
 
 
+class LeaderAgentConfigTests(_ConfigTestCase):
+    """``leader_agent`` is free-form (validated like ``--agent``), not enumerable."""
+
+    def test_default_is_built_in_claude_opus(self) -> None:
+        self.assertEqual(config.get("leader_agent"), ("claude:opus", "default"))
+
+    def test_configured_value(self) -> None:
+        self.write("leader_agent: claude:claude-opus-5-5\n")
+        self.assertEqual(
+            config.get("leader_agent"), ("claude:claude-opus-5-5", "config")
+        )
+
+    def test_value_is_stripped_but_not_lowercased(self) -> None:
+        # Unlike ``mux``, a spec's model half may be case-sensitive, so
+        # leader_agent is only stripped (like --agent), never lowercased.
+        self.write("leader_agent: ' codex:GPT-5.5 '\n")
+        self.assertEqual(config.get("leader_agent"), ("codex:GPT-5.5", "config"))
+
+    def test_invalid_spec_warns_lists_the_parser_error_and_falls_back(self) -> None:
+        self.write("leader_agent: not-a-spec\n")
+        values, err = self.load_with_stderr()
+        self.assertEqual(values, {})
+        self.assertIn("warn:", err)
+        self.assertIn("invalid value for leader_agent", err)
+        self.assertIn("vendor:model", err)
+        self.assertEqual(config.get("leader_agent"), ("claude:opus", "default"))
+
+    def test_unsupported_vendor_warns_and_falls_back(self) -> None:
+        self.write("leader_agent: nosuchvendor:model\n")
+        values, err = self.load_with_stderr()
+        self.assertEqual(values, {})
+        self.assertIn("unsupported vendor", err)
+        self.assertEqual(config.get("leader_agent"), ("claude:opus", "default"))
+
+    def test_mux_and_leader_agent_both_load_from_the_same_file(self) -> None:
+        self.write("mux: tmux\nleader_agent: codex:gpt-5.5\n")
+        values, err = self.load_with_stderr()
+        self.assertEqual(values, {"mux": "tmux", "leader_agent": "codex:gpt-5.5"})
+        self.assertEqual(err, "")
+
+    def test_all_keys_includes_both(self) -> None:
+        self.assertEqual(config.ALL_KEYS, ("mux", "leader_agent"))
+
+
 class ConfigSetTests(_ConfigTestCase):
     def test_set_creates_the_file_and_dir(self) -> None:
         self.assertEqual(config.set_value("mux", "tmux"), "tmux")
@@ -186,6 +230,32 @@ class ConfigSetTests(_ConfigTestCase):
             config.set_value("mux", "screen")
         self.assertIn("screen", str(cm.exception))
         self.assertIn("tmux, zellij", str(cm.exception))
+        self.assertFalse(self.path.exists())
+
+    def test_set_leader_agent_valid_spec(self) -> None:
+        self.assertEqual(
+            config.set_value("leader_agent", "claude:claude-opus-5-5"),
+            "claude:claude-opus-5-5",
+        )
+        self.assertEqual(
+            self.path.read_text(encoding="utf-8"),
+            "leader_agent: claude:claude-opus-5-5\n",
+        )
+        self.assertEqual(
+            config.get("leader_agent"), ("claude:claude-opus-5-5", "config")
+        )
+
+    def test_set_leader_agent_rejects_missing_colon(self) -> None:
+        with self.assertRaises(config.ConfigError) as cm:
+            config.set_value("leader_agent", "opus")
+        self.assertIn("invalid value for leader_agent", str(cm.exception))
+        self.assertIn("vendor:model", str(cm.exception))
+        self.assertFalse(self.path.exists())
+
+    def test_set_leader_agent_rejects_unsupported_vendor(self) -> None:
+        with self.assertRaises(config.ConfigError) as cm:
+            config.set_value("leader_agent", "nosuchvendor:model")
+        self.assertIn("unsupported vendor", str(cm.exception))
         self.assertFalse(self.path.exists())
 
     def test_set_refuses_to_overwrite_a_corrupt_file(self) -> None:
@@ -251,6 +321,34 @@ class ConfigCmdTests(_ConfigTestCase):
         self.assertIn("invalid value for mux", r.stderr)
         self.assertIn("tmux, zellij", r.stderr)
         self.assertFalse(self.path.exists())
+
+    def test_no_args_prints_leader_agent_default(self) -> None:
+        r = self._fleet()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("leader_agent: claude:opus (default)", r.stdout)
+
+    def test_set_then_print_and_get_leader_agent(self) -> None:
+        r = self._fleet("set", "leader_agent", "claude:claude-opus-5-5")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("leader_agent: claude:claude-opus-5-5", r.stdout)
+
+        r = self._fleet()
+        self.assertIn("leader_agent: claude:claude-opus-5-5 (config)", r.stdout)
+
+        r = self._fleet("get", "leader_agent")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "claude:claude-opus-5-5\n")
+
+    def test_set_leader_agent_invalid_spec_fails(self) -> None:
+        r = self._fleet("set", "leader_agent", "opus")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("invalid value for leader_agent", r.stderr)
+        self.assertFalse(self.path.exists())
+
+    def test_help_lists_leader_agent_and_its_format(self) -> None:
+        r = self._fleet("--help")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("leader_agent=vendor:model", r.stdout)
 
     def test_env_override_is_noted_but_get_reports_the_config_layer(self) -> None:
         self._fleet("set", "mux", "tmux")

@@ -98,7 +98,8 @@ git add -A && git -c user.email=t@x -c user.name=t commit -m init
 ```
 
 これは `fleet-trial` というマルチプレクサセッションを作成し、その中で leader エージェント
-（デフォルトは `claude:opus`）を動かし、フォアグラウンドでアタッチする。セッションは
+（デフォルトは `claude:opus`。永続的に設定を変えたい場合は
+[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）を動かし、フォアグラウンドでアタッチする。セッションは
 プロジェクトごとに単一インスタンスである。いつでもデタッチでき（tmux は `C-b d`、zellij は `Ctrl o` のあと `d`）、leader は
 動き続ける。あなたが常駐するのはこの 1 つのペインだ。
 
@@ -234,9 +235,9 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | コマンド | 用途 |
 |---|---|
 | `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
-| `fleet config [get <key> \| set <key> <value>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定。現状のキーは `mux` = `zellij` \| `tmux` のみ。[マルチプレクサの選択](#マルチプレクサの選択) を参照。 |
+| `fleet config [get <key> \| set <key> <value>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec で `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
-| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`、デフォルトエージェントは `claude:opus`）。 |
+| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`）。エージェントの優先順位: `--agent` > グローバル config の `leader_agent` > 組み込みデフォルト `claude:opus`。 |
 | `fleet attach [target] [--project P] [--session LABEL]` | タスクの driver ペイン（そのタスクを所有するセッション `fleet-<owner_session>` 内。`--project` でタスクを特定）、またはデフォルトで `fleet-<LABEL>` の `leader` ペインにアタッチする（`--session`、デフォルトは `$FLEET_SESSION`、なければ `main`）。対象セッションが動いていなければ、稼働中のセッションを一覧表示する。 |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | プロジェクト情報、タスク一覧、直近のイベントを表示する。`--all` 時はセッションの scope 内 project のみ表示（`--unscoped` で全件）。 |
 | `fleet sessions` | leader セッションと全 PJ の実行中タスクを一覧表示する。 |
@@ -357,6 +358,28 @@ config は手で編集せず CLI で管理する:
 `fleet preflight` で確認できる。`FLEET_NO_MUX` と `FLEET_ZELLIJ` は従来どおり。
 config ファイルがなければデフォルトを使うだけで、読めない / 不正な config は警告を
 出して無視されるだけであり、コマンドが止まることはない。
+
+---
+
+## leader のエージェントを選ぶ
+
+`fleet leader` は leader ペインをエージェント spec（`vendor:model` 形式。例:
+`claude:opus`、`claude:claude-opus-5-5`、`codex:gpt-5.5`）で起動する。優先順位は、
+最初に該当したものが勝つ:
+
+1. コマンドラインの **`fleet leader --agent <spec>`**。
+2. グローバル config `fleet-state/global/config.yaml` の **`leader_agent:`**。
+3. 組み込みのデフォルト: **`claude:opus`**。
+
+```bash
+./fleet config set leader_agent claude:claude-opus-5-5   # 永続
+./fleet leader --agent claude:claude-opus-5-5              # その起動だけの一時指定
+```
+
+値は `--agent` と同じ方法で検証される（未知の vendor は、サポート対象を列挙して
+拒否される）。config ファイル中の `leader_agent` が欠けている、または不正な場合は、
+他のグローバル config キーと同様に警告を出して組み込みのデフォルトにフォールバック
+するだけであり、コマンドが止まることはない。
 
 ---
 

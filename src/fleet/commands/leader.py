@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import agents as agents_mod
+from .. import config as config_mod
 from .. import leader_prompt as lp
 from .. import prompt_pointer
 from .. import state as state_mod
@@ -28,7 +29,10 @@ from .. import mux
 from ..events import append_event
 
 
-DEFAULT_LEADER_AGENT = "claude:opus"
+#: Built-in default when neither --agent nor the ``leader_agent`` config key
+#: is set. Canonical definition lives in :mod:`fleet.config` (also its
+#: ``leader_agent`` default); re-exported here for callers of this module.
+DEFAULT_LEADER_AGENT = config_mod.DEFAULT_LEADER_AGENT
 DEFAULT_SESSION_LABEL = "main"
 
 # commands/leader.py → parents[0]=commands, [1]=fleet, [2]=src, [3]=clone root.
@@ -55,8 +59,12 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--agent",
-        default=DEFAULT_LEADER_AGENT,
-        help=f"Agent spec for the leader pane (default: {DEFAULT_LEADER_AGENT})",
+        default=None,
+        help=(
+            "Agent spec for the leader pane. Precedence: this flag > "
+            "'leader_agent' in global config (fleet config set leader_agent "
+            f"<vendor:model>) > built-in default ({DEFAULT_LEADER_AGENT})."
+        ),
     )
     p.add_argument(
         "--attach",
@@ -92,6 +100,12 @@ def run(args: argparse.Namespace) -> int:
     label = getattr(args, "name", None) or DEFAULT_SESSION_LABEL
     session = f"fleet-{label}"
 
+    # Precedence: --agent (explicit) > 'leader_agent' in global config > the
+    # built-in default. config.get() already falls back tolerantly (warns and
+    # ignores) if the stored value is malformed, so agent_spec here is always
+    # at least the built-in default.
+    agent_spec = getattr(args, "agent", None) or config_mod.get("leader_agent")[0]
+
     m = mux.get()
     if not m.available():
         print(f"error: {m.name} not on PATH", file=sys.stderr)
@@ -105,7 +119,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        agents_mod.parse_spec(args.agent)
+        agents_mod.parse_spec(agent_spec)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -129,8 +143,8 @@ def run(args: argparse.Namespace) -> int:
     # Session display name so the leader is identifiable in the session picker.
     session_name = state_mod.leader_agent_name(label)
 
-    cli = agents_mod.cli_command(args.agent)
-    cli = cli + agents_mod.session_name_launch_args(args.agent, session_name)
+    cli = agents_mod.cli_command(agent_spec)
+    cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
 
     try:
         m.new_session(
@@ -149,7 +163,7 @@ def run(args: argparse.Namespace) -> int:
 
     record: dict = {
         "label": label,
-        "agent": args.agent,
+        "agent": agent_spec,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "pane": f"{session}:leader",
     }
@@ -173,7 +187,7 @@ def run(args: argparse.Namespace) -> int:
             # Name the session BEFORE pasting: vendors with no launch-time flag
             # (codex) rename via post-ready keystrokes; claude is already named
             # at launch → session_rename_keys is [] → no-op.
-            for step, enter in agents_mod.session_rename_keys(args.agent, session_name):
+            for step, enter in agents_mod.session_rename_keys(agent_spec, session_name):
                 mux.send_step(session, "leader", step, enter=enter, backend=m)
                 time.sleep(0.6)
             prompt_pointer.paste_pointer(
@@ -187,12 +201,12 @@ def run(args: argparse.Namespace) -> int:
     append_event(
         session_dir / "events.jsonl",
         "leader_start",
-        agent=args.agent,
+        agent=agent_spec,
         session=session,
         label=label,
     )
 
-    print(f"leader started: session={session}, agent={args.agent}")
+    print(f"leader started: session={session}, agent={agent_spec}")
     print(f"  attach: {m.attach_hint(session)}")
 
     if args.attach:
