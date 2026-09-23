@@ -127,14 +127,15 @@ Each has a GitHub issue. They are also listed in `windows-support.md` §11.
 
 - **#256** codex driver under zellij: codex is not installed on the Windows
   machine.
-- **#257** `fleet attach` in a real, visible terminal.
 - **#258** zellij backend on macOS / Linux (the mux layer is covered by the
   `unittest-zellij-linux` CI job; a live driver E2E with a real agent CLI is
   still open).
-- **#259** claude's workspace-trust dialog needs one manual attach per
-  worktree. There is a proposal for an opt-in `fleet init --trust-claude`; it
-  was deferred because it writes to the user's claude config.
-- **#261** re-run a live tmux E2E of multi-stage handoff after #253.
+- **#261** re-run a live tmux E2E of multi-stage handoff after #253. The same
+  shape as the zellij live suite (a `tests/test_mux_tmux_live.py` + a Linux CI
+  job with tmux installed) would cover the mux layer.
+
+Closed since: **#257** (visible-terminal attach, verified 2026-09-20) and
+**#259** (workspace trust — worktrees sit inside the trusted clone).
 
 ## 7. First fleet-leader run (2026-09-19)
 
@@ -176,6 +177,29 @@ Runtime config the leader created: project formations `solo`,
 `pair_review_claude` and `smoke_verify` (a throwaway E2E smoke), global roles
 `driver`, `implementer` and `code-reviewer`, and `fleet notify on` for
 agent-fleet.
+
+
+### 7.1 Continued (2026-09-20 → 23)
+
+- **attach** (#257) verified in a real terminal; `fleet attach` had resolved
+  `fleet-<project>` instead of `fleet-<owner_session>` (#295/#296) and its
+  "another client is attached" note was unreadable (#297/#298, it now waits for
+  Enter on a TTY).
+- **Live zellij backend CI** (#301, Refs #258): `tests/test_mux_zellij_live.py`
+  plus the `unittest-zellij-linux` job. Its first Linux run found two real
+  backend bugs — the #5594 temp client never attached without a controlling
+  terminal, and SIGINT was ignored across exec so nothing in a POSIX pane could
+  be interrupted — both fixed there.
+- **Global config** (#299/#300): `fleet-state/global/config.yaml` with
+  `mux: zellij|tmux`, `fleet config get|set`, precedence env > config > default,
+  and **zellij as the default on every platform** (POSIX users keep tmux with
+  `fleet config set mux tmux` or `FLEET_MUX=tmux`).
+- **Leader-window recovery** (#302/#303): the notifier used to find the leader
+  only by the `leader` window name, so a closed-and-recreated leader tab
+  stranded notifications for a day (nothing was lost — the #293 queue and log
+  made it diagnosable). It now finds the pane by the leader agent's session name
+  and renames the window back; `fleet status` / `fleet sessions` show a pending
+  queue.
 
 ## 6. Where to look
 
