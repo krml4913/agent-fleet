@@ -9,6 +9,8 @@ development **Phase** (per `docs/design.md`).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
 ### change: make solo formations stop at the user approval gate
 
 The shipped `solo` template now includes `user_approval: required`, and the
@@ -310,6 +312,658 @@ and defeats fleet's shared multi-vendor memory. Mirrors the existing note in
 driver's part is finished — merging the PR and tearing down the worktree/branch
 belong to the leader. The leader/driver authority split was previously implicit
 discipline that the driver prompt did not mention. Refs #188.
+
+### feat: agent aliases — name a whole `vendor:model` spec and use the name anywhere a spec goes
+
+A new `agent_aliases` map in `fleet-state/global/config.yaml`
+(`fleet config set agent_aliases.<name> <vendor:model>`, plus `get` / the new
+`unset`) names a full agent spec. The alias is accepted by formation `agent` /
+`peer_review.agent`, `fleet-agent start --agent`, `fleet leader --agent` and
+the `leader_agent` config key (`fleet config set leader_agent deep`; `fleet
+config` shows `leader_agent: deep -> claude:opus`). It is resolved once
+(`fleet.agents.resolve_spec`) where the spec enters task / leader state:
+task.yaml, events, the dashboard, cost/usage and `session.json` carry the
+resolved spec, with the alias name kept as `agent_alias`, so editing an alias
+never changes a running task or leader. Alias names cannot contain `:`, targets
+must be full specs (no alias chains), and an unknown alias is an error naming
+the known aliases — including in `formation.validate`, which now also checks
+stage `agent` / `peer_review.agent` specs. `fleet config unset <key>` also
+clears a scalar key back to its default.
+
+### feat: `fleet-agent ask` also reaches the owning leader pane when `fleet notify` is on
+
+With `notify_leader_on_driver_done` on (`fleet notify --project P on`), a driver's
+`fleet-agent ask "<q>"` now enqueues a `kind: "ask"` record (status `awaiting_orders`,
+carrying the question) into the owner session's leader queue and spawns the detached
+notifier, exactly as `done` does — the shared enqueue/spawn logic moved from
+`done._maybe_notify_leader` into `leader_notifier.push_to_leader`. The injected line
+tells the leader to answer with `fleet-agent inbox <id> "<answer>" --project <P>`
+(or relay to the user) instead of "pull the diff and run the gate"; a mixed batch
+keeps the gate instruction for done entries. An ask and a later done for the same
+task are independent records and never suppress each other. The OS notification
+`ask` sends is unchanged. Documented in design §10.1/§10.3, README (en/ja) and the
+leader prompt. Closes #287.
+
+### fix: `fleet attach` targets `fleet-<owner_session>` instead of `fleet-<project>`
+
+Since #166 multiplexer sessions are `fleet-<label>` (one per leader session), but
+`fleet attach` still built `fleet-<project name>`, so it reported "session not running"
+for tasks that were running fine in `fleet-main`. A task target now loads the task and
+attaches to `fleet-<task_owner_session(task)>` (the same resolution `inbox`, `cleanup`,
+the orchestrator and the leader notifier use), with a clear `task not found` error for
+an unknown id. The `leader` target no longer needs a project: it takes a new
+`--session LABEL` (default `$FLEET_SESSION`, else `main`). When the session isn't
+running the error lists the live sessions (the `fleet sessions` data) and the corrected
+hint is `fleet leader --name <label>` (the old `fleet leader --project` flag never
+existed). Help text and README (en/ja) updated; the README `fleet leader` row now
+shows `--name LABEL`. Closes #295.
+
+### fix: `fleet attach` waits for Enter after the "another client is attached" note (zellij)
+
+When another client is already attached to the session, `ZellijMux.attach` cannot focus
+the task tab and prints "press Ctrl t, then N" instead — but `zellij attach` took over
+the screen immediately, so the note flashed by unread and only surfaced in the scrollback
+after detaching. When both stdin and stderr are a TTY it now prints `press Enter to
+attach…` and waits before handing the terminal over (EOF on stdin just continues).
+Without a TTY (piped runs, CI, tests) nothing is read and behaviour is unchanged, and the
+no-other-client path (background focus helper) is untouched. Closes #297.
+
+### change: replace direct changelog edits with changelog fragments
+
+New PRs now add one `changelog.d/<task-id>.md` fragment instead of editing
+`CHANGELOG.md` `## [Unreleased]` directly, removing the GitHub-side mergeability
+conflict that parallel changelog edits still hit. A new on-demand
+`fleet changelog` command assembles fragments into `CHANGELOG.md` under
+`## [Unreleased]` or a versioned heading and deletes the assembled fragment files.
+The existing `CHANGELOG.md merge=union` rule stays as a fallback for old branches
+or manual edits. Closes #232.
+
+### fix: selection dialogs no longer count as a ready prompt
+
+An un-numbered selection menu (e.g. claude's "Claude in Chrome extension
+detected" startup dialog, `❯ No, keep browser tools off`) matched the adapter's
+`ready` regex, so the prompt deliverer pasted the driver-prompt pointer into the
+dialog and the leader notifier could inject into it. Adapters now expose
+`is_ready` / `is_gated` / `is_dialog`: a dialog is detected structurally at the
+bottom of the pane (a `Enter to confirm` / `Esc to …` footer, or an indented
+un-numbered cursor option with an aligned sibling option), vetoes readiness, and
+is reported as a boot gate (`awaiting_orders`). Keyword matches in conversation
+history (e.g. "login") still do not veto readiness.
+
+### feat: add transient config editor
+
+Adds `fleet edit`, a token-gated localhost editor for runtime formations and
+roles with cascade visibility, drift markers, validation-on-save, atomic writes,
+stale-buffer protection, and create/copy-down flows.
+
+### change: teach driver prompts the user approval gate
+
+The shared driver prompt now tells every driver to use `fleet-agent ask` instead
+of the agent CLI's built-in interactive question tool, and documents that
+`fleet-agent done` raises a `user_approval` gate without settling it. Drivers may
+relay an in-pane user approval with `fleet-agent approve` only when the user gives
+explicit approval of that finished deliverable; otherwise the leader/user settles
+the gate.
+
+### fix: driver prompt states the working directory; `CLAUDE_EFFORT` no longer leaks into panes
+
+- The driver prompt now has a short "Working directory" section: with
+  `workspace=worktree` it names the task worktree (absolute path) and branch,
+  with `workspace=none` the project root, and it forbids editing the fleet
+  state (`fleet-state/`, `$FLEET_STATE_DIR`, the task dir) directly — only
+  through `fleet-agent` commands, plus appending to the task's `outbox.md`.
+  Previously a driver whose task description did not say where to work could
+  commit inside its task dir in the agent-fleet clone.
+- The zellij pane launcher now also strips `CLAUDE_EFFORT` (the creating
+  Claude Code session's effort level, which was silently forced onto every
+  driver/leader pane) and `AI_AGENT` (the creating agent's identity).
+
+### test: de-flake `test_git_worktree` copytree vs. git auto-maintenance (#272)
+
+The shared template repo in `tests/test_git_worktree.py` now sets
+`maintenance.auto=false` and `gc.auto=0` right after `git init`, so
+`git commit` no longer spawns a background maintenance run that creates and
+removes `.git/objects/maintenance.lock` while `shutil.copytree` is copying it.
+The per-test copy also ignores `*.lock` as a guard. The template approach (one
+build, a copy per test) is unchanged, so there is no speed cost.
+
+### change: zellij is now the default multiplexer on every platform; new global config (`fleet config`)
+
+> **Behaviour change for existing macOS / Linux users.** The built-in default
+> multiplexer used to be tmux everywhere except Windows; it is now **zellij on
+> every platform**. If you run fleet on tmux and want to keep it, use **either**:
+>
+> - `fleet config set mux tmux` — persistent (writes `fleet-state/global/config.yaml`)
+> - `FLEET_MUX=tmux fleet ...` — per shell / per command
+>
+> Do this before your next fleet command if tmux sessions are still running:
+> fleet only looks for sessions in the selected backend, so under the new
+> default it will not see them. zellij on macOS / Linux is less exercised than
+> tmux there (#258).
+
+New global config file `fleet-state/global/config.yaml` (cross-project, next to
+`global/leader-memory/`), first key `mux: zellij|tmux`, read through the new
+`fleet.config` module (cached per process; a missing file means the defaults, an
+unreadable or invalid file only warns and is ignored). Backend selection is now
+`FLEET_MUX` env > global config > built-in default; `FLEET_NO_MUX` /
+`FLEET_ZELLIJ` are unchanged. `fleet.mux.backend_selection()` returns the name
+and its source; `WINDOWS_DEFAULT_BACKEND` is gone (`DEFAULT_BACKEND` is
+`zellij`).
+
+`fleet config` prints every key with its source, `fleet config get <key>` prints
+one value, and `fleet config set <key> <value>` writes it through the locked
+atomic-write helpers; an unknown key or invalid value is rejected with the valid
+ones listed. `fleet preflight` gains a `mux` line showing the selected backend
+and where the choice came from (`env` / `config` / `default`; the default case
+names the two ways back to tmux). Documented in README (en/ja) and
+`docs/design.md` (§5.3). Tests no longer assume tmux is the default off Windows
+(backend-selection tests pin `FLEET_HOME` and are platform-independent). Closes
+#299.
+
+### chore: handoff note records #262 and the usage follow-up (#264)
+
+### feat: `leader_agent` global config key sets the default `fleet leader` agent
+
+`fleet leader` always launched with the hardcoded default `claude:opus`, so the
+only way to change the leader's model persistently was typing `--agent` on
+every launch. A new `leader_agent` key in `fleet-state/global/config.yaml`
+(`fleet config set leader_agent <vendor:model>`) is validated with the same
+`vendor:model` parser `--agent` uses (an unknown vendor is rejected with the
+supported list) and is free-form rather than enumerable, unlike `mux`
+(`fleet.config.FREEFORM` alongside the existing `fleet.config.KEYS`).
+Precedence: `fleet leader --agent` > `leader_agent` in the config > the
+built-in default `claude:opus`. `fleet config` / `get` show it with its
+source, like every other key; a missing or malformed value warns and falls
+back to the default, same as `mux`. `fleet leader --help` and the README
+(en/ja) and design.md document the new key. Closes #305.
+
+### chore: follow-up nits from the `merge` / `cleanup` leader-only guard review
+
+Refs #188. Reformatted the collapsed multi-`with` statements in `tests/test_merge.py`,
+documented `--allow-from-driver` on `merge` / `cleanup` in `README.md` / `README.ja.md`,
+and made `deferred_launch.running_in_task_pane` and `task_context.in_driver_pane`
+share one `FLEET_TASK_ID` reader (`task_context.driver_pane_task_id`). No behavior change.
+
+### feat: `merge` / `cleanup` refuse to run from a driver pane
+
+`fleet-agent merge` and `fleet-agent cleanup` are leader-only, but that was
+enforced by driver-prompt discipline alone (Refs #188). They now refuse with a
+"leader-only action" error when run from a driver pane, detected by the
+`FLEET_TASK_ID` that `launch_stage_driver` injects into every driver pane (tmux
+and zellij alike); the leader pane and a user's own terminal never carry it and
+are unaffected. `--allow-from-driver` overrides the guard on purpose — `--force`
+does not, since it only skips the terminal-status check. `docs/prompts/driver-base.md`
+now lists `merge`, `cleanup`, `approve`, `reject` and `start` as leader-only.
+This is a soft guard, not role enforcement: the state-machine / role-gating
+option in #188 stays open.
+
+### fix: a renamed or recreated leader tab no longer strands leader notifications; a stuck queue is visible in `fleet status` / `fleet sessions`
+
+The leader notifier addressed the leader pane only as `fleet-<label>:leader`. Closing the
+leader tab and starting the leader again leaves a tab with the multiplexer's default name
+(`Tab #3`), so every poll failed with "tab not found" and two driver tasks waited in
+`awaiting_orders` for a day while the queue sat in `leader-pending.jsonl`.
+
+- **Find the leader by its pane title.** When `capture` fails and the `leader` window is
+  missing, the notifier looks for the pane titled with the leader agent's session name
+  (`<label>-leader`, the name `fleet leader` launches it with; it survives a window rename),
+  renames that window back to `leader`, logs it to `leader-notifier.log`, and carries on. It
+  only acts on a `fleet-<label>` session, matches the name as a whole token (so a driver
+  named `<project>-<task>-<role>` is never taken for the leader), and does nothing when no
+  pane or more than one window matches. Works on tmux and zellij: the `Mux` interface gains
+  `list_panes(session)` (window name, window id, pane title) and `rename_window(session,
+  window_id, new_name)`. A leader agent that does not put its session name in the pane title
+  (e.g. codex) is not found this way; the queue still stays pending and is re-armed as before.
+- **Show what is pending.** `fleet status` (project view and `--all`) and `fleet sessions`
+  print `N leader notifications pending (oldest 3h ago)` per session whose
+  `leader-pending.jsonl` is not empty; nothing is printed in the normal, empty case.
+  `fleet sessions` lists a session that has only a stranded queue too, and the dashboard
+  snapshot (`collect_sessions`) carries the same `pending` summary.
+
+Closes #302 (items 1 and 2; a `fleet leader --adopt` / `fleet sessions repair` command, item
+3, is not part of this).
+
+### fix: `fleet-agent memory write` drops the seeded "(no entries yet …)" placeholder
+
+The first `fleet-agent memory write` on a fresh store appended the real index
+line but left the seeded `- *(no entries yet — …)*` placeholder in `MEMORY.md`.
+`_update_index` now removes that placeholder line (matched by pattern, so both
+the project and the global leader-memory templates are covered) whenever it adds
+or updates an entry. All other lines of the index are left untouched (#269).
+
+### change: put every tmux call behind a multiplexer backend (`fleet.mux`)
+
+`src/fleet/tmux.py` is replaced by `src/fleet/mux/` — a `Mux` backend interface
+(`base.py`), the tmux backend (`tmux.py`), and `mux.get()` returning the
+process-wide backend (`FLEET_MUX`, default `tmux`; `zellij` raises "not
+implemented yet" until the next PR). Every caller (leader, start, attach,
+cleanup, done, inbox, rm, send-prompt, sessions, status, the orchestrator,
+prompt deliverer and leader notifier) goes through it, so a zellij backend can
+be added without touching them. No behavior change on tmux:
+
+- Launch takes argv (`new_window(argv=…)`, `new_session(argv=…)`); the tmux
+  backend still opens a shell window with `-e` env and types the
+  `shlex`-joined command, so the pane keeps a shell after the agent exits.
+- Buffers leave the interface: `paste(text)` uses a one-shot tmux buffer
+  (`paste-buffer -d`). The per-task `fleet-task-<id>` buffer for
+  `--no-auto-paste` / `C-b ]` is staged by `preload_paste()` and dropped by
+  cleanup via `drop_paste()`.
+- Keys are explicit: adapters return `Key("Ctrl-u")` (codex `/rename` flow)
+  and backends translate normalized key names (tmux `C-u`). Typed text is sent
+  with `send-keys -l` (literal).
+- `fleet attach`'s grouped view session (Issue #76) moved into the tmux
+  backend's `attach()`; `tmux attach -t …` hints come from `attach_hint()`.
+- `TmuxError` → `MuxError` (the tmux backend's `TmuxError` subclasses it).
+- `FLEET_NO_MUX` disables the multiplexer; `FLEET_NO_TMUX` stays as an alias.
+- Tests use a shared recording fake backend (`tests/_fake_mux.py`).
+
+### fix: a transient multiplexer error no longer makes the prompt deliverer or the leader notifier give up
+
+One inconsistent zellij pane listing (`tab not found` while another tab is being closed)
+used to fail a task's prompt delivery and strand a leader notification for an hour, with
+nothing in the logs.
+
+- **Prompt deliverer:** a `MuxError` from capture / rename / paste / submit Enter is
+  retried with a short backoff until the delivery deadline; it fails the task only if it
+  persists or the session is confirmed gone. Closes #289.
+- A successful delivery (including `fleet-agent send-prompt`) of a task the deliverer had
+  marked `failed` moves it back to its stage-derived status and emits
+  `prompt_delivery_recovered`.
+- With `notify_leader_on_driver_done` on, a deliverer failure is also pushed to the owning
+  leader (`kind: "delivery_failed"`: "delivery failed, retry with `fleet-agent send-prompt`").
+- **Leader notifier:** `MuxError` from `capture` and a single `session_exists() == False`
+  keep polling until the deadline, then re-arm like the busy case; it gives up only when
+  the session is confirmed gone. #290's idle/confirm/submit logic and #291's ask records are
+  unchanged. Closes #292.
+- The notifier now logs its decisions (spawn pid/timeout, lock contention, wait reasons,
+  flush result, deadline/re-arm, exit reason) to `leader-notifier.log`, at low volume.
+
+### fix: workspace=none driver panes open in the project root
+
+A task without a worktree used to open its driver pane / window inside its task
+dir under `fleet-state/`, even though the driver prompt tells it to work in the
+project root — inviting edits to fleet state. `launch_stage_driver` now starts
+the pane in the project's `repo` (for both `start` and the orchestrator's later
+stages), keeping the task dir only as a fallback when the project has no `repo`
+or it is missing on disk. Nothing in the pane relied on the task dir as cwd
+(`FLEET_TASK_ID` / `FLEET_STATE_DIR` are in the env; prompt and outbox paths are
+absolute). Token usage for such tasks is not read from the shared project root,
+since its session logs cannot be attributed to a single task.
+
+### feat: add `fleet notify` to enable/disable the leader-pane push
+
+New `fleet notify --project P [on|off|status]` sets `notify_leader_on_driver_done`
+in `project.yaml` (the opt-in leader-pane push of driver `done` / approval gates,
+design §10.3); no argument (or `status`) prints the current state. Previously no
+command set the option, so a leader could not enable it without hand-editing state
+files, which the leader protocol forbids. Written through `state.save_project`
+(locked, atomic). Documented in README (en/ja) and the leader prompt's command list.
+
+### fix: leader notifier injects only at a real idle boundary and verifies the submit
+
+`leader_notifier` waited for `adapter.is_ready(pane)` before typing, but claude
+keeps its `❯` composer on screen while it works, so notifications were typed into
+a busy leader: surfaced mid-turn ("user sent a new message while you were
+working"), or left unsent in the composer until a human pressed Enter, which then
+delivered a second copy (Issue #288).
+
+- `VendorAdapter` gains `is_busy` / `is_idle` / `composer_holds`. claude is busy
+  when its spinner status line (`✢ Frosting… (48s · ↓ 4.0k tokens)`) or an
+  `esc to interrupt` hint is in the bottom tail; codex matches `esc to interrupt`
+  (not verified live: if the wording differs it never matches, i.e. the old
+  behaviour). A vendor without a `busy` pattern is never busy, so an unknown
+  pattern cannot strand the queue.
+- The notifier injects only when the pane is `is_idle` (ready AND not busy) on a
+  capture, and again on a confirming capture `INJECT_SETTLE_SECONDS` later taken
+  right before the keystrokes. A leader that flips back to busy in between is
+  left alone and the queue stays for the next boundary.
+- After the submit Enter the pane is re-captured; if the text is still in the
+  composer, Enter is pressed once more (`SUBMIT_ENTER_RETRIES`, mirroring the
+  deliverer's `submit_retries`). The `leader_notified` event records
+  `submit_confirmed` and `enter_retries`.
+- Deliberately unchanged: the driver prompt deliverer keeps `is_ready` (it pastes
+  into a freshly booted pane that is never mid-turn, and a busy false-positive
+  there would fail the task) and the inbox wake-up nudge stays a one-shot write
+  (it exists to reach a driver that may be working, and the message is durable in
+  `inbox.md`).
+
+Tests use pane fixtures built from a real claude `dump-screen` of a busy pane
+(`tests/_pane_fixtures.py`).
+
+Closes #288.
+
+### fix: leader notification finds the PR even when the driver wrote `PR #N`
+
+The leader-pane notification showed `PR=(none yet)` whenever the driver's
+`outbox.md` said `PR #280` instead of a full PR URL. `scan_pr_url` now tries, in
+order: the full `https://github.com/<owner>/<repo>/pull/<n>` URL (unchanged);
+a `PR #<n>` / `pull request #<n>` mention expanded with the repo's `origin`
+remote (github https / ssh forms); and, at notifier flush time only, a
+best-effort `gh pr list --head <branch> --state all --json url` lookup (only
+when `gh` is on PATH, 5s timeout, never raises, never runs inside `done`).
+`docs/prompts/driver-base.md` now tells drivers to record the full PR URL in
+`outbox.md`. Closes #281.
+
+### fix: `fleet preflight` explains why a tool's `--version` probe failed
+
+A zellij binary downloaded from a GitHub release and killed by macOS on launch only
+showed `✘ zellij required TimeoutExpired` — neither the exception name nor a bare
+`non-zero from \`zellij\`` said what actually happened.
+
+`_check_command` now reports the concrete failure:
+
+- Timeout: `timed out after 5s running \`zellij --version\``.
+- Killed by a signal (negative returncode): `killed by SIGKILL running
+  \`zellij --version\``; on macOS this also notes that Gatekeeper (quarantine /
+  code signing) may have blocked the binary and that installing via Homebrew
+  avoids it.
+- Non-zero exit: `exit 2 running \`zellij --version\`: <first stderr line>`.
+
+Required/optional and the `ok` flag are unchanged.
+
+### fix: accept `--project` after the subcommand of grouped commands
+
+`fleet formation show solo --project P` (and `formation list`, `workspace list|set`)
+failed with `unrecognized arguments: --project P`; `--project` was only accepted
+before the subcommand for these groups (`fleet formation --project P show solo`).
+Every subcommand of `formation`, `workspace` and `role` now accepts `--project` in
+both places; when both are given, the one after the subcommand wins. The
+`argparse.SUPPRESS` pattern from `fleet formation|role seed` is factored into a
+shared helper (`commands/_project_arg.py`), and a parser-audit test fails if a
+future grouped command adds a group-level `--project` without repeating it on its
+subcommands. Closes #279.
+
+### fix: on macOS, fleet refuses to run a Gatekeeper-quarantined zellij
+
+A zellij binary downloaded with a browser (or extracted by `tar`) can carry the
+`com.apple.quarantine` xattr. The first exec then pops a Gatekeeper dialog —
+with a "Move to Trash" button that deletes the binary — even from `fleet
+preflight` or an unattended driver pane (#309).
+
+`fleet preflight` now resolves every tool it is about to probe and checks
+that xattr first (`fleet.macos_quarantine`, ctypes `getxattr`, no
+subprocess). A quarantined binary fails the check immediately — `zellij
+--version` (or `tmux -V`, or an agent CLI) is never run — with a hint to
+`brew install <formula>` or, after confirming where the binary came from,
+`xattr -d com.apple.quarantine <path>`. The zellij backend
+(`fleet.mux.zellij.ZellijMux`) shares the same guard: its own `--version`
+probe and every exec path raise an explicit error instead of running a
+quarantined binary. The killed-by-signal and timeout hints added in #308 are
+refined to name Gatekeeper quarantine specifically (re-signing does not
+help) instead of a vague "macOS may have blocked the binary".
+
+No primary source (Apple open-source headers/docs) could be confirmed for
+the meaning of individual bits in the quarantine value (the "user approved"
+bit some blog posts cite) — see the module docstring — so this only checks
+*presence* of the xattr, not its flags. The xattr is never written or
+removed automatically; that stays the user's call. Off macOS, behavior is
+unchanged (no ctypes load).
+
+### chore: document the macOS zellij quarantine issue and fix (#309)
+
+README / README.ja gain a short "macOS" section (mirroring "Windows"):
+`brew install zellij` as the recommended install (curl-fetched bottles carry
+no quarantine attribute), why a browser-downloaded release binary gets killed
+by Gatekeeper on first exec, the fix (`xattr -d com.apple.quarantine <path>`
+after confirming the binary's origin, or re-download with `curl`; re-signing
+does not help; don't disable Gatekeeper), and `xattr -l <path>` for
+diagnosis. Docs only — the preflight guard that stops fleet from exec'ing a
+quarantined binary in the first place is tracked separately (#309 part 1,
+task-q-guard).
+
+### feat: `fleet-agent reject` takes a reason and always tells the driver it was rejected
+
+`fleet-agent reject <id> [--reason TEXT | --reason-file PATH]` (mutually
+exclusive; the file is read as UTF-8) relays the user's feedback to the driver.
+Every reject now appends a `[fleet reject]` block to the task inbox **before**
+the relaunch / peer-review handoff: it says the user rejected the stage, carries
+the reason when given, and tells the driver not to re-submit unchanged work (with
+no reason it points the driver at `fleet-agent ask`). Previously a stage without
+`peer_review` was relaunched with nothing in the inbox but the stale
+`[fleet verify]` message, so the driver re-submitted the same work. The reason
+is also recorded on the `reject` event. Docs: leader prompt command list, README
+(en/ja) command tables, `docs/formations.md`, `docs/design.md`. Closes #285.
+
+### change: scoper poses questions via `fleet-agent ask`, not the CLI interactive menu
+
+The scoper role prompt now instructs the scoper to surface every question with
+the `fleet-agent ask "<question>"` shell command rather than its CLI's built-in
+interactive multiple-choice menu (the AskUserQuestion tool). The in-pane menu
+blocks without calling `fleet-agent ask`, so the task stayed `running` (heartbeat
+stopped) instead of parking at `awaiting_orders`, hiding the wait from fleet and
+the leader — the same class of status lie as #226. Options now go inside the
+question text and the user replies in the pane.
+
+### feat: unseeded formation/role errors say how to seed; add `fleet formation seed` / `fleet role seed`
+
+When `fleet-agent start` (or `fleet formation show`, the driver prompt render,
+`fleet edit` validation) misses a formation or role that ships as a seed
+(`src/fleet/templates/*.yaml`, `docs/prompts/roles/*.md`), the error now names the
+shipped seed and the exact next step: the `fleet formation|role seed` command with
+the resolved project/global target path, or `fleet edit`'s "seed shipped" mode.
+A miss is still a hard error — shipped files are never a runtime fallback.
+
+New non-interactive commands `fleet formation seed <name> [--global] [--project P]
+[--force]` and `fleet role seed <name> [--global] [--project P] [--force]` copy a
+shipped seed into the project (default) or global tier and refuse to overwrite an
+existing file unless `--force`. Shared seed logic lives in `fleet.seeds`, which
+`fleet edit` now also uses.
+
+### test: cut unit-suite wall time ~4x serial, ~10x with the new parallel runner
+
+`run_fleet` / `run_fleet_agent` now call `fleet.cli.main` / `main_agent`
+in-process (env, cwd, stdin, and the mux backend isolated per call;
+`FLEET_TEST_SUBPROCESS=1` restores real subprocesses). A few true
+end-to-end subprocess smoke tests remain. Also: fsync skipped in tests through
+a new `fleet.locking.fsync` hook (production still uses `os.fsync`), shared
+git-repo and `preflight.check_all()` fixtures, no more waited-out sleeps or
+socket timeouts, and every test module now imports the hermetic-env helpers,
+so running a module alone no longer sends real desktop toasts. New stdlib
+`tests/run_parallel.py` (a ProcessPoolExecutor, one job per TestCase class)
+is what CI now runs; `python -m unittest discover tests` still works and runs
+in one CI job as the serial reference. Windows local: 88 s → 22 s serial,
+~9 s parallel.
+
+### fix: make user-facing help and messages multiplexer-neutral
+
+Since the multiplexer became tmux or zellij, `fleet --help`, the `fleet-agent`
+`start` / `cleanup` / `merge` / `done` / `inbox` / `rm` / `attach` help text, the
+`--dry-run` output ("dry-run: multiplexer step skipped."), the related docstrings
+and the README prose still said "tmux". They now say "multiplexer" (tmux window /
+zellij tab), and the tmux-only hints (`C-b ]` manual paste, `C-b d` detach) are
+labelled as tmux-only, with the zellij equivalent (`fleet-agent send-prompt`,
+`Ctrl o` then `d`) alongside. Wording only; no behavior change. Closes #275.
+
+### fix: record token usage for workspace=none tasks
+
+Since #262 a workspace=none driver pane runs in the project root, but
+`state.record_task_usage` still looked for the session logs under the task dir,
+so these tasks recorded no usage. The root is shared with the leader and other
+tasks, so the directory alone cannot identify a task's logs. The lookup now also
+narrows to the sessions the task's own prompt pointer (the first thing fleet
+pastes into the pane) started: `VendorAdapter.usage_from_session` takes an
+optional `pointer`, and both the claude and codex adapters keep only the
+session logs whose first pointer mention is that task's. Worktree tasks and the
+task-dir fallback (a project with no usable `repo`, or panes that predate #262)
+are unchanged. Closes #264.
+
+### feat: add stage-level verify gates
+
+Stages can now declare a `verify:` block whose project-declared command runs in
+the task worktree, or project root for `workspace: none`, before peer review or
+user approval. Non-zero exits and timeouts bounce to the implementer with
+captured output; repeated failures escalate to `awaiting_orders`.
+
+### feat: optional `shell:` field for verify commands
+
+A stage's `verify` block can now set `shell: bash | sh | pwsh | powershell | cmd`
+to pick the shell that runs the command. Without it nothing changes (the
+platform shell: `/bin/sh`, or `cmd.exe` on Windows), so POSIX-style verify
+commands can finally be used in formations on Windows with `shell: bash`. On
+Windows `bash` / `sh` resolve to Git Bash (never the WSL launcher in
+`System32`); `pwsh` / `powershell` run with `-NoProfile -NonInteractive`.
+`formation.validate()` rejects an unknown `shell` value. A shell that is not
+installed is reported to the driver as a failed verify run (exit 127) with a
+message naming the shell, and the usual `max_iterations` cap escalates it. New
+`fleet.verify_shell` module; documented in `docs/formations.md` §2.5. Closes #260.
+
+### feat: Windows-compatible core (no tmux yet)
+
+fleet now imports and runs its non-multiplexer commands on Windows: a portable
+file lock (`fcntl.flock` on POSIX, `msvcrt.locking` on Windows) with a bounded
+`os.replace` retry, explicit UTF-8 for file I/O, subprocess output and CLI
+stdout/stderr, a `spawn_detached()` helper for the prompt deliverer and leader
+notifier, `os.pathsep` in the driver `PATH`, and case-insensitive prompt-file
+project inference. New `fleet.cmd` / `fleet-agent.cmd` shims run the CLIs from
+PowerShell / cmd, and agent prompts embed the forward-slash `fleet-agent.cmd`
+path on Windows. CI gains a `windows-latest` unittest job. POSIX behavior is
+unchanged.
+
+### chore: document native Windows support (zellij)
+
+README / README.ja gain a "Windows" section: requirements (Python >= 3.11,
+zellij >= 0.45.0, Git for Windows, agent CLIs on `PATH`), installing zellij
+(`winget install Zellij.Zellij` or a release zip), `fleet.cmd` /
+`fleet-agent.cmd`, a clone path without spaces, `core.longpaths`, `FLEET_MUX`,
+what `fleet preflight` checks, attach under zellij, and known limitations. The
+intro no longer says tmux is required everywhere. `docs/design.md` describes
+the mechanism as a terminal multiplexer (tmux on macOS/Linux, zellij on
+Windows) behind `fleet/mux/`, and `docs/windows-support.md` is marked
+implemented (#247–#251) with a list of remaining follow-ups.
+
+### chore: handoff note for the Windows/zellij work
+
+`docs/handoff-windows-zellij.md` summarizes the Windows/zellij push for the
+fleet leader; `docs/windows-support.md` §11 links each open item to its issue.
+
+### chore: record Windows Phase 0 verification results
+
+Updates `docs/windows-support.md` with the Phase 0 results on Windows +
+zellij 0.45.1. Verified: claude pointer paste + `Enter`, `Ctrl u`,
+`new-tab --no-focus`, sole-client attach focus, and pane env inheritance.
+Raises the minimum zellij to 0.45.0, because 0.44.3 has no
+`new-tab --no-focus`. Also records that the pane launcher must strip
+inherited Claude Code session markers, and that `claude --no-chrome` avoids
+the Chrome-extension startup dialog.
+
+### chore: add Windows support plan
+
+Adds `docs/windows-support.md`: the verified feasibility study for running
+fleet natively on Windows with zellij in place of tmux (tmux→zellij mapping,
+zellij quirks, Windows blockers outside the multiplexer) and the PR-by-PR
+implementation plan.
+
+### feat: `fleet preflight` checks the configured multiplexer backend and Windows setup
+
+- The multiplexer check follows the backend (`FLEET_MUX`, else zellij on
+  Windows / tmux elsewhere). tmux: `tmux -V` as before. zellij: parses
+  `zellij --version` and fails below 0.45.0 (0.44.x lacks
+  `new-tab --no-focus`); 0.45.0–0.45.1 pass with a ⚠ note that the detached
+  new-tab workaround for zellij#5594 is active.
+- Windows only: warns when the clone path contains spaces (the fleet-agent
+  path is embedded unquoted in prompts), when `core.longpaths` is not true
+  (with the fix command), and fails when `fleet-agent.cmd` is missing.
+- claude / codex are reported with their resolved absolute path. On Windows,
+  when `PATH` lookup fails, `%USERPROFILE%\.local\bin` and `~`-prefixed
+  `PATH` entries are tried, and a CLI found only that way is flagged
+  (agent panes may not find it on `PATH`).
+- A check can now be "ok with a warning" (⚠, exit code unaffected).
+
+### feat: native Windows desktop notifications
+
+`fleet.notify` gains a Windows transport next to macOS and Slack: on Windows it
+shows a WinRT toast (`ToastNotificationManager`) through
+`powershell.exe -EncodedCommand`, under PowerShell's own AppUserModelID so no
+registration is needed. Default-on; disable with `windows: {enabled: false}` in
+`notify.yaml`, and `FLEET_NO_NOTIFY` suppresses it like the others. Title/body
+are XML-escaped and truncated like macOS, the level emoji is included, and the
+call is best-effort (5 s timeout, `CREATE_NO_WINDOW`, warns on stderr, never
+raises). Other platforms never invoke it.
+
+### feat: zellij multiplexer backend (default on native Windows)
+
+`fleet.mux.zellij.ZellijMux` implements the multiplexer interface on zellij
+(>= 0.45): driver windows are tabs in the owner session, every pane runs the
+new `fleet.pane_launch` launcher (per-pane env from a JSON file, inherited
+Claude Code session markers stripped, agent CLI resolved to an absolute path),
+failures are detected explicitly (zellij exits 0 on most of them), and the
+zellij 0.45.x detached-tab bug (#5594) is worked around with a hidden
+temporary client. Backend selection: `FLEET_MUX` wins, otherwise zellij on
+Windows and tmux elsewhere (`fleet.mux.default_backend_name()`; preflight uses
+the same rule). Also: driver panes get `FLEET_SESSION`; cleanup / merge close
+the task's windows (and wait for the agent to exit) before removing its
+worktree; the test suite never touches a real multiplexer unless
+`FLEET_LIVE_TMUX` / `FLEET_LIVE_ZELLIJ` is set.
+
+### fix: multi-stage handoff and peer-review launch on Windows/zellij
+
+- A cross-stage advance run from a driver's own tab (`fleet-agent done`, or an
+  in-pane `approve` / `reject`) no longer kills itself. On Windows, closing a
+  zellij tab ends every process on its console, so `done` died inside
+  `kill_window` before the next stage's tab was opened, and the task was left
+  on a stage with no window. When the backend reports
+  `window_close_kills_caller` (zellij on Windows only; tmux is unchanged), the
+  launch now runs in a detached helper (`fleet.deferred_launch`) after `done`
+  exits (`stage_launch_deferred` event, log in `<task>/stage-launch.log`).
+- The zellij backend drops `ZELLIJ`, `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`
+  from the environment of the clients it spawns. A fleet command started from
+  a pane of the same session (a driver's `done` that opens the reviewer or the
+  next stage, or a leader's `start`) could not attach the zellij#5594 temp
+  client when no client was attached: zellij refuses to attach to "the current
+  session".
+- Verify output is captured as bytes and decoded line by line: UTF-8 first,
+  then (on Windows) the OEM code page that `cmd.exe` built-ins use, so
+  localized cmd messages (such as cp932) no longer turn into U+FFFD in the
+  driver's inbox.
+- `fleet preflight` takes the zellij minimum version and the #5594 workaround
+  range from the backend constants (`MIN_VERSION`,
+  `FIXED_DETACHED_TAB_VERSION`), so its warning matches what the backend does.
+
+### fix: zellij treats closing a tab as killing the caller on every platform, not only Windows
+
+`ZellijMux.window_close_kills_caller` returned `True` only on Windows; on macOS / Linux a
+`fleet-agent done` run from inside the stage's own tab still called `kill_window` on that tab
+directly. A real macOS run (#313, zellij 0.45.1) showed this hangs up (SIGHUP) the tab's
+foreground process group just as it ends every console process on Windows: the designer's
+`done` closed its own tab and died before the implementer's tab ever opened, stranding the
+task on a stage with no window.
+
+The property is now `True` for zellij on every platform, so the orchestrator always hands a
+same-pane cross-stage advance to the detached `fleet.deferred_launch` helper (already used on
+Windows), which survives via `fleet.proc.spawn_detached`'s `start_new_session=True`. Docstrings
+in `zellij.py`, `deferred_launch.py` and `docs/windows-support.md` are corrected: earlier POSIX
+testing only checked a caller that had already detached into its own session, not how a real
+agent's tool-call shell runs `fleet-agent done` (a plain foreground job).
+
+### test: live zellij backend suite + Linux CI job; fix zellij temp client and Ctrl+C on POSIX
+
+`tests/test_mux_zellij_live.py` drives `ZellijMux` end to end against a real zellij with a
+plain `/bin/sh` as the pane command (no agent CLI, no API key): session create / kill (and
+the resurrectable entry), tabs created detached and with a client attached, tab / pane
+listing, per-pane env and cwd through `pane_launch` (agent markers stripped), `send_text` /
+`send_key` (Ctrl-u, Ctrl-c) / `paste` / `capture` round-trips, closing a tab (waits for the
+pane's processes), and the behaviours fleet relies on: an `action` on a missing session or
+tab exits 0 (so the listing-based errors), and a stage advance run from a caller inside the
+tab it closes completes. Sessions are `fleet-citest-<random>`, torn down even on failure;
+nothing else is touched.
+
+It is opt-in like the tmux live tests (`FLEET_LIVE_ZELLIJ=1 python -m unittest
+tests.test_mux_zellij_live -v`, `FLEET_ZELLIJ` for a zellij off `PATH`) and skips cleanly
+without zellij, so the default `python tests/run_parallel.py` stays hermetic. A new
+`unittest-zellij-linux` CI job installs zellij 0.45.1 (pinned, checksum-verified) on
+ubuntu-latest and runs it. Refs #258 (a live driver E2E with a real agent CLI on
+macOS / Linux is still open).
+
+The Linux run found and fixed two backend bugs:
+
+- **fix:** the #5594 temporary client (`zellij attach S`) was started with stdio on
+  `/dev/null`; without a controlling terminal (CI, the detached deliverer / notifier) it
+  never registers as a client, so every detached `new_window` on 0.45.x failed with
+  "temporary zellij client did not attach". On POSIX it now runs on a pseudo-terminal.
+- **fix:** `pane_launch` ignored SIGINT *before* spawning the agent, and an ignored signal
+  survives exec, so on POSIX the agent and the commands it starts could never be
+  interrupted (`send_key Ctrl-c` to a shell in a pane did nothing). It now ignores SIGINT
+  only after the spawn there (Windows unchanged).
 
 ## [0.2.0] - 2026-06-24
 
