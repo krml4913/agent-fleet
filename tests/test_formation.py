@@ -6,6 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -16,6 +17,17 @@ from fleet import formation, state as state_mod  # noqa: E402
 
 
 class FormationTemplateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # These tests assert on the project -> global lookup cascade, so each
+        # gets its own empty global tier; a seeded clone's real
+        # ``global/formations/`` must never be visible (#319). Tests that need a
+        # populated tier still point FLEET_HOME at their own dir.
+        home = TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        patcher = mock.patch.dict(os.environ, {"FLEET_HOME": home.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     # ---- listing templates ----
 
     def test_list_templates_includes_known(self) -> None:
