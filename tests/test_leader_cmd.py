@@ -1,6 +1,7 @@
 """Tests for ``fleet leader`` — project-agnostic session entrypoint (Issue #166)."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
-from fleet import prompt_pointer, state  # noqa: E402
+from fleet import config, prompt_pointer, state  # noqa: E402
 from fleet.mux.base import Key  # noqa: E402
 from fleet.mux.tmux import TmuxMux  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
@@ -28,6 +29,8 @@ class LeaderCmdTests(unittest.TestCase):
         self.fleet_home.mkdir()
         self._old_fleet_home = os.environ.get("FLEET_HOME")
         os.environ["FLEET_HOME"] = str(self.fleet_home)
+        config.reset_cache()
+        self.addCleanup(config.reset_cache)
         # Use an isolated, randomized label so real-tmux tests never collide
         # with a live leader session. The production default label is "main"
         # → session "fleet-main"; if a test used it literally, tearDown's
@@ -316,6 +319,64 @@ class LeaderCmdTests(unittest.TestCase):
             result = leader.run(self._args())
         self.assertEqual(result, 1)
         self.assertIn("tmux setup failed: boom", err.getvalue())
+
+    def _agent_used(self) -> str:
+        data = json.loads(state.session_record_path(self.label).read_text(encoding="utf-8"))
+        return data["agent"]
+
+    def test_agent_flag_takes_precedence_over_config(self) -> None:
+        """Issue #305: --agent > leader_agent config > built-in default."""
+        from fleet.commands import leader
+
+        config.set_value("leader_agent", "codex:gpt-5.5")
+        with use_fake_mux():
+            result = leader.run(self._args(agent="claude:opus"))
+        self.assertEqual(result, 0)
+        self.assertEqual(self._agent_used(), "claude:opus")
+
+    def test_no_agent_flag_falls_back_to_configured_leader_agent(self) -> None:
+        from fleet.commands import leader
+
+        config.set_value("leader_agent", "codex:gpt-5.5")
+        with use_fake_mux():
+            result = leader.run(self._args(agent=None))
+        self.assertEqual(result, 0)
+        self.assertEqual(self._agent_used(), "codex:gpt-5.5")
+
+    def test_no_agent_flag_and_no_config_uses_built_in_default(self) -> None:
+        from fleet.commands import leader
+
+        with use_fake_mux():
+            result = leader.run(self._args(agent=None))
+        self.assertEqual(result, 0)
+        self.assertEqual(self._agent_used(), leader.DEFAULT_LEADER_AGENT)
+
+    def test_invalid_agent_flag_fails_even_with_a_valid_config(self) -> None:
+        from fleet.commands import leader
+
+        config.set_value("leader_agent", "codex:gpt-5.5")
+        with use_fake_mux() as fake:
+            result = leader.run(self._args(agent="not-a-spec"))
+        self.assertEqual(result, 1)
+        self.assertEqual(fake.calls_named("new_session"), [])
+
+    def test_cli_agent_flag_default_is_none_so_config_can_apply(self) -> None:
+        from fleet.commands import leader
+
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        leader.add_parser(sub)
+        args = parser.parse_args(["leader"])
+        self.assertIsNone(args.agent)
+
+    def test_cli_help_names_the_leader_agent_config_key(self) -> None:
+        from fleet.commands import leader
+
+        parser = argparse.ArgumentParser()
+        sub = parser.add_subparsers()
+        leader.add_parser(sub)
+        help_text = sub.choices["leader"].format_help()
+        self.assertIn("leader_agent", help_text)
 
 
 if __name__ == "__main__":

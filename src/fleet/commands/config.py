@@ -7,6 +7,7 @@ state files. Settings here are cross-project (not per-project like
 ``get`` and the plain listing report the *config layer* (the file, else the
 built-in default). ``FLEET_MUX`` in the environment overrides ``mux`` at run
 time and is only noted; ``fleet preflight`` shows the backend actually selected.
+``leader_agent`` has no such env override; see ``fleet leader --help``.
 """
 from __future__ import annotations
 
@@ -17,33 +18,44 @@ import sys
 from .. import config as config_mod
 
 
+def _values_help(key: str) -> str:
+    """Human-readable accepted-values description for ``key``, for help text."""
+    if key in config_mod.KEYS:
+        return "|".join(config_mod.KEYS[key])
+    return config_mod.FREEFORM[key][1]
+
+
 def add_parser(sub: "argparse._SubParsersAction") -> None:
-    keys = ", ".join(f"{k}={'|'.join(v)}" for k, v in config_mod.KEYS.items())
+    keys = ", ".join(f"{k}={_values_help(k)}" for k in config_mod.ALL_KEYS)
     p = sub.add_parser(
         "config",
         help="Show or set the global config (fleet-state/global/config.yaml)",
         description=(
             "Show or set the global config. With no subcommand, print every "
             f"key. Known keys: {keys}. Precedence for mux: FLEET_MUX env > "
-            "this config > built-in default (zellij)."
+            "this config > built-in default (zellij). leader_agent has no env "
+            "override: fleet leader --agent > this config > built-in default."
         ),
     )
     p.set_defaults(func=run_show)
     sp = p.add_subparsers(dest="config_cmd", metavar="<sub>")
 
     sp_get = sp.add_parser("get", help="Print one key's value")
-    sp_get.add_argument("key", help=f"one of: {', '.join(config_mod.KEYS)}")
+    sp_get.add_argument("key", help=f"one of: {', '.join(config_mod.ALL_KEYS)}")
     sp_get.set_defaults(func=run_get)
 
     sp_set = sp.add_parser("set", help="Set a key")
-    sp_set.add_argument("key", help=f"one of: {', '.join(config_mod.KEYS)}")
-    sp_set.add_argument("value", help="the new value (mux: tmux | zellij)")
+    sp_set.add_argument("key", help=f"one of: {', '.join(config_mod.ALL_KEYS)}")
+    sp_set.add_argument(
+        "value",
+        help="the new value (mux: tmux | zellij; leader_agent: vendor:model, e.g. claude:opus)",
+    )
     sp_set.set_defaults(func=run_set)
 
 
 def run_show(args: argparse.Namespace) -> int:
     print(f"config file: {config_mod.config_path()}")
-    for key in config_mod.KEYS:
+    for key in config_mod.ALL_KEYS:
         value, source = config_mod.get(key)
         print(f"{key}: {value} ({source})")
     env_mux = (os.environ.get("FLEET_MUX") or "").strip()

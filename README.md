@@ -94,8 +94,10 @@ Optionally give each task its own git branch/worktree (the default is in-place):
 ```
 
 This creates the multiplexer session `fleet-trial` with the leader agent (default
-`claude:opus`) running in it, and attaches you in the foreground. The session is
-single-instance per project. Detach any time (tmux: `C-b d`; zellij: `Ctrl o`, then `d`); the leader keeps
+`claude:opus`; persistently configurable, see
+[Choosing the leader's agent](#choosing-the-leaders-agent)) running in it, and
+attaches you in the foreground. The session is single-instance per project.
+Detach any time (tmux: `C-b d`; zellij: `Ctrl o`, then `d`); the leader keeps
 running. This is the one pane you live in.
 
 ### 4. Talk to the leader
@@ -230,9 +232,9 @@ not killed for you — fleet warns if it spots one still running.
 | Command | Purpose |
 |---|---|
 | `fleet preflight` | Check Python / multiplexer (zellij or tmux; shows which is selected and why) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
-| `fleet config [get <key> \| set <key> <value>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Only key today: `mux` = `zellij` \| `tmux`. See [Choosing the multiplexer](#choosing-the-multiplexer). |
+| `fleet config [get <key> \| set <key> <value>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Keys: `mux` = `zellij` \| `tmux` (see [Choosing the multiplexer](#choosing-the-multiplexer)); `leader_agent` = a `vendor:model` spec, the default agent for `fleet leader` (see [Choosing the leader's agent](#choosing-the-leaders-agent)). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
-| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`, default agent `claude:opus`). |
+| `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`). Agent precedence: `--agent` > `leader_agent` in the global config > built-in default `claude:opus`. |
 | `fleet attach [target] [--project P] [--session LABEL]` | Attach to a task's driver pane (in the session that owns the task, `fleet-<owner_session>`; `--project` locates the task) or, by default, to the `leader` pane of `fleet-<LABEL>` (`--session`, default `$FLEET_SESSION`, else `main`). Lists the live sessions if the target one isn't running. |
 | `fleet status [name] [--all] [--unscoped] [--events N]` | Print project info, task list, recent events. With `--all`, filters to the session's scope by default; `--unscoped` shows all projects. |
 | `fleet sessions` | List leader sessions and their in-flight tasks across all projects. |
@@ -354,6 +356,28 @@ active `FLEET_MUX` is noted, and `fleet preflight` shows the backend actually
 selected and its source. `FLEET_NO_MUX` and `FLEET_ZELLIJ` are unchanged. A
 missing config file just means the defaults; an unreadable or invalid one only
 prints a warning and is ignored — it never stops a command.
+
+---
+
+## Choosing the leader's agent
+
+`fleet leader` launches the leader pane with an agent spec (`vendor:model`,
+e.g. `claude:opus`, `claude:claude-opus-5-5`, `codex:gpt-5.5`). Precedence,
+first hit wins:
+
+1. **`fleet leader --agent <spec>`** on the command line.
+2. **`leader_agent:`** in the global config, `fleet-state/global/config.yaml`.
+3. The built-in default: **`claude:opus`**.
+
+```bash
+./fleet config set leader_agent claude:claude-opus-5-5   # persistent
+./fleet leader --agent claude:claude-opus-5-5             # one-off, this launch only
+```
+
+The value is validated the same way as `--agent` (an unknown vendor is
+rejected, listing the supported ones); a missing or invalid `leader_agent` in
+the config file only warns and falls back to the built-in default, like every
+other global config key.
 
 ---
 
