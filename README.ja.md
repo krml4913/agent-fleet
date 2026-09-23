@@ -424,6 +424,27 @@ config キー `leader_agent`。
 
 ---
 
+## macOS
+
+zellij は `brew install zellij` でインストールする — Homebrew の bottle は curl で
+取得されるため quarantine 属性が付かない。
+
+ブラウザでダウンロードした zellij のリリースバイナリには、代わりに Apple の
+`com.apple.quarantine` 属性が付く。Gatekeeper は初回実行時に「開発元を確認できません」
+という趣旨のダイアログを出してプロセスを kill する（`fleet preflight` はこの kill を
+quarantine のヒント付きで報告する）。ダイアログの **ゴミ箱に入れる** ボタンは
+バイナリを削除するので押さないこと。
+
+- **対処:** バイナリの入手元を確認したうえで、フラグを外す
+  （`xattr -d com.apple.quarantine <path>`）か、ブラウザではなく `curl` で
+  再ダウンロードする（curl でのダウンロードには quarantine 属性が付かない）。
+  `codesign` での再署名は効かない — リリースバイナリはすでに有効な ad-hoc
+  署名済みのため。回避策として Gatekeeper を無効化する
+  （`spctl --master-disable`）のは避けること。
+- **診断:** `xattr -l <path>` で quarantine 属性の有無を確認できる。
+
+---
+
 ## Windows
 
 fleet は Windows 上でネイティブに（WSL なしで）動く。tmux の代わりに

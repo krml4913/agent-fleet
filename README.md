@@ -422,6 +422,28 @@ and the `leader_agent` config key.
 
 ---
 
+## macOS
+
+Install zellij with `brew install zellij` — Homebrew bottles are fetched with
+curl and carry no quarantine attribute.
+
+A zellij release binary downloaded with a browser instead inherits Apple's
+`com.apple.quarantine` attribute. Gatekeeper then blocks the first exec with a
+"cannot verify developer" dialog and kills the process (`fleet preflight`
+reports the kill, with a quarantine hint). The dialog's **Move to Trash**
+button deletes the binary — don't click it.
+
+- **Fix:** confirm where the binary came from, then either clear the flag
+  (`xattr -d com.apple.quarantine <path>`) or re-download with `curl` instead
+  of a browser (curl downloads carry no quarantine attribute). Re-signing with
+  `codesign` does not help — release binaries are already validly ad-hoc
+  signed. Don't disable Gatekeeper (`spctl --master-disable`) to work around
+  this.
+- **Diagnose:** `xattr -l <path>` shows whether the quarantine attribute is
+  present.
+
+---
+
 ## Windows
 
 fleet runs natively on Windows (no WSL), using
