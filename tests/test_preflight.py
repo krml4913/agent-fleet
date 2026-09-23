@@ -166,8 +166,76 @@ class PreflightLibraryTests(unittest.TestCase):
         self.assertIsNone(preflight._extract_version("codex-cli dev"))
 
 
-def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
-    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr="")
+def _completed(
+    stdout: str = "", returncode: int = 0, stderr: str = ""
+) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+class CheckCommandFailureDetailTests(unittest.TestCase):
+    """`_check_command` failure details: timeout / killed-by-signal / non-zero exit."""
+
+    def _check(self, *, side_effect=None, run_return=None, platform: str = "linux"):
+        with (
+            unittest.mock.patch("fleet.commands.preflight.sys.platform", platform),
+            unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value="/bin/zellij"),
+            unittest.mock.patch(
+                "fleet.commands.preflight.subprocess.run",
+                side_effect=side_effect,
+                return_value=run_return,
+            ),
+        ):
+            return preflight._check_command(
+                "zellij", ["zellij", "--version"], required=True
+            )
+
+    def test_timeout_reports_duration_and_command(self) -> None:
+        result = self._check(
+            side_effect=subprocess.TimeoutExpired(cmd=["zellij", "--version"], timeout=5)
+        )
+        self.assertFalse(result.ok)
+        self.assertTrue(result.required)
+        self.assertEqual(result.detail, "timed out after 5s running `zellij --version`")
+
+    def test_killed_by_signal_names_it(self) -> None:
+        result = self._check(run_return=_completed(returncode=-9), platform="linux")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.detail, "killed by SIGKILL running `zellij --version`")
+
+    def test_killed_by_signal_on_macos_hints_quarantine(self) -> None:
+        result = self._check(run_return=_completed(returncode=-9), platform="darwin")
+        self.assertFalse(result.ok)
+        self.assertIn("killed by SIGKILL running `zellij --version`", result.detail)
+        self.assertIn("macOS may have blocked the binary", result.detail)
+        self.assertIn("Homebrew", result.detail)
+
+    def test_killed_by_signal_off_macos_has_no_hint(self) -> None:
+        result = self._check(run_return=_completed(returncode=-9), platform="linux")
+        self.assertNotIn("macOS", result.detail)
+        self.assertNotIn("Homebrew", result.detail)
+
+    def test_positive_exit_code_includes_code_and_stderr(self) -> None:
+        result = self._check(
+            run_return=_completed(returncode=2, stderr="error: unknown flag\nmore\n")
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.detail, "exit 2 running `zellij --version`: error: unknown flag"
+        )
+
+    def test_positive_exit_code_without_stderr(self) -> None:
+        result = self._check(run_return=_completed(returncode=1))
+        self.assertEqual(result.detail, "exit 1 running `zellij --version`")
+
+    def test_file_not_found_unchanged(self) -> None:
+        result = self._check(side_effect=FileNotFoundError())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.detail, "FileNotFoundError")
+
+    def test_success_unchanged(self) -> None:
+        result = self._check(run_return=_completed(stdout="zellij 0.46.0\n"))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.detail, "zellij 0.46.0")
 
 
 class MuxBackendCheckTests(unittest.TestCase):

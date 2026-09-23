@@ -257,7 +257,8 @@ class MainTests(unittest.TestCase):
             env_file = pl.write_env_file(Path(d) / "e.json", env={"FLEET_TASK_ID": "42"}, cwd=d)
             code = (
                 "import os,sys; print(os.environ['FLEET_TASK_ID'], os.environ['PYTHONUTF8'], "
-                "'CLAUDECODE' in os.environ, os.getcwd() == sys.argv[1])"
+                "'CLAUDECODE' in os.environ, "
+                "os.path.realpath(os.getcwd()) == os.path.realpath(sys.argv[1]))"
             )
             env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
             env["CLAUDECODE"] = "1"

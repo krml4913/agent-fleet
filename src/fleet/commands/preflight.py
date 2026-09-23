@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -307,6 +308,40 @@ def _check_agent_cli(name: str) -> CheckResult:
     return result._replace(detail=detail)
 
 
+# Standard POSIX signal numbers (same on Linux/macOS) -> name. A killed-by-signal
+# returncode is itself POSIX-only, but the host running these unit tests (and
+# formatting this detail) may be Windows, whose `signal` module has no SIGKILL
+# and numbers things differently — so this table, not the host's `signal`
+# module, is the source of truth for the common signals.
+_POSIX_SIGNAL_NAMES = {
+    1: "SIGHUP",
+    2: "SIGINT",
+    3: "SIGQUIT",
+    4: "SIGILL",
+    5: "SIGTRAP",
+    6: "SIGABRT",
+    7: "SIGBUS",
+    8: "SIGFPE",
+    9: "SIGKILL",
+    10: "SIGUSR1",
+    11: "SIGSEGV",
+    12: "SIGUSR2",
+    13: "SIGPIPE",
+    14: "SIGALRM",
+    15: "SIGTERM",
+}
+
+
+def _signal_name(signum: int) -> str:
+    name = _POSIX_SIGNAL_NAMES.get(signum)
+    if name is not None:
+        return name
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return f"signal {signum}"
+
+
 def _check_command(
     name: str,
     version_argv: list[str],
@@ -316,6 +351,7 @@ def _check_command(
 ) -> CheckResult:
     if not (which or shutil.which(name)):
         return CheckResult(name, False, "not on PATH", required)
+    cmd = " ".join([name, *version_argv[1:]])
     try:
         r = subprocess.run(
             version_argv,
@@ -325,12 +361,29 @@ def _check_command(
             errors="replace",
             timeout=5,
         )
-        if r.returncode != 0:
-            return CheckResult(name, False, f"non-zero from `{name}`", required)
-        detail = (r.stdout or r.stderr).strip().splitlines()[0] if (r.stdout or r.stderr) else "found"
-        return CheckResult(name, True, detail, required)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+    except FileNotFoundError as e:
         return CheckResult(name, False, f"{type(e).__name__}", required)
+    except subprocess.TimeoutExpired as e:
+        timeout = f"{e.timeout:g}" if e.timeout is not None else "5"
+        return CheckResult(
+            name, False, f"timed out after {timeout}s running `{cmd}`", required
+        )
+    if r.returncode < 0:
+        detail = f"killed by {_signal_name(-r.returncode)} running `{cmd}`"
+        if sys.platform == "darwin":
+            detail += (
+                "; macOS may have blocked the binary (quarantine / code "
+                "signing) — installing via Homebrew avoids this"
+            )
+        return CheckResult(name, False, detail, required)
+    if r.returncode != 0:
+        detail = f"exit {r.returncode} running `{cmd}`"
+        stderr_line = (r.stderr or "").strip().splitlines()[0] if r.stderr else ""
+        if stderr_line:
+            detail += f": {stderr_line}"
+        return CheckResult(name, False, detail, required)
+    detail = (r.stdout or r.stderr).strip().splitlines()[0] if (r.stdout or r.stderr) else "found"
+    return CheckResult(name, True, detail, required)
 
 
 def _git_required_for_cwd(cwd: Path) -> bool:
