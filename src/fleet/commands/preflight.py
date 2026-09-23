@@ -308,7 +308,34 @@ def _check_agent_cli(name: str) -> CheckResult:
     return result._replace(detail=detail)
 
 
+# Standard POSIX signal numbers (same on Linux/macOS) -> name. A killed-by-signal
+# returncode is itself POSIX-only, but the host running these unit tests (and
+# formatting this detail) may be Windows, whose `signal` module has no SIGKILL
+# and numbers things differently — so this table, not the host's `signal`
+# module, is the source of truth for the common signals.
+_POSIX_SIGNAL_NAMES = {
+    1: "SIGHUP",
+    2: "SIGINT",
+    3: "SIGQUIT",
+    4: "SIGILL",
+    5: "SIGTRAP",
+    6: "SIGABRT",
+    7: "SIGBUS",
+    8: "SIGFPE",
+    9: "SIGKILL",
+    10: "SIGUSR1",
+    11: "SIGSEGV",
+    12: "SIGUSR2",
+    13: "SIGPIPE",
+    14: "SIGALRM",
+    15: "SIGTERM",
+}
+
+
 def _signal_name(signum: int) -> str:
+    name = _POSIX_SIGNAL_NAMES.get(signum)
+    if name is not None:
+        return name
     try:
         return signal.Signals(signum).name
     except ValueError:
