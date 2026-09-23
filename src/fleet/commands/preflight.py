@@ -348,6 +348,21 @@ def _signal_name(signum: int) -> str:
         return f"signal {signum}"
 
 
+def _quarantine_result(
+    name: str, path: str, required: bool, *, brew_formula: str | None = None
+) -> CheckResult | None:
+    """``CheckResult`` refusing to exec ``path`` if it is quarantined, else ``None``."""
+    quarantined = macos_quarantine.quarantined_path(path)
+    if quarantined is None:
+        return None
+    detail = (
+        f"quarantined by macOS Gatekeeper: {quarantined} (not executed: "
+        f"running it would show a Gatekeeper dialog whose \"Move to Trash\" "
+        f"button deletes it) — {macos_quarantine.fix_hint(quarantined, brew_formula=brew_formula)}"
+    )
+    return CheckResult(name, False, detail, required)
+
+
 def _check_command(
     name: str,
     version_argv: list[str],
@@ -359,14 +374,13 @@ def _check_command(
     path = which or shutil.which(name)
     if not path:
         return CheckResult(name, False, "not on PATH", required)
-    quarantined = macos_quarantine.quarantined_path(path)
-    if quarantined is not None:
-        detail = (
-            f"quarantined by macOS Gatekeeper: {quarantined} (not executed: "
-            f"running it would show a Gatekeeper dialog whose \"Move to Trash\" "
-            f"button deletes it) — {macos_quarantine.fix_hint(quarantined, brew_formula=brew_formula)}"
-        )
-        return CheckResult(name, False, detail, required)
+    blocked = _quarantine_result(name, path, required, brew_formula=brew_formula)
+    if blocked is not None:
+        return blocked
+    # Resolved path (realpath, like the quarantine check above): the fail-open
+    # darwin hints below name the same file `xattr -l`/`-d` would act on, not
+    # a Homebrew symlink into Cellar.
+    resolved = os.path.realpath(path)
     cmd = " ".join([name, *version_argv[1:]])
     try:
         r = subprocess.run(
@@ -385,8 +399,8 @@ def _check_command(
         if sys.platform == "darwin":
             detail += (
                 f"; a Gatekeeper dialog may be waiting on screen — do not "
-                f"click \"Move to Trash\"; check `xattr -l {path}`; fix: "
-                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
+                f"click \"Move to Trash\"; check `xattr -l {resolved}`; fix: "
+                f"{macos_quarantine.fix_hint(resolved, brew_formula=brew_formula)}"
             )
         return CheckResult(name, False, detail, required)
     if r.returncode < 0:
@@ -394,8 +408,8 @@ def _check_command(
         if sys.platform == "darwin":
             detail += (
                 f"; on macOS this is usually Gatekeeper quarantine "
-                f"(re-signing does not help) — check `xattr -l {path}`; fix: "
-                f"{macos_quarantine.fix_hint(path, brew_formula=brew_formula)}"
+                f"(re-signing does not help) — check `xattr -l {resolved}`; fix: "
+                f"{macos_quarantine.fix_hint(resolved, brew_formula=brew_formula)}"
             )
         return CheckResult(name, False, detail, required)
     if r.returncode != 0:
@@ -474,6 +488,9 @@ def _check_codex_update() -> CheckResult:
             "skipped (codex not on PATH)",
             required=False,
         )
+    blocked = _quarantine_result("codex-update", codex_path, False)
+    if blocked is not None:
+        return blocked
 
     current = _codex_version()
     if current is None:

@@ -110,6 +110,10 @@ class PreflightLibraryTests(unittest.TestCase):
                 side_effect=lambda name: f"/bin/{name}",
             ),
             unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=None,
+            ),
+            unittest.mock.patch(
                 "fleet.commands.preflight._codex_version",
                 return_value="0.132.0",
             ),
@@ -137,6 +141,10 @@ class PreflightLibraryTests(unittest.TestCase):
                 side_effect=lambda name: f"/bin/{name}",
             ),
             unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value=None,
+            ),
+            unittest.mock.patch(
                 "fleet.commands.preflight._codex_version",
                 return_value="0.133.0",
             ),
@@ -160,6 +168,27 @@ class PreflightLibraryTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertIn("skipped", result.detail)
+
+    def test_codex_update_quarantined_never_execs(self) -> None:
+        # #309 review B1: a quarantined codex must fail here too, before
+        # `_codex_version()` execs `codex --version`.
+        with (
+            unittest.mock.patch(
+                "fleet.commands.preflight.shutil.which", return_value="/bin/codex"
+            ),
+            unittest.mock.patch(
+                "fleet.commands.preflight.macos_quarantine.quarantined_path",
+                return_value="/bin/codex",
+            ),
+            unittest.mock.patch("fleet.commands.preflight.subprocess.run") as run,
+        ):
+            result = preflight._check_codex_update()
+
+        run.assert_not_called()
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("Gatekeeper", result.detail)
+        self.assertNotIn("brew install", result.detail)
 
     def test_extract_version_from_codex_output(self) -> None:
         self.assertEqual(preflight._extract_version("codex-cli 0.132.0"), "0.132.0")
