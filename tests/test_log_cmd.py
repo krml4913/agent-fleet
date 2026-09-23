@@ -51,6 +51,14 @@ class LogCmdTests(unittest.TestCase):
         self.assertIn("task-1", r.stdout)
         self.assertNotIn("task-2", r.stdout)
 
+    def test_filter_by_task_prefixed_id_normalized(self) -> None:
+        # `fleet log task-1` must match the same events as `fleet log 1` (#315),
+        # not the (nonexistent) stored id "task-1".
+        r = run_fleet("log", "task-1", "--project", "demo", fleet_home=self.fleet_home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("task-1", r.stdout)
+        self.assertNotIn("task-2", r.stdout)
+
     def test_filter_by_type(self) -> None:
         r = run_fleet("log", "--type", "spawn", "--project", "demo",
                       fleet_home=self.fleet_home)

@@ -19,6 +19,20 @@ State-dir resolution:
   - Failing both, fall back to registry resolution from cwd (ad-hoc human use).
 
 If none of those produce an id, :class:`TaskNotFound` is raised.
+
+Self-heal (:func:`resolve` only, Issue #315): when state-dir resolution fails
+because ``FLEET_STATE_DIR`` is a leader session dir — e.g. a leader's env
+leaked into a driver pane's shell — and ``FLEET_TASK_ID`` is set, try
+cwd-based registry resolution before giving up: a driver's cwd is its
+worktree, which still resolves the right project even when
+``FLEET_STATE_DIR`` does not, and the healed dir is trusted only once
+confirmed to actually own that task id. Gated on ``FLEET_TASK_ID``
+specifically, not any explicit ``--task-id`` argument: that env var is the
+one unmistakable driver-pane signal (:func:`in_driver_pane`) — a leader-side
+command such as ``cleanup <id> --project`` also takes an explicit task id but
+never sets ``FLEET_TASK_ID``, and must keep demanding ``--project`` outright.
+:func:`resolve_project_state_dir` (used by leader-side, project-centric
+commands with no task id at all) never self-heals either.
 """
 from __future__ import annotations
 
@@ -85,9 +99,16 @@ def resolve(
     absent, the driver / ad-hoc fallbacks apply (``FLEET_STATE_DIR`` then cwd).
     """
     here = Path(cwd) if cwd is not None else Path.cwd()
-    state_dir = _resolve_state_dir(here, project_name)
+    env_task_id = os.environ.get("FLEET_TASK_ID")
 
-    task_id = explicit_id or os.environ.get("FLEET_TASK_ID")
+    try:
+        state_dir = _resolve_state_dir(here, project_name)
+    except TaskNotFound:
+        state_dir = _self_heal_state_dir(here, project_name, env_task_id)
+        if state_dir is None:
+            raise
+
+    task_id = explicit_id or env_task_id
     if task_id is None:
         task_id = _from_cwd(here, state_dir)
     if task_id is None:
@@ -95,7 +116,42 @@ def resolve(
             "could not determine task id "
             "(pass --task-id, set FLEET_TASK_ID, or run inside a task dir)"
         )
-    return state_dir, task_id
+    return state_dir, normalize_task_id(task_id)
+
+
+def _self_heal_state_dir(
+    here: Path, project_name: str | None, env_task_id: str | None
+) -> Path | None:
+    """Try cwd-based registry resolution after ``FLEET_STATE_DIR`` failed.
+
+    Gated on ``FLEET_TASK_ID`` specifically — not any explicit ``--task-id``
+    CLI argument — because that env var is the one unmistakable driver-pane
+    signal (:func:`in_driver_pane`): a leader-side command like ``cleanup
+    <id> --project`` / ``approve <id>`` also takes an explicit task id, but
+    never sets ``FLEET_TASK_ID``, and must keep demanding ``--project``
+    outright rather than silently leaning on cwd. Even then the healed dir is
+    trusted only once confirmed to actually own that task id. See the module
+    docstring's "Self-heal" section (Issue #315).
+    """
+    if project_name is not None or not env_task_id:
+        return None
+    task_id = normalize_task_id(env_task_id)
+    healed = state_mod.resolve_state_dir(here)
+    if healed is None:
+        return None
+    if not (healed / "tasks" / f"task-{task_id}").is_dir():
+        return None
+    return healed
+
+
+def normalize_task_id(task_id: str) -> str:
+    """Strip one leading ``task-`` so ``<id>`` and ``task-<id>`` resolve alike.
+
+    ``task_dir()`` always prepends ``task-`` itself; passing an id that
+    already carries the prefix — e.g. copied from a ``task-<id>`` directory
+    name — would otherwise double it (``task-task-<id>``, Issue #315).
+    """
+    return task_id[len("task-"):] if task_id.startswith("task-") else task_id
 
 
 def _resolve_state_dir_core(here: Path, project_name: str | None) -> Path:
@@ -123,7 +179,9 @@ def _resolve_state_dir_core(here: Path, project_name: str | None) -> Path:
         if _is_session_dir(candidate):
             # A project-agnostic leader pane points FLEET_STATE_DIR at its
             # session dir, which has no tasks/. The cwd fallbacks must not apply
-            # for a leader — name the project explicitly instead.
+            # for a leader — name the project explicitly instead. (A driver
+            # pane whose FLEET_STATE_DIR leaked a leader's session dir, Issue
+            # #315, self-heals earlier, in :func:`resolve` — see there.)
             raise _Unresolved(
                 f"FLEET_STATE_DIR is the leader session dir {candidate.name!r}, "
                 f"which owns no tasks; pass --project <name> to name the target "

@@ -54,6 +54,40 @@ class MarkerTests(unittest.TestCase):
         self.assertTrue(pl.is_agent_marker("Claude_Code_Session_Id"))
 
 
+class FleetVarTests(unittest.TestCase):
+    def test_strips_inherited_fleet_vars(self) -> None:
+        env = {
+            "FLEET_SESSION": "main",
+            "FLEET_STATE_DIR": "/leader/session/dir",
+            "FLEET_TASK_ID": "leaked",
+            "HOME": "/h",
+        }
+        self.assertEqual(pl.strip_fleet_vars(env), {"HOME": "/h"})
+
+    def test_keeps_user_level_fleet_config_vars(self) -> None:
+        # Only the task-scoped FLEET_* keys a per-pane override always
+        # supplies are stripped; FLEET_HOME / FLEET_MUX / FLEET_NO_NOTIFY /
+        # FLEET_NO_MUX / FLEET_NO_TMUX / FLEET_ZELLIJ* are user configuration
+        # a driver pane must keep seeing (a blanket FLEET_* strip broke this).
+        env = {
+            "FLEET_HOME": "/custom/fleet-home",
+            "FLEET_MUX": "tmux",
+            "FLEET_NO_NOTIFY": "1",
+            "FLEET_NO_MUX": "1",
+            "FLEET_NO_TMUX": "1",
+            "FLEET_ZELLIJ": "/opt/zellij",
+            "FLEET_ZELLIJ_TEMP_CLIENT": "1",
+        }
+        self.assertEqual(pl.strip_fleet_vars(env), env)
+        for key in env:
+            self.assertFalse(pl.is_fleet_var(key), key)
+
+    @unittest.skipUnless(sys.platform == "win32", "case-insensitive env on Windows")
+    def test_fleet_vars_case_insensitive_on_windows(self) -> None:
+        self.assertTrue(pl.is_fleet_var("fleet_session"))
+        self.assertFalse(pl.is_fleet_var("fleet_home"))
+
+
 class BuildEnvTests(unittest.TestCase):
     def test_overrides_fixed_vars_and_path(self) -> None:
         root = os.path.abspath("clone-root")
@@ -88,6 +122,48 @@ class BuildEnvTests(unittest.TestCase):
         # An explicit override is applied after stripping (caller intent wins).
         env = pl.build_env({}, {"CLAUDE_CODE_FOO": "1"}, clone_root="/r")
         self.assertEqual(env["CLAUDE_CODE_FOO"], "1")
+
+    def test_inherited_fleet_vars_do_not_leak_through(self) -> None:
+        # zellij has no per-pane env: every pane in a session inherits the
+        # *server's* environment — the leader's, if the session was created
+        # from a leader pane (#315). None of that may survive into a driver
+        # pane's env, even for a FLEET_* key the overrides don't set.
+        inherited = {
+            "FLEET_SESSION": "main",
+            "FLEET_STATE_DIR": "/leader/session/dir",
+            "HOME": "/h",
+        }
+        env = pl.build_env(inherited, {"FLEET_TASK_ID": "7"}, clone_root="/r")
+        self.assertEqual(env["FLEET_TASK_ID"], "7")
+        self.assertNotIn("FLEET_SESSION", env)
+        self.assertNotIn("FLEET_STATE_DIR", env)
+        self.assertEqual(env["HOME"], "/h")
+
+    def test_fleet_var_override_still_wins_over_inherited(self) -> None:
+        inherited = {"FLEET_STATE_DIR": "/leader/session/dir"}
+        env = pl.build_env(
+            inherited, {"FLEET_STATE_DIR": "/project/state"}, clone_root="/r"
+        )
+        self.assertEqual(env["FLEET_STATE_DIR"], "/project/state")
+
+    def test_user_level_fleet_vars_survive_build_env(self) -> None:
+        # FLEET_HOME (state root) / FLEET_MUX (backend choice) are user
+        # configuration, not task-scoped overrides: build_env must not wipe
+        # them just because they share the FLEET_ prefix (#315 follow-up).
+        inherited = {
+            "FLEET_HOME": "/custom/fleet-home",
+            "FLEET_MUX": "tmux",
+            "FLEET_SESSION": "main",
+            "FLEET_STATE_DIR": "/leader/session/dir",
+        }
+        env = pl.build_env(
+            inherited, {"FLEET_TASK_ID": "7", "FLEET_STATE_DIR": "/project/state"},
+            clone_root="/r",
+        )
+        self.assertEqual(env["FLEET_HOME"], "/custom/fleet-home")
+        self.assertEqual(env["FLEET_MUX"], "tmux")
+        self.assertEqual(env["FLEET_STATE_DIR"], "/project/state")
+        self.assertNotIn("FLEET_SESSION", env)
 
 
 class ResolveTests(unittest.TestCase):

@@ -74,6 +74,13 @@ class InboxCmdTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("no task dir", r.stderr)
 
+    def test_task_prefixed_id_normalized(self) -> None:
+        # `fleet-agent inbox task-1 ...` must not look for task-task-1 (#315).
+        r = self._run("inbox", "task-1", "Hello", "--project", "demo")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        inbox = self.state_dir / "tasks" / "task-1" / "inbox.md"
+        self.assertIn("Hello", inbox.read_text(encoding="utf-8"))
+
 
 class InboxDeliveryTests(unittest.TestCase):
     """Unit tests for _wake_driver_pane — pane delivery without a real session."""

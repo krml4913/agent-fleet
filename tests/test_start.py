@@ -1061,6 +1061,37 @@ class ValidateTaskIdTests(unittest.TestCase):
         self.assertIsNotNone(msg)
         self.assertIn("kebab-case", msg)
 
+    def test_rejects_leading_task_prefix(self) -> None:
+        # Issue #315 review: normalize_task_id() strips one leading "task-"
+        # from an id passed to other commands, so a task actually named
+        # "task-foo" (dir task-task-foo) would become unaddressable there.
+        from fleet.commands import start
+
+        for task_id in ["task-foo", "task-env-leak-315", "task-task-x"]:
+            with self.subTest(task_id=task_id):
+                msg = start._validate_task_id(task_id)
+                self.assertIsNotNone(msg)
+                self.assertIn("task-", msg)
+                self.assertIn(task_id, msg)
+
+    def test_leading_task_prefix_checked_after_shape(self) -> None:
+        # "Task-foo" is both malformed (uppercase) and starts with a
+        # case-varied "task-" — the kebab-case error wins since shape is
+        # checked first (mirrors test_shape_checked_before_length).
+        from fleet.commands import start
+
+        msg = start._validate_task_id("Task-foo")
+        self.assertIsNotNone(msg)
+        self.assertIn("kebab-case", msg)
+
+    def test_task_without_hyphen_is_not_rejected(self) -> None:
+        # Only a literal "task-" prefix is disallowed; "task1" etc. (no
+        # hyphen right after "task") is an ordinary, addressable slug.
+        from fleet.commands import start
+
+        self.assertIsNone(start._validate_task_id("task1"))
+        self.assertIsNone(start._validate_task_id("task"))
+
 
 class StartTaskIdValidationTests(unittest.TestCase):
     """``start`` rejects invalid task ids before creating any state."""
@@ -1091,6 +1122,16 @@ class StartTaskIdValidationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("kebab-case", result.stderr)
         self.assertFalse((self.state_dir / "tasks" / "task-Bad_ID").exists())
+
+    def test_rejects_leading_task_prefix_task_id(self) -> None:
+        result = run_fleet_agent(
+            "start", "--project", "demo", "--dry-run",
+            "task-foo", "some work",
+            fleet_home=self.fleet_home,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task-", result.stderr)
+        self.assertFalse((self.state_dir / "tasks" / "task-task-foo").exists())
 
     def test_rejects_too_long_task_id(self) -> None:
         long_id = "a" * 25

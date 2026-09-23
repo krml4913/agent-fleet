@@ -45,6 +45,7 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    args.task_id = task_context.normalize_task_id(args.task_id)
     project_name = args.project if args.project != "." else None
     try:
         state_dir = task_context.resolve_project_state_dir(project_name=project_name)

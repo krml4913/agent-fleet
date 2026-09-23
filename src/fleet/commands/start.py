@@ -21,6 +21,7 @@ from .. import state as state_mod
 from .. import task_context
 from .. import formation as formation_mod
 from .. import mux
+from .. import pane_launch
 from ..events import append_event, truncate_text
 
 
@@ -33,13 +34,22 @@ def _validate_task_id(task_id: str) -> str | None:
 
     Returns an error message describing the violation, or ``None`` when the
     id is valid. The id must be kebab-case (lowercase ``a-z``, ``0-9``, single
-    hyphens, no leading/trailing/consecutive hyphens) and at most
+    hyphens, no leading/trailing/consecutive hyphens), must not itself start
+    with ``task-`` (the task dir already prepends that prefix, and
+    ``task_context.normalize_task_id()`` strips one leading ``task-`` from an
+    id passed to other commands — a task named e.g. ``task-foo`` would become
+    unaddressable as soon as that stripping ran, Issue #315), and at most
     ``_TASK_ID_MAX_LEN`` characters.
     """
     if not _TASK_ID_RE.match(task_id):
         return (
             "error: task id must be kebab-case "
             f"(lowercase a-z, 0-9, single hyphens): {task_id}"
+        )
+    if task_id.startswith("task-"):
+        return (
+            "error: task id must not start with 'task-' (added automatically "
+            f"as the task dir prefix, and stripped back off by other commands): {task_id}"
         )
     if len(task_id) > _TASK_ID_MAX_LEN:
         return f"error: task id too long ({len(task_id)} chars, max {_TASK_ID_MAX_LEN}): {task_id}"
@@ -161,6 +171,10 @@ def launch_stage_driver(
 
     try:
         repo_root = _fleet_clone_root()
+        # These three keys are exactly pane_launch.TASK_SCOPED_FLEET_VARS —
+        # the only FLEET_* pane_launch.strip_fleet_vars() strips from what a
+        # zellij pane inherits before applying this override (Issue #315).
+        # Kept in sync with an assertion below rather than duplicated by name.
         driver_env = {
             "FLEET_TASK_ID": task_id,
             "FLEET_STATE_DIR": str(state_dir),
@@ -170,6 +184,10 @@ def launch_stage_driver(
             "FLEET_SESSION": owner_session,
             "PATH": f"{repo_root}{os.pathsep}{os.environ.get('PATH', '')}",
         }
+        assert (
+            {k for k in driver_env if k.startswith("FLEET_")}
+            == set(pane_launch.TASK_SCOPED_FLEET_VARS)
+        ), "driver_env's FLEET_* keys drifted from pane_launch.TASK_SCOPED_FLEET_VARS"
         # Session display name so the user can tell resumable sessions apart
         # in the picker: <project>-<task_id>-<role> (role disambiguates
         # pair_review / multi_stage panes on the same task).

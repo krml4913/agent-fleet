@@ -13,7 +13,13 @@ and this launcher
    markers a creating agent leaks into it (``CLAUDECODE``, ``CLAUDE_PID``,
    ``CLAUDE_EFFORT``, ``AI_AGENT``, ``CLAUDE_CODE_*`` except user configuration such as
    ``CLAUDE_CODE_USE_BEDROCK``; ``CLAUDE_CONFIG_DIR`` and ``ANTHROPIC_*``
-   are kept),
+   are kept) **and every inherited task-scoped** ``FLEET_*`` **key**
+   (``FLEET_SESSION`` / ``FLEET_STATE_DIR`` / ``FLEET_TASK_ID`` —
+   :data:`TASK_SCOPED_FLEET_VARS`) — those must come only from the per-pane
+   overrides below, never from whichever process created the zellij session
+   (the leader's, if it was created from a leader pane: Issue #315). Other
+   ``FLEET_*`` keys (``FLEET_HOME``, ``FLEET_MUX``, …) are user-level
+   switches and are left alone,
 2. applies the per-pane env from the JSON env file (``FLEET_*``, ``PATH``…),
    prefixes ``PATH`` with the clone root and sets ``PYTHONUTF8=1`` /
    ``MSYS_NO_PATHCONV=1``,
@@ -98,6 +104,17 @@ KEEP_CLAUDE_CODE_VARS: frozenset[str] = frozenset(
 #: Always set in the pane environment.
 FIXED_ENV: dict[str, str] = {"PYTHONUTF8": "1", "MSYS_NO_PATHCONV": "1"}
 
+#: The ``FLEET_*`` keys a per-pane override (``driver_env`` in
+#: ``commands/start.py`` / ``commands/leader.py``) owns and always supplies.
+#: Only these are stripped from the *inherited* environment before overrides
+#: are applied (Issue #315) — every other ``FLEET_*`` (``FLEET_HOME``,
+#: ``FLEET_MUX``, ``FLEET_NO_NOTIFY``, ``FLEET_NO_MUX``, ``FLEET_NO_TMUX``,
+#: ``FLEET_ZELLIJ``, ``FLEET_ZELLIJ_TEMP_CLIENT``, …) is user configuration,
+#: not task-scoped, and must pass through untouched.
+TASK_SCOPED_FLEET_VARS: frozenset[str] = frozenset(
+    {"FLEET_TASK_ID", "FLEET_STATE_DIR", "FLEET_SESSION"}
+)
+
 
 def _is_windows() -> bool:
     return sys.platform == "win32"
@@ -172,6 +189,30 @@ def strip_agent_markers(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if not is_agent_marker(k)}
 
 
+def is_fleet_var(name: str) -> bool:
+    """True for an inherited, task-scoped ``FLEET_*`` variable to strip.
+
+    Only :data:`TASK_SCOPED_FLEET_VARS` — the keys a per-pane override always
+    supplies — are stripped from the *inherited* environment before overrides
+    are applied. zellij has no per-pane environment (module docstring): every
+    pane in a session inherits the *server's* environment, i.e. whichever
+    process created the session. When that was a leader pane, its own
+    ``FLEET_SESSION`` / ``FLEET_STATE_DIR`` (and no ``FLEET_TASK_ID``) would
+    otherwise leak through into a driver pane whenever the overrides don't
+    happen to cover every leaked key (Issue #315). A blanket ``FLEET_*``
+    strip would be wrong: ``FLEET_HOME``, ``FLEET_MUX``, ``FLEET_NO_NOTIFY``
+    and friends are user configuration, not task-scoped, and must pass
+    through untouched.
+    """
+    key = name.upper() if _is_windows() else name
+    return key in TASK_SCOPED_FLEET_VARS
+
+
+def strip_fleet_vars(env: Mapping[str, str]) -> dict[str, str]:
+    """Return ``env`` without any inherited, task-scoped ``FLEET_*`` variable."""
+    return {k: v for k, v in env.items() if not is_fleet_var(k)}
+
+
 def _env_get(env: Mapping[str, str], name: str) -> tuple[str | None, str | None]:
     """Case-insensitive (on Windows) lookup → ``(actual_key, value)``."""
     if name in env:
@@ -214,12 +255,13 @@ def build_env(
     *,
     clone_root: str | os.PathLike[str] = CLONE_ROOT,
 ) -> dict[str, str]:
-    """The agent's environment: inherited − markers + overrides + fixed vars.
+    """The agent's environment: inherited − markers − FLEET_* + overrides + fixed vars.
 
     ``PATH`` ends up with the clone root first (once), ``~`` entries expanded,
     and empty entries dropped.
     """
     env = strip_agent_markers(inherited)
+    env = strip_fleet_vars(env)
     for k, v in (overrides or {}).items():
         _env_set(env, str(k), str(v))
     for k, v in FIXED_ENV.items():
