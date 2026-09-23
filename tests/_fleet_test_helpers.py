@@ -2,13 +2,16 @@
 
 All tests that touch fleet state must isolate ``$FLEET_HOME`` to a
 tempdir so they don't interact with the live agent-fleet dogfooding state.
+Importing this module makes that the default: see ``AMBIENT_FLEET_HOME``.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +20,19 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
+
+# Hermetic global tier (#319): point the *ambient* ``$FLEET_HOME`` at a
+# throwaway dir before any test imports fleet. Without it, every test that
+# does not set its own FLEET_HOME resolves ``<clone>/fleet-state`` -- the
+# developer's live state -- so a seeded ``global/`` tier (formations, roles,
+# config, sessions) leaks into assertions, and anything that moves a task
+# through the orchestrator rewrites the real ``global/dashboard.html`` and
+# touches ``global/sessions/<label>/``. An inherited FLEET_HOME is overridden
+# on purpose: the suite must never run against a real state dir. Tests that
+# need a populated tier still set ``$FLEET_HOME`` per test, on top of this.
+AMBIENT_FLEET_HOME = tempfile.mkdtemp(prefix="fleet-test-home-")
+os.environ["FLEET_HOME"] = AMBIENT_FLEET_HOME
+atexit.register(shutil.rmtree, AMBIENT_FLEET_HOME, ignore_errors=True)
 
 # Hermetic by default: no test may create a REAL multiplexer session (tmux, or
 # zellij — the default backend on Windows) unless live tests are explicitly
