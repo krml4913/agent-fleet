@@ -265,7 +265,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--agent",
         default=None,
-        help="Override the formation's agent for the first stage (e.g. claude:sonnet)",
+        help=(
+            "Override the formation's agent for the first stage: a vendor:model "
+            "spec (e.g. claude:sonnet) or an agent alias from the global config"
+        ),
     )
     p.add_argument(
         "--title",
@@ -498,6 +501,15 @@ def run(args: argparse.Namespace) -> int:
     # Apply --agent override to the first stage
     if args.agent:
         expanded_stages[current_stage_idx]["agent"] = args.agent
+
+    # Resolve agent aliases once, here, so task.yaml / events / every later
+    # stage carry the full vendor:model spec (the alias name is kept as
+    # ``agent_alias``); editing an alias later never changes this task.
+    try:
+        formation_mod.resolve_stage_agents(expanded_stages)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
     current_stage = expanded_stages[current_stage_idx]
     agent_spec = current_stage.get("agent", "")

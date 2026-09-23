@@ -291,7 +291,7 @@ A project that is no longer needed can be removed from the registry with
     projects.yaml                      ← global registry (name → repo map)
     projects.yaml.lock                 ← for flock
     global/                            ← reserved namespace for cross-project concerns (§6, §5.6)
-      config.yaml                      ← global config (`mux`, `leader_agent`; `fleet config`; see below)
+      config.yaml                      ← global config (`mux`, `leader_agent`, `agent_aliases`; `fleet config`; see below)
       leader-memory/                   ← two-tier leader memory: GLOBAL layer (loaded every session)
         MEMORY.md      # index
         GUIDE.md       # discipline
@@ -343,7 +343,8 @@ Settings that are not per-project live in `fleet-state/global/config.yaml`
 | Key | Values | Built-in default |
 |---|---|---|
 | `mux` | `zellij` \| `tmux` | `zellij` (every platform) |
-| `leader_agent` | `vendor:model` (validated like `fleet leader --agent`, via `fleet.agents.parse_spec`) | `claude:opus` |
+| `leader_agent` | `vendor:model` or an agent alias (validated like `fleet leader --agent`, via `fleet.agents.resolve_spec`) | `claude:opus` |
+| `agent_aliases` | map of alias name → `vendor:model` (managed as `agent_aliases.<name>`) | none |
 
 - `mux` is **enumerable** (`config.KEYS`): the value must be one of a fixed,
   known set. `leader_agent` is **free-form** (`config.FREEFORM`): any value
@@ -371,7 +372,19 @@ Settings that are not per-project live in `fleet-state/global/config.yaml`
   file that is not a valid mapping is refused rather than overwritten.
 - `fleet config` / `get` report the config layer (file, else default) and only
   *note* an active `FLEET_MUX`; the env layer is applied by `fleet.mux`.
-  `leader_agent` has no such env note (it has no env layer).
+  `leader_agent` has no such env note (it has no env layer). When
+  `leader_agent` is an alias the listing shows its resolution
+  (`leader_agent: deep -> claude:opus (config)`).
+- **Agent aliases** (`agent_aliases`, the one map-valued key): alias name
+  (`[A-Za-z0-9_-]+`, never `:`) → a full `vendor:model` spec; a target that is
+  not a spec (e.g. another alias) is rejected. Written as dotted keys:
+  `fleet config set|get|unset agent_aliases.<name>`; `fleet config unset
+  <key>` also clears a scalar key. `fleet.agents.resolve_spec` resolves an
+  alias **once**, where the spec enters task / leader state
+  (`fleet-agent start` → `formation.resolve_stage_agents` over every stage's
+  `agent` / `peer_review.agent`; `fleet leader` → `session.json`), keeping the
+  alias name as `agent_alias`. `formation.validate` rejects an unknown alias
+  like a bad spec. Unsetting an alias that `leader_agent` names is refused.
 
 #### Project Resolution Logic
 

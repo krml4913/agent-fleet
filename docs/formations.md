@@ -80,6 +80,12 @@ Format: `vendor:model`. MVP supports **claude and codex only** (see
 | `claude:opus` | claude vendor, opus model |
 | `claude:sonnet` | claude vendor, sonnet model |
 | `codex:gpt-5.5` | codex vendor, gpt-5.5 model |
+| `deep` | an **agent alias** from the global config (`fleet config set agent_aliases.deep claude:opus`) |
+
+An agent alias (no `:`) is resolved to its full spec once, at `fleet-agent
+start`: `task.yaml` stores the resolved `agent` (plus `agent_alias: <name>`),
+so changing the alias later never affects a running task. See the README's
+"Agent aliases" section.
 
 Resolution order (`fleet-agent start`):
 
@@ -393,7 +399,8 @@ approval/review/check boundaries cannot silently disappear through a typo
 | stage missing `role` | `formation stages[i] missing required field: role` |
 | malformed `verify` | `formation stages[i] verify must carry a non-empty 'command' string`, a positive-integer error for `timeout` / `max_iterations`, or `verify.shell must be one of bash, sh, pwsh, powershell, cmd` |
 | `verify.shell` not installed (at run time) | The gate fails with exit 127 and `verify shell '<name>' was requested (verify.shell) but was not found on this machine; …` in the driver's inbox; `max_iterations` then escalates. |
-| bad `agent` spec | At runtime: `unsupported vendor` or `agent spec must be 'vendor:model'`. |
+| bad `agent` / `peer_review.agent` spec | `formation stages[i] agent: unsupported vendor …` (or `agent spec must be 'vendor:model'`); `peer_review.agent` is reported as `stages[i] peer_review.agent`. |
+| unknown agent alias | `formation stages[i] agent: unknown agent alias 'x' (known aliases: …)` |
 | unsupported vendor (e.g. `openai:gpt-4`) | `unsupported vendor 'openai'; supported: ['claude', 'codex']` |
 
 ---

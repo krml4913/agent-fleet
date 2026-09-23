@@ -235,7 +235,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | コマンド | 用途 |
 |---|---|
 | `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
-| `fleet config [get <key> \| set <key> <value>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec で `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）。 |
+| `fleet config [get <key> \| set <key> <value> \| unset <key>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定 / 削除。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec またはエージェントエイリアスで `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）、`agent_aliases.<name>` = エージェントエイリアス（[エージェントエイリアス](#エージェントエイリアス) を参照）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`）。エージェントの優先順位: `--agent` > グローバル config の `leader_agent` > 組み込みデフォルト `claude:opus`。 |
 | `fleet attach [target] [--project P] [--session LABEL]` | タスクの driver ペイン（そのタスクを所有するセッション `fleet-<owner_session>` 内。`--project` でタスクを特定）、またはデフォルトで `fleet-<LABEL>` の `leader` ペインにアタッチする（`--session`、デフォルトは `$FLEET_SESSION`、なければ `main`）。対象セッションが動いていなければ、稼働中のセッションを一覧表示する。 |
@@ -379,7 +379,48 @@ config ファイルがなければデフォルトを使うだけで、読めな�
 値は `--agent` と同じ方法で検証される（未知の vendor は、サポート対象を列挙して
 拒否される）。config ファイル中の `leader_agent` が欠けている、または不正な場合は、
 他のグローバル config キーと同様に警告を出して組み込みのデフォルトにフォールバック
-するだけであり、コマンドが止まることはない。
+するだけであり、コマンドが止まることはない。`--agent` と `leader_agent` はどちらも
+[エージェントエイリアス](#エージェントエイリアス) も受け付ける
+（`./fleet config set leader_agent deep`）。エイリアスは起動時に完全な spec へ解決され、
+`fleet config` は両方を表示する（`leader_agent: deep -> claude:opus (config)`）。
+
+---
+
+## エージェントエイリアス
+
+エージェントエイリアスは `vendor:model` spec 全体に付ける短い名前で、グローバル config に
+一度定義すれば spec を書ける場所ならどこでも使える: formation の stage の `agent` と
+`peer_review.agent`、`fleet-agent start --agent`、`fleet leader --agent`、
+config キー `leader_agent`。
+
+```bash
+./fleet config set agent_aliases.fast claude:sonnet
+./fleet config set agent_aliases.deep claude:opus
+./fleet config get agent_aliases.deep       # -> claude:opus
+./fleet config unset agent_aliases.fast
+./fleet config                              # 全エイリアスを表示
+```
+
+```yaml
+# formation の stage
+- role: implementer
+  agent: fast
+  peer_review:
+    role: code-reviewer
+    agent: deep
+```
+
+- エイリアスは完全な `vendor:model` spec 1 つに対応する。エイリアスからエイリアスへの
+  連鎖は拒否される。エイリアス名に使えるのは英数字・`_`・`-` のみ（`:` は不可）なので、
+  本物の spec と衝突することはない。
+- エイリアスは spec が task / leader の状態に入る時点で **一度だけ** 解決される。
+  `task.yaml`、イベント、ダッシュボード、cost/usage は解決済みの spec を持つ
+  （エイリアス名は `agent_alias` として横に残る）。後からエイリアスを変えても、
+  実行中の task や leader は変わらない。
+- 未知のエイリアスは既知のエイリアス一覧付きのエラーになる — `fleet-agent start`、
+  `fleet leader`、`fleet config set leader_agent`、formation の検証
+  （`fleet formation show`）のいずれでも。
+- エイリアスは現状グローバルのみ（プロジェクト単位の層はまだ無い）。
 
 ---
 

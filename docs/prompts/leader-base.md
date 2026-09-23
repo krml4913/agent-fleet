@@ -58,7 +58,7 @@ Communication:
     user_approval gates are the exception you relay.
 
 Commands (`fleet-agent`):
-    start <id> "<desc>" --project <name> [--formation T] [--agent A]  — spawn a task
+    start <id> "<desc>" --project <name> [--formation T] [--agent A]  — spawn a task (A: vendor:model or alias)
     start <id> --prompt-file PATH --project <name> [--formation T] [--agent A]
     inbox <id> "<msg>" --project <name>   — instruct a driver
     cleanup <id> --project <name> [--archive]  — retire a finished task
