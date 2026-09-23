@@ -5,6 +5,12 @@ Specs look like ``vendor:model`` (e.g. ``claude:sonnet``,
 (launch command, pane ready/gate detection) come from the adapter
 registry in :mod:`fleet.adapters` — adding a vendor is one file there, not
 edits scattered across this module.
+
+Anywhere a spec is accepted, an *agent alias* from the global config
+(``agent_aliases`` in ``fleet-state/global/config.yaml``) may be written
+instead; :func:`resolve_spec` turns it into the full spec once, where the spec
+enters task / leader state, so everything downstream only ever sees a
+``vendor:model`` spec.
 """
 from __future__ import annotations
 
@@ -37,6 +43,37 @@ def parse_spec(spec: str) -> tuple[str, str]:
     if not model:
         raise ValueError(f"empty model in agent spec: {spec!r}")
     return vendor, model
+
+
+def is_alias(spec: str) -> bool:
+    """True when ``spec`` is written as an alias name (no ``:``), not a full spec."""
+    return isinstance(spec, str) and ":" not in spec and bool(spec.strip())
+
+
+def resolve_spec(spec: str, aliases: dict[str, str] | None = None) -> str:
+    """Resolve an agent alias to its full ``vendor:model`` spec and validate it.
+
+    A value containing ``:`` is a spec and is validated with :func:`parse_spec`
+    (returned stripped). Anything else is looked up in ``aliases`` (default:
+    the global config's ``agent_aliases``); an unknown alias raises
+    ``ValueError`` naming the known aliases. Alias targets are full specs by
+    construction (:func:`fleet.config.normalize_alias`), so there are no chains.
+    """
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError(f"agent spec must be 'vendor:model' or an agent alias, got {spec!r}")
+    spec = spec.strip()
+    if ":" in spec:
+        parse_spec(spec)
+        return spec
+    from . import config as config_mod  # config imports this module
+
+    if aliases is None:
+        aliases = config_mod.load_aliases()
+    if spec not in aliases:
+        raise ValueError(config_mod.unknown_alias_message(spec, aliases))
+    target = aliases[spec]
+    parse_spec(target)
+    return target
 
 
 def cli_command(spec: str) -> list[str]:

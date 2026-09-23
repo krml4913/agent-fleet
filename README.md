@@ -232,7 +232,7 @@ not killed for you — fleet warns if it spots one still running.
 | Command | Purpose |
 |---|---|
 | `fleet preflight` | Check Python / multiplexer (zellij or tmux; shows which is selected and why) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
-| `fleet config [get <key> \| set <key> <value>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Keys: `mux` = `zellij` \| `tmux` (see [Choosing the multiplexer](#choosing-the-multiplexer)); `leader_agent` = a `vendor:model` spec, the default agent for `fleet leader` (see [Choosing the leader's agent](#choosing-the-leaders-agent)). |
+| `fleet config [get <key> \| set <key> <value> \| unset <key>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Keys: `mux` = `zellij` \| `tmux` (see [Choosing the multiplexer](#choosing-the-multiplexer)); `leader_agent` = a `vendor:model` spec or an agent alias, the default agent for `fleet leader` (see [Choosing the leader's agent](#choosing-the-leaders-agent)); `agent_aliases.<name>` = an agent alias (see [Agent aliases](#agent-aliases)). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`). Agent precedence: `--agent` > `leader_agent` in the global config > built-in default `claude:opus`. |
 | `fleet attach [target] [--project P] [--session LABEL]` | Attach to a task's driver pane (in the session that owns the task, `fleet-<owner_session>`; `--project` locates the task) or, by default, to the `leader` pane of `fleet-<LABEL>` (`--session`, default `$FLEET_SESSION`, else `main`). Lists the live sessions if the target one isn't running. |
@@ -377,7 +377,48 @@ first hit wins:
 The value is validated the same way as `--agent` (an unknown vendor is
 rejected, listing the supported ones); a missing or invalid `leader_agent` in
 the config file only warns and falls back to the built-in default, like every
-other global config key.
+other global config key. Both `--agent` and `leader_agent` also accept an
+[agent alias](#agent-aliases) (`./fleet config set leader_agent deep`); it is
+resolved to the full spec at launch, and `fleet config` shows both
+(`leader_agent: deep -> claude:opus (config)`).
+
+---
+
+## Agent aliases
+
+An agent alias is a short name for a whole `vendor:model` spec, defined once in
+the global config and usable anywhere a spec goes: a formation stage's `agent`
+and `peer_review.agent`, `fleet-agent start --agent`, `fleet leader --agent`,
+and the `leader_agent` config key.
+
+```bash
+./fleet config set agent_aliases.fast claude:sonnet
+./fleet config set agent_aliases.deep claude:opus
+./fleet config get agent_aliases.deep       # -> claude:opus
+./fleet config unset agent_aliases.fast
+./fleet config                              # lists every alias
+```
+
+```yaml
+# formation stage
+- role: implementer
+  agent: fast
+  peer_review:
+    role: code-reviewer
+    agent: deep
+```
+
+- An alias maps to one full `vendor:model` spec; alias-to-alias chains are
+  rejected. Alias names use letters, digits, `_` and `-` only (never `:`), so
+  they can't collide with a real spec.
+- An alias is resolved **once**, when the spec enters task / leader state:
+  `task.yaml`, events, the dashboard and cost/usage carry the resolved spec
+  (the alias name is kept next to it as `agent_alias`). Changing an alias later
+  never changes a task or leader that is already running.
+- An unknown alias is an error naming the known aliases — at `fleet-agent
+  start`, `fleet leader`, `fleet config set leader_agent`, and formation
+  validation (`fleet formation show`).
+- Aliases are global only (no per-project layer yet).
 
 ---
 

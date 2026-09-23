@@ -43,6 +43,7 @@ def run_list(args: argparse.Namespace) -> int:
     template_names = set(formation_mod.list_templates())
 
     print("formations and seed sources:")
+    state_dir = None
     try:
         state_dir = task_context.resolve_project_state_dir(project_name=project_name)
         project_names = set(formation_mod.list_custom(state_dir))
@@ -70,9 +71,30 @@ def run_list(args: argparse.Namespace) -> int:
         for tier, wins in tiers:
             suffix = " (wins)" if wins else " (shadowed)"
             print(f"  {name} [{tier}]{suffix}")
+            if wins:
+                problem = _validation_problem(name, tier == "global", state_dir)
+                if problem:
+                    print(f"    invalid: {problem}")
         if name in template_names:
             print(f"  {name} [seed:template]")
     return 0
+
+
+def _validation_problem(name: str, is_global: bool, state_dir) -> str | None:
+    """The validation error of the winning runtime formation ``name``, if any.
+
+    Flags a bad agent spec or an unknown agent alias (``formation.validate``)
+    in the listing instead of only at ``fleet-agent start``.
+    """
+    try:
+        if is_global or state_dir is None:
+            data = formation_mod.load_global(name)
+        else:
+            data = formation_mod.load_custom(state_dir, name)
+        formation_mod.validate(data)
+    except Exception as e:  # noqa: BLE001 — a listing never crashes
+        return str(e)
+    return None
 
 
 def run_show(args: argparse.Namespace) -> int:

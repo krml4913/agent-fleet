@@ -61,9 +61,10 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
         "--agent",
         default=None,
         help=(
-            "Agent spec for the leader pane. Precedence: this flag > "
-            "'leader_agent' in global config (fleet config set leader_agent "
-            f"<vendor:model>) > built-in default ({DEFAULT_LEADER_AGENT})."
+            "Agent spec (vendor:model) or agent alias for the leader pane. "
+            "Precedence: this flag > 'leader_agent' in global config (fleet "
+            "config set leader_agent <vendor:model|alias>) > built-in default "
+            f"({DEFAULT_LEADER_AGENT})."
         ),
     )
     p.add_argument(
@@ -118,8 +119,11 @@ def run(args: argparse.Namespace) -> int:
             return _attach(m, session)
         return 0
 
+    # Resolve an agent alias (from --agent or leader_agent) to the full spec
+    # at launch; the session record carries the resolved spec.
+    agent_alias = agent_spec.strip() if agents_mod.is_alias(agent_spec) else None
     try:
-        agents_mod.parse_spec(agent_spec)
+        agent_spec = agents_mod.resolve_spec(agent_spec)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -164,6 +168,7 @@ def run(args: argparse.Namespace) -> int:
     record: dict = {
         "label": label,
         "agent": agent_spec,
+        **({"agent_alias": agent_alias} if agent_alias else {}),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "pane": f"{session}:leader",
     }

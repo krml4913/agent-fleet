@@ -229,6 +229,8 @@ def expand_stages(formation_data: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for stage in raw:
         entry = dict(stage)
+        if isinstance(entry.get("peer_review"), dict):
+            entry["peer_review"] = dict(entry["peer_review"])
         entry["status"] = "pending"
         ua = entry.get("user_approval")
         if isinstance(ua, str):
@@ -238,6 +240,38 @@ def expand_stages(formation_data: dict[str, Any]) -> list[dict[str, Any]]:
             }
         result.append(entry)
     return result
+
+
+def resolve_stage_agents(
+    stages: list[dict[str, Any]], aliases: dict[str, str] | None = None
+) -> None:
+    """Resolve agent aliases in expanded ``stages`` in place.
+
+    Each stage's ``agent`` and ``peer_review.agent`` becomes the full
+    ``vendor:model`` spec (:func:`fleet.agents.resolve_spec`); when the value
+    was an alias, the alias name is kept alongside as ``agent_alias``. Called
+    once at ``fleet-agent start`` so task.yaml, events and every later stage
+    carry the resolved spec — editing the alias afterwards never changes a
+    running task. Raises ``ValueError`` (naming the stage) on a bad value.
+    """
+    from .agents import is_alias, resolve_spec
+
+    for idx, stage in enumerate(stages):
+        targets: list[tuple[dict[str, Any], str]] = [(stage, f"stages[{idx}].agent")]
+        pr = stage.get("peer_review")
+        if isinstance(pr, dict):
+            targets.append((pr, f"stages[{idx}].peer_review.agent"))
+        for holder, where in targets:
+            value = holder.get("agent")
+            if value is None or value == "":
+                continue
+            try:
+                resolved = resolve_spec(value, aliases)
+            except ValueError as e:
+                raise ValueError(f"formation {where}: {e}") from e
+            if is_alias(value):
+                holder["agent_alias"] = value.strip()
+            holder["agent"] = resolved
 
 
 # Safety-boundary gate keys (design P8). These are the only keys whose silent
@@ -259,6 +293,8 @@ def validate(data: dict[str, Any]) -> None:
       * a present ``user_approval`` must be the string ``"required"`` /
         ``"optional"`` or an object carrying a bool ``required``;
       * a present ``peer_review`` must be an object carrying ``role``;
+      * a present stage ``agent`` / ``peer_review.agent`` must be a valid
+        ``vendor:model`` spec or a configured agent alias;
       * a present ``verify`` must be an object carrying ``command``; its
         optional ``shell`` must be one of ``verify_shell.SUPPORTED_SHELLS``;
       * top-level gate keys and near-miss misspellings are rejected, because
@@ -285,6 +321,24 @@ def validate(data: dict[str, Any]) -> None:
         if "role" not in stage:
             raise ValueError(f"formation stages[{i}] missing required field: role")
         _validate_stage_gates(i, stage)
+        _validate_stage_agents(i, stage)
+
+
+def _validate_stage_agents(idx: int, stage: dict[str, Any]) -> None:
+    """Reject a stage / peer_review ``agent`` that is neither a spec nor a known alias."""
+    from .agents import resolve_spec
+
+    holders: list[tuple[Any, str]] = [(stage.get("agent"), "agent")]
+    pr = stage.get("peer_review")
+    if isinstance(pr, dict):
+        holders.append((pr.get("agent"), "peer_review.agent"))
+    for value, field in holders:
+        if value is None or value == "":
+            continue
+        try:
+            resolve_spec(value)
+        except ValueError as e:
+            raise ValueError(f"formation stages[{idx}] {field}: {e}") from e
 
 
 def _validate_top_level_gates(data: dict[str, Any]) -> None:
