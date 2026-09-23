@@ -6,8 +6,11 @@ environment (every pane inherits the zellij *server's* environment, i.e. whichev
 process created the session): when that session was created from a leader's shell
 (`FLEET_SESSION` / `FLEET_STATE_DIR` set to the leader's session dir), a driver pane
 whose per-pane overrides don't happen to cover a given key could see that leader value
-leak through instead. `build_env` now strips every inherited `FLEET_*` before applying
-the per-pane overrides, the same way it strips agent markers (#315).
+leak through instead. `build_env` now strips every inherited *task-scoped* `FLEET_*`
+key (`FLEET_SESSION` / `FLEET_STATE_DIR` / `FLEET_TASK_ID` — the only ones a pane's
+overrides ever set) before applying the per-pane overrides, the same way it strips
+agent markers — a blanket `FLEET_*` strip would also have dropped user-level switches
+such as `FLEET_HOME` / `FLEET_MUX` set in the shell that created the session (#315).
 
 As defense in depth, `task_context.resolve()` (used by `done` / `ask` / `event` /
 `approval` / `cleanup` / `merge` / `inbox-read`) now self-heals when `FLEET_STATE_DIR`
@@ -20,6 +23,9 @@ A leading `task-` in an explicit task id (e.g. `fleet-agent done task-q-guard`, 
 from a `task-<id>` directory name) no longer doubles into `task-task-<id>`:
 `task_context.normalize_task_id()` strips one leading `task-`, applied in `resolve()`
 and at the raw task-id entry points of `log`, `send-prompt`, `inbox` and `status --json`.
+Since that stripping is now unconditional, `fleet-agent start` rejects a task id that
+itself begins with `task-` (e.g. `task-foo`) up front — such a task would otherwise
+live in `tasks/task-task-foo` but become unaddressable by every other command.
 
 The third item in #315 (a notifier polling an absent/empty leader pane in a mixed-mux
 setup) turned out to already be covered by the existing `fleet status` stranded-queue
