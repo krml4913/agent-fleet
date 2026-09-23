@@ -1560,6 +1560,8 @@ class AskHookTests(unittest.TestCase):
             title="fleet demo: task-1 awaiting orders",
             message="Should I use A or B?",
             level="waiting",
+            project="demo",
+            task_id="1",
         )
 
     def test_on_without_leader_record_leaves_ask_queued(self) -> None:

@@ -596,6 +596,7 @@ class WindowsChecksTests(unittest.TestCase):
             unittest.mock.patch("fleet.commands.preflight._check_clone_path", return_value=ok._replace(name="clone-path")),
             unittest.mock.patch("fleet.commands.preflight._check_longpaths", return_value=ok._replace(name="longpaths")),
             unittest.mock.patch("fleet.commands.preflight._check_fleet_agent_cmd", return_value=ok._replace(name="fleet-agent")),
+            unittest.mock.patch("fleet.commands.preflight._check_windows_notify_setup", return_value=ok._replace(name="win-notify")),
             unittest.mock.patch("fleet.commands.preflight._check_agent_cli", side_effect=lambda n: ok._replace(name=n)),
             unittest.mock.patch("fleet.commands.preflight._check_codex_update", return_value=ok._replace(name="codex-update")),
             unittest.mock.patch("fleet.commands.preflight._check_codex_trust", return_value=ok._replace(name="codex-trust")),
@@ -605,10 +606,10 @@ class WindowsChecksTests(unittest.TestCase):
 
     def test_windows_checks_only_on_windows(self) -> None:
         win = self._check_all_names("win32")
-        for name in ("clone-path", "longpaths", "fleet-agent"):
+        for name in ("clone-path", "longpaths", "fleet-agent", "win-notify"):
             self.assertIn(name, win)
         linux = self._check_all_names("linux")
-        for name in ("clone-path", "longpaths", "fleet-agent"):
+        for name in ("clone-path", "longpaths", "fleet-agent", "win-notify"):
             self.assertNotIn(name, linux)
         self.assertIn("claude", linux)
         self.assertIn("codex", linux)
@@ -668,6 +669,31 @@ class WindowsChecksTests(unittest.TestCase):
         self.assertIn("missing", missing.detail)
         self.assertTrue(present.ok)
         self.assertTrue(present.detail.endswith("fleet-agent.cmd"))
+
+
+class WindowsNotifySetupCheckTests(unittest.TestCase):
+    """`_check_windows_notify_setup` (#317): informational, never fails."""
+
+    def _check(self, done: bool) -> preflight.CheckResult:
+        with unittest.mock.patch(
+            "fleet.windows_notify_setup.is_setup_done", return_value=done
+        ):
+            return preflight._check_windows_notify_setup()
+
+    def test_configured_is_ok_and_unmarked(self) -> None:
+        result = self._check(True)
+        self.assertEqual(result.name, "win-notify")
+        self.assertTrue(result.ok)
+        self.assertFalse(result.required)
+        self.assertFalse(result.warn)
+        self.assertIn("configured", result.detail)
+
+    def test_unconfigured_is_ok_but_flagged(self) -> None:
+        result = self._check(False)
+        self.assertTrue(result.ok)  # informational only — never a failure
+        self.assertFalse(result.required)
+        self.assertTrue(result.warn)
+        self.assertIn("setup-windows", result.detail)
 
 
 class AgentCliTests(unittest.TestCase):

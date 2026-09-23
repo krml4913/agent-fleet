@@ -72,6 +72,8 @@ def run(args: argparse.Namespace) -> int:
         title=f"fleet {project_name}: task-{task_id} awaiting orders",
         message=args.question,
         level="waiting",
+        project=project_name,
+        task_id=task_id,
     )
 
     # Opt-in (notify_leader_on_driver_done): also push the question into the owning

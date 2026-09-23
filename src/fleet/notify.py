@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -106,12 +107,26 @@ def send(
     title: str,
     message: str,
     level: str = DEFAULT_LEVEL,
+    *,
+    project: str | None = None,
+    task_id: str | None = None,
 ) -> None:
+    """Best-effort notify across every transport.
+
+    ``project`` / ``task_id`` are optional structured context: callers that
+    know them (driver ``done`` / ``ask``, the orchestrator's ``awaiting_orders``
+    / approval paths) pass them so the Windows transport can attach a
+    ``fleet://attach`` click target (#317) once ``fleet notify setup-windows``
+    has run. Titles are never parsed for this — it is always the explicit
+    kwargs. Other transports ignore them.
+    """
     if os.environ.get("FLEET_NO_NOTIFY"):
         return
     cfg = load_config(state_dir)
     _macos_notify(cfg.get("macos") or {}, title, message, level)
-    _windows_notify(cfg.get("windows") or {}, title, message, level)
+    _windows_notify(
+        cfg.get("windows") or {}, title, message, level, project=project, task_id=task_id
+    )
     _slack_notify(cfg.get("slack") or {}, title, message, level)
 
 
@@ -166,25 +181,51 @@ def _toast_text(text: str) -> str:
     return escaped.encode("ascii", "xmlcharrefreplace").decode("ascii")
 
 
-def _windows_toast_script(title: str, message: str, level: str) -> str:
+def _windows_toast_script(
+    title: str, message: str, level: str, *, app_id: str, launch: str | None = None
+) -> str:
     body = f"{level_emoji(level)} {message}".replace("\n", " ")[:300]
+    # activationType="protocol" is what makes Windows invoke launch (fleet://…)
+    # on click, via the registered fleet:// command (#317) — only added when
+    # there is somewhere to send the click.
+    toast_attrs = f' launch="{_toast_text(launch)}" activationType="protocol"' if launch else ""
     xml = (
-        '<toast><visual><binding template="ToastGeneric">'
+        f"<toast{toast_attrs}><visual><binding template=\"ToastGeneric\">"
         f"<text>{_toast_text(title.replace(chr(10), ' ')[:60])}</text>"
         f"<text>{_toast_text(body)}</text>"
         "</binding></visual></toast>"
     )
-    return _WINDOWS_TOAST_SCRIPT.format(xml=xml, app_id=_WINDOWS_TOAST_APP_ID)
+    return _WINDOWS_TOAST_SCRIPT.format(xml=xml, app_id=app_id)
+
+
+def _windows_launch_uri(project: str | None, task_id: str | None) -> str | None:
+    """``fleet://attach?project=…&task=…`` for a toast click, or ``None`` without both."""
+    if not project or not task_id:
+        return None
+    query = urllib.parse.urlencode({"project": project, "task": task_id})
+    return f"fleet://attach?{query}"
 
 
 def _windows_notify(
-    cfg: dict[str, Any], title: str, message: str, level: str = DEFAULT_LEVEL
+    cfg: dict[str, Any],
+    title: str,
+    message: str,
+    level: str = DEFAULT_LEVEL,
+    *,
+    project: str | None = None,
+    task_id: str | None = None,
 ) -> None:
     if cfg.get("enabled") is False:  # default-on
         return
     if platform.system() != "Windows":
         return
-    script = _windows_toast_script(title, message, level)
+    from . import windows_notify_setup as _win_setup
+
+    app_id = _win_setup.chosen_app_id(_WINDOWS_TOAST_APP_ID)
+    launch = None
+    if app_id == _win_setup.AUMID and _win_setup.is_protocol_configured():
+        launch = _windows_launch_uri(project, task_id)
+    script = _windows_toast_script(title, message, level, app_id=app_id, launch=launch)
     # -EncodedCommand (base64 UTF-16LE) sidesteps all command-line quoting.
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     try:

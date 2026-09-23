@@ -186,15 +186,30 @@ class MacosRenderTests(unittest.TestCase):
 class WindowsToastTests(unittest.TestCase):
     """Windows toast via PowerShell + WinRT; best-effort, Windows-only."""
 
+    def setUp(self) -> None:
+        # Deterministic regardless of host registry state (#317): every test
+        # in this class pretends the fleet AUMID is not configured unless it
+        # explicitly patches windows_notify_setup itself.
+        patcher = patch(
+            "fleet.windows_notify_setup.is_aumid_configured", return_value=False
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher2 = patch(
+            "fleet.windows_notify_setup.is_protocol_configured", return_value=False
+        )
+        patcher2.start()
+        self.addCleanup(patcher2.stop)
+
     @staticmethod
     def _decode(argv: list) -> str:
         return base64.b64decode(argv[-1]).decode("utf-16-le")
 
-    def _run(self, cfg: dict, title: str, message: str, level: str = "info"):
+    def _run(self, cfg: dict, title: str, message: str, level: str = "info", **kwargs):
         with patch("fleet.notify.platform.system", return_value="Windows"), \
              patch("fleet.notify.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
-            notify._windows_notify(cfg, title, message, level)
+            notify._windows_notify(cfg, title, message, level, **kwargs)
         return mock_run
 
     def test_invokes_powershell_encoded_no_window(self) -> None:
@@ -292,6 +307,88 @@ class WindowsToastTests(unittest.TestCase):
              patch("fleet.notify.subprocess.run") as mock_run:
             notify.send(Path(d), "t", "m")
         mock_run.assert_not_called()
+
+    def test_uses_powershell_aumid_when_not_configured(self) -> None:
+        mock_run = self._run({}, "t", "m")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertIn(notify._WINDOWS_TOAST_APP_ID, script)
+
+    def test_uses_fleet_aumid_once_configured(self) -> None:
+        with patch("fleet.windows_notify_setup.is_aumid_configured", return_value=True):
+            mock_run = self._run({}, "t", "m")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertIn("agent-fleet", script)
+        self.assertNotIn(notify._WINDOWS_TOAST_APP_ID, script)
+
+    def test_no_launch_context_without_project_and_task(self) -> None:
+        mock_run = self._run({}, "t", "m")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertNotIn("activationType", script)
+        self.assertNotIn("launch=", script)
+
+    def test_no_launch_context_when_aumid_unconfigured_even_with_context(self) -> None:
+        # Fallback AUMID (borrowed PowerShell) must never carry a launch target:
+        # only fleet's own AUMID is registered to invoke fleet://.
+        mock_run = self._run({}, "t", "m", project="proj", task_id="42")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertNotIn("activationType", script)
+
+    def test_no_launch_context_when_protocol_unconfigured(self) -> None:
+        # AUMID alone (no fleet:// registration) must not add a launch target.
+        with patch("fleet.windows_notify_setup.is_aumid_configured", return_value=True):
+            mock_run = self._run({}, "t", "m", project="proj", task_id="42")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertNotIn("activationType", script)
+
+    def test_launch_context_added_when_fully_configured(self) -> None:
+        with patch("fleet.windows_notify_setup.is_aumid_configured", return_value=True), \
+             patch("fleet.windows_notify_setup.is_protocol_configured", return_value=True):
+            mock_run = self._run({}, "t", "m", project="myproj", task_id="42")
+        script = self._decode(mock_run.call_args.args[0])
+        self.assertIn('activationType="protocol"', script)
+        self.assertIn("fleet://attach?", script)
+        self.assertIn("project=myproj", script)
+        self.assertIn("task=42", script)
+
+    def test_launch_context_omitted_without_both_project_and_task(self) -> None:
+        with patch("fleet.windows_notify_setup.is_aumid_configured", return_value=True), \
+             patch("fleet.windows_notify_setup.is_protocol_configured", return_value=True):
+            for kwargs in ({"project": "p"}, {"task_id": "1"}, {}):
+                with self.subTest(kwargs=kwargs):
+                    mock_run = self._run({}, "t", "m", **kwargs)
+                    script = self._decode(mock_run.call_args.args[0])
+                    self.assertNotIn("activationType", script)
+
+    def test_launch_uri_escapes_ampersand_for_xml_attribute(self) -> None:
+        # urlencode joins query params with "&"; that must become &amp; inside
+        # the XML attribute, not a raw ampersand.
+        with patch("fleet.windows_notify_setup.is_aumid_configured", return_value=True), \
+             patch("fleet.windows_notify_setup.is_protocol_configured", return_value=True):
+            mock_run = self._run({}, "t", "m", project="p", task_id="1")
+        script = self._decode(mock_run.call_args.args[0])
+        launch_line = next(ln for ln in script.splitlines() if "launch=" in ln)
+        self.assertIn("&amp;", launch_line)
+        self.assertNotRegex(launch_line, r"project=p&task")  # raw & must not survive
+
+
+class WindowsLaunchUriTests(unittest.TestCase):
+    def test_none_without_project(self) -> None:
+        self.assertIsNone(notify._windows_launch_uri(None, "42"))
+
+    def test_none_without_task(self) -> None:
+        self.assertIsNone(notify._windows_launch_uri("proj", None))
+
+    def test_none_with_empty_strings(self) -> None:
+        self.assertIsNone(notify._windows_launch_uri("", ""))
+
+    def test_builds_attach_uri(self) -> None:
+        uri = notify._windows_launch_uri("myproj", "42")
+        self.assertEqual(uri, "fleet://attach?project=myproj&task=42")
+
+    def test_url_encodes_special_characters(self) -> None:
+        uri = notify._windows_launch_uri("my proj", "4&2")
+        self.assertIn("my+proj", uri)
+        self.assertIn("4%262", uri)
 
 
 class SlackRenderTests(unittest.TestCase):

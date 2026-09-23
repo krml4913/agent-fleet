@@ -45,6 +45,7 @@ from .commands import start as start_cmd
 from .commands import status as status_cmd
 from .commands import formation as formation_cmd
 from .commands import notify as notify_cmd
+from .commands import url_handler as url_handler_cmd
 from .commands import workspace as workspace_cmd
 
 
@@ -77,6 +78,7 @@ def build_parser_user() -> argparse.ArgumentParser:
     notify_cmd.add_parser(sub)
     config_cmd.add_parser(sub)
     rm_cmd.add_parser(sub)
+    url_handler_cmd.add_parser(sub)  # hidden: registered as the fleet:// protocol handler
     return parser
 
 

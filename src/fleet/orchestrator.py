@@ -951,11 +951,14 @@ def _notify_escalation(
         question=question,
     )
     project = state_mod.load_project(state_dir)
+    project_name = project.get("name", "?")
     notify.send(
         state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} awaiting orders",
+        title=f"fleet {project_name}: task-{task_id} awaiting orders",
         message=question,
         level="waiting",
+        project=project_name,
+        task_id=task_id,
     )
 
 
@@ -982,11 +985,14 @@ def _request_user_approval(
         question=question,
     )
     project = state_mod.load_project(state_dir)
+    project_name = project.get("name", "?")
     notify.send(
         state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} needs approval",
+        title=f"fleet {project_name}: task-{task_id} needs approval",
         message=question,
         level="waiting",
+        project=project_name,
+        task_id=task_id,
     )
 
 
