@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import agents as agents_mod
+from .. import banner
 from .. import config as config_mod
 from .. import leader_prompt as lp
 from .. import prompt_pointer
@@ -34,6 +35,10 @@ from ..events import append_event
 #: ``leader_agent`` default); re-exported here for callers of this module.
 DEFAULT_LEADER_AGENT = config_mod.DEFAULT_LEADER_AGENT
 DEFAULT_SESSION_LABEL = "main"
+
+#: With ``--attach``, seconds to hold after printing the startup banner so the
+#: user actually sees it before the multiplexer screen takes over.
+BANNER_ATTACH_PAUSE = 2.0
 
 # commands/leader.py → parents[0]=commands, [1]=fleet, [2]=src, [3]=clone root.
 _CLONE_ROOT = Path(__file__).resolve().parents[3]
@@ -211,12 +216,23 @@ def run(args: argparse.Namespace) -> int:
         label=label,
     )
 
+    banner.print_banner(label=label, agent=agent_spec, scope=scope_names)
     print(f"leader started: session={session}, agent={agent_spec}")
     print(f"  attach: {m.attach_hint(session)}")
 
     if args.attach:
+        _flush_stdout()
+        time.sleep(BANNER_ATTACH_PAUSE)
         return _attach(m, session)
     return 0
+
+
+def _flush_stdout() -> None:
+    """Flush stdout so the banner is on screen before the attach pause (piped stdout is block-buffered)."""
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def _attach(m: mux.Mux, session: str) -> int:
