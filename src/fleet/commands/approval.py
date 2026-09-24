@@ -117,6 +117,10 @@ def _run(args: argparse.Namespace, *, approved: bool) -> int:
     if reason:
         # Audit snippet only — the full reason lives in the driver's inbox.md.
         event_fields["reason"] = truncate_text(reason)
+    # Set by the fleet:// toast handler (#318); absent for the CLI.
+    source = getattr(args, "source", None)
+    if source:
+        event_fields["source"] = source
     append_event(state_dir / "events.jsonl", event_type, task_id=task_id, **event_fields)
     print(f"task-{task_id} user approval {verb}")
     return 0

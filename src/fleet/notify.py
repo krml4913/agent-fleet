@@ -110,6 +110,7 @@ def send(
     *,
     project: str | None = None,
     task_id: str | None = None,
+    approval_stage: int | None = None,
 ) -> None:
     """Best-effort notify across every transport.
 
@@ -119,13 +120,25 @@ def send(
     ``fleet://attach`` click target (#317) once ``fleet notify setup-windows``
     has run. Titles are never parsed for this — it is always the explicit
     kwargs. Other transports ignore them.
+
+    ``approval_stage`` (the stage index of a raised approval gate, #318) marks
+    the toast as an approval-gate toast: with setup done, the Windows transport
+    then adds Approve / Reject / Open buttons carrying a single-use nonce bound
+    to that stage. Plain toasts (``ask``, handoffs, completion) never pass it.
     """
     if os.environ.get("FLEET_NO_NOTIFY"):
         return
     cfg = load_config(state_dir)
     _macos_notify(cfg.get("macos") or {}, title, message, level)
     _windows_notify(
-        cfg.get("windows") or {}, title, message, level, project=project, task_id=task_id
+        cfg.get("windows") or {},
+        title,
+        message,
+        level,
+        project=project,
+        task_id=task_id,
+        state_dir=state_dir,
+        approval_stage=approval_stage,
     )
     _slack_notify(cfg.get("slack") or {}, title, message, level)
 
@@ -182,7 +195,13 @@ def _toast_text(text: str) -> str:
 
 
 def _windows_toast_script(
-    title: str, message: str, level: str, *, app_id: str, launch: str | None = None
+    title: str,
+    message: str,
+    level: str,
+    *,
+    app_id: str,
+    launch: str | None = None,
+    actions: list[tuple[str, str]] | None = None,
 ) -> str:
     body = f"{level_emoji(level)} {message}".replace("\n", " ")[:300]
     # activationType="protocol" is what makes Windows invoke launch (fleet://…)
@@ -193,9 +212,42 @@ def _windows_toast_script(
         f"<toast{toast_attrs}><visual><binding template=\"ToastGeneric\">"
         f"<text>{_toast_text(title.replace(chr(10), ' ')[:60])}</text>"
         f"<text>{_toast_text(body)}</text>"
-        "</binding></visual></toast>"
+        f"</binding></visual>{_toast_actions_xml(actions)}</toast>"
     )
     return _WINDOWS_TOAST_SCRIPT.format(xml=xml, app_id=app_id)
+
+
+def _toast_actions_xml(actions: list[tuple[str, str]] | None) -> str:
+    """``<actions>`` for ``(label, fleet:// uri)`` buttons; empty without any."""
+    if not actions:
+        return ""
+    buttons = "".join(
+        f'<action content="{_toast_text(label)}" arguments="{_toast_text(uri)}" '
+        'activationType="protocol"/>'
+        for label, uri in actions
+    )
+    return f"<actions>{buttons}</actions>"
+
+
+def _windows_approval_actions(
+    state_dir: Path, project: str, task_id: str, stage: int
+) -> list[tuple[str, str]]:
+    """Approve / Reject / Open buttons for an approval-gate toast (#318).
+
+    Mints the single-use nonce (bound to project + task + stage) the URL
+    handler demands for approve/reject; Open is the plain phase-1 attach.
+    """
+    from . import toast_nonce
+
+    nonce = toast_nonce.issue(state_dir, project, task_id, stage)
+    query = urllib.parse.urlencode(
+        {"project": project, "task": task_id, "stage": stage, "nonce": nonce}
+    )
+    return [
+        ("Approve", f"fleet://approve?{query}"),
+        ("Reject", f"fleet://reject?{query}"),
+        ("Open", _windows_launch_uri(project, task_id) or ""),
+    ]
 
 
 def _windows_launch_uri(project: str | None, task_id: str | None) -> str | None:
@@ -214,6 +266,8 @@ def _windows_notify(
     *,
     project: str | None = None,
     task_id: str | None = None,
+    state_dir: Path | None = None,
+    approval_stage: int | None = None,
 ) -> None:
     if cfg.get("enabled") is False:  # default-on
         return
@@ -225,7 +279,15 @@ def _windows_notify(
     launch = None
     if app_id == _win_setup.AUMID and _win_setup.is_protocol_configured():
         launch = _windows_launch_uri(project, task_id)
-    script = _windows_toast_script(title, message, level, app_id=app_id, launch=launch)
+    actions = None
+    if launch and approval_stage is not None and state_dir is not None:
+        try:
+            actions = _windows_approval_actions(state_dir, project, task_id, approval_stage)
+        except Exception as e:  # noqa: BLE001 — best effort: fall back to a plain toast
+            print(f"warn: toast approval buttons unavailable: {e}", file=sys.stderr)
+    script = _windows_toast_script(
+        title, message, level, app_id=app_id, launch=launch, actions=actions
+    )
     # -EncodedCommand (base64 UTF-16LE) sidesteps all command-line quoting.
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     try:

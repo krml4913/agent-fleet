@@ -188,8 +188,11 @@ class DoneNotifyTests(unittest.TestCase):
 
         sent: list[dict] = []
 
-        def _fake_send(sd, *, title, message, level="info", project=None, task_id=None):  # noqa: ANN001
-            sent.append({"title": title, "message": message, "level": level})
+        def _fake_send(sd, *, title, message, level="info", project=None, task_id=None, approval_stage=None):  # noqa: ANN001
+            sent.append({
+                "title": title, "message": message, "level": level,
+                "approval_stage": approval_stage,
+            })
 
         with (
             unittest.mock.patch("fleet.orchestrator._launch_driver_for_stage"),
@@ -203,6 +206,7 @@ class DoneNotifyTests(unittest.TestCase):
 
         # done.py's notify.send is called last (after the send inside the orchestrator)
         self._last_level = sent[-1]["level"] if sent else ""
+        self._last_approval_stage = sent[-1]["approval_stage"] if sent else None
         return ret, sent[-1]["title"] if sent else "", sent[-1]["message"] if sent else ""
 
     def test_notify_completed(self) -> None:
@@ -223,6 +227,7 @@ class DoneNotifyTests(unittest.TestCase):
         self.assertIn("all stages finished", message)
         self.assertIn("c1", message)
         self.assertEqual(self._last_level, "success")
+        self.assertIsNone(self._last_approval_stage)
 
     def test_notify_awaiting_orders(self) -> None:
         """When stopped at the user_approval gate, the 'awaiting_orders' wording is sent."""
@@ -251,6 +256,8 @@ class DoneNotifyTests(unittest.TestCase):
         # stage 1/1 format
         self.assertIn("1/1", message)
         self.assertEqual(self._last_level, "waiting")
+        # #318: the approval-gate toast is marked with its stage index.
+        self.assertEqual(self._last_approval_stage, 0)
 
     def test_notify_next_stage_running(self) -> None:
         """A multi-stage advance names the genuinely-next stage's role in the handoff wording."""

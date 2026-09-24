@@ -297,6 +297,8 @@ KIND_DONE = "done"
 KIND_ASK = "ask"
 # The prompt deliverer gave up (Issue #289): the driver never got its prompt.
 KIND_DELIVERY_FAILED = "delivery_failed"
+# The user settled an approval gate from a Windows toast button (#318).
+KIND_TOAST_DECISION = "toast_decision"
 # Kinds that carry no PR: never pay for a PR lookup.
 _NO_PR_KINDS = (KIND_ASK, KIND_DELIVERY_FAILED)
 
@@ -566,6 +568,23 @@ def _render_delivery_failed(record: dict) -> str:
     )
 
 
+def _is_toast_decision(record: dict) -> bool:
+    return record.get("kind") == KIND_TOAST_DECISION
+
+
+def _render_toast_decision(record: dict) -> str:
+    """One toast decision: what the user chose, and that the leader must not redo it."""
+    summary = " ".join(str(record.get("summary") or "").split())  # keep it single-line
+    parts = [
+        f"task-{record.get('task_id', '?')} [toast decision] {summary}",
+        "gate already settled by the user (do NOT approve/reject it again)",
+    ]
+    if record.get("branch"):
+        parts.append(f"branch={record['branch']}")
+    parts.append(f"PR={record.get('pr_url') or '(none yet)'}")
+    return " ".join(parts)
+
+
 def _render_done(record: dict) -> str:
     parts = [f"task-{record.get('task_id', '?')} [{record.get('status', '?')}]"]
     summary = (record.get("summary") or "").strip()
@@ -586,6 +605,11 @@ _ASK_INSTRUCTION = (
     "answer the driver's question with the fleet-agent inbox command shown, or relay it "
     "to the user if it is not yours to decide. Skip any task no longer awaiting_orders."
 )
+_TOAST_DECISION_INSTRUCTION = (
+    "the user already approved/rejected this gate from a desktop toast — do not "
+    "approve/reject it again. After an approval, do the merge / next step as usual; "
+    "after a rejection the driver is reworking, so just wait."
+)
 _DELIVERY_FAILED_INSTRUCTION = (
     "the driver never got its prompt; check its pane and retry with the fleet-agent "
     "send-prompt command shown, or relay to the user. Skip any task no longer failed."
@@ -604,6 +628,25 @@ def render_block(records: list[dict]) -> str:
     "run the gate", which makes no sense for a question); a ``[delivery failed]``
     entry says to retry with ``fleet-agent send-prompt``.
     """
+    n = len(records)
+    decisions = sum(1 for r in records if _is_toast_decision(r))
+    if decisions == n:
+        instruction = f"for each: {_TOAST_DECISION_INSTRUCTION}"
+    elif decisions:
+        others = [r for r in records if not _is_toast_decision(r)]
+        instruction = (
+            _block_instruction(others).replace("for each", "for each other", 1)
+            + f" For each [toast decision] entry: {_TOAST_DECISION_INSTRUCTION}"
+        )
+    else:
+        instruction = _block_instruction(records)
+    head = f"[fleet] {n} driver notification(s) — {instruction}"
+    segs = [_render_record(r) for r in records]
+    return head + " :: " + " || ".join(segs)
+
+
+def _block_instruction(records: list[dict]) -> str:
+    """The lead-in for done / ask / delivery-failed records (no toast decisions)."""
     n = len(records)
     asks = sum(1 for r in records if _is_ask(r))
     fails = sum(1 for r in records if _is_delivery_failed(r))
@@ -629,9 +672,7 @@ def render_block(records: list[dict]) -> str:
             parts.append(f"For each [ask] entry: {_ASK_INSTRUCTION}")
         parts.append(f"For each [delivery failed] entry: {_DELIVERY_FAILED_INSTRUCTION}")
         instruction = " ".join(parts)
-    head = f"[fleet] {n} driver notification(s) — {instruction}"
-    segs = [_render_record(r) for r in records]
-    return head + " :: " + " || ".join(segs)
+    return instruction
 
 
 def _render_record(record: dict) -> str:
@@ -639,6 +680,8 @@ def _render_record(record: dict) -> str:
         return _render_ask(record)
     if _is_delivery_failed(record):
         return _render_delivery_failed(record)
+    if _is_toast_decision(record):
+        return _render_toast_decision(record)
     return _render_done(record)
 
 

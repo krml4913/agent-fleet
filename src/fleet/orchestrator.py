@@ -973,6 +973,7 @@ def _request_user_approval(
     from . import notify
 
     role = stage.get("role", "?")
+    stage_idx = task.get("current_stage")
     question = (
         f"Stage '{role}' is ready for your approval. "
         "Tell the leader whether to approve or reject it."
@@ -993,6 +994,7 @@ def _request_user_approval(
         level="waiting",
         project=project_name,
         task_id=task_id,
+        approval_stage=stage_idx if isinstance(stage_idx, int) else None,
     )
 
 

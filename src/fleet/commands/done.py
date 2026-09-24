@@ -122,6 +122,8 @@ def run(args: argparse.Namespace) -> int:
     notify.send(
         state_dir, title=title, message=message, level=level,
         project=project_name, task_id=task_id,
+        # Approval gate only: the Windows toast gets Approve/Reject/Open buttons (#318).
+        approval_stage=current_idx if status == "awaiting_orders" else None,
     )
 
     _maybe_notify_leader(
