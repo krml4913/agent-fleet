@@ -16,6 +16,7 @@ USER_COMMANDS = {
     "init", "preflight", "leader", "attach", "status", "sessions", "cost",
     "usage", "dashboard", "edit", "scope", "log", "changelog", "formation",
     "workspace", "rm", "role", "notify", "config",
+    "url-handler",  # hidden (help=SUPPRESS): the registered fleet:// handler, #317
 }
 AGENT_COMMANDS = {
     "start", "inbox", "inbox-read", "send-prompt", "cleanup", "merge", "ask",
@@ -38,11 +39,12 @@ class TestBuildParserUser(unittest.TestCase):
     def test_prog_name(self) -> None:
         self.assertEqual(self.parser.prog, "fleet")
 
-    def test_exposes_exactly_19_commands(self) -> None:
+    def test_exposes_exactly_20_commands(self) -> None:
         # 18 base commands + the `cost` command's `usage` alias (counted via
-        # the parser's name->subparser map, which lists aliases) = 19.
+        # the parser's name->subparser map, which lists aliases) + the hidden
+        # `url-handler` (#317) = 20.
         names = _subcommand_names(self.parser)
-        self.assertEqual(len(names), 19, f"expected 19 user commands, got {sorted(names)}")
+        self.assertEqual(len(names), 20, f"expected 20 user commands, got {sorted(names)}")
 
     def test_exposes_all_user_commands(self) -> None:
         names = _subcommand_names(self.parser)

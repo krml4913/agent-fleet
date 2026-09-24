@@ -532,6 +532,26 @@ steer a client to a tab only while that client is the only one attached:
 
 Desktop notifications use a Windows toast (on by default; set
 `windows: {enabled: false}` in the project's `notify.yaml` to turn it off).
+Out of the box the toast shows as **"Windows PowerShell"** (it borrows
+PowerShell's AppUserModelID) and clicking it does nothing. Run
+`fleet.cmd notify setup-windows` once, per user, to register a fleet-owned
+sender name and click-to-attach:
+
+```powershell
+D:\dev\agent-fleet\fleet.cmd notify setup-windows
+```
+
+This writes two `HKCU`-only registry keys (no admin rights): an
+`AppUserModelId\agent-fleet` key (so the toast shows as "agent-fleet"
+instead of "Windows PowerShell") and a `fleet://` URL protocol handler
+(so a `done` / `ask` / approval toast that carries a task can be clicked to
+open a terminal attached to that task's pane). `fleet.cmd notify
+teardown-windows` removes exactly what setup created. `fleet preflight`
+reports whether setup has been done (informational only — unconfigured
+machines keep working exactly as before). See
+[`fleet.windows_notify_setup`](src/fleet/windows_notify_setup.py) for exactly
+what is written.
+
 The investigation behind this port and the remaining follow-ups are in
 [docs/windows-support.md](docs/windows-support.md).
 

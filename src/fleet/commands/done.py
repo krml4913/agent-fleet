@@ -119,7 +119,10 @@ def run(args: argparse.Namespace) -> int:
         title = f"fleet {project_name}: task-{task_id} stage {N} handed off"
         message = f"task-{task_id} stage {N} handed off → {next_role}"
 
-    notify.send(state_dir, title=title, message=message, level=level)
+    notify.send(
+        state_dir, title=title, message=message, level=level,
+        project=project_name, task_id=task_id,
+    )
 
     _maybe_notify_leader(
         state_dir,

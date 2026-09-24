@@ -105,6 +105,7 @@ def check_all() -> list[CheckResult]:
             _check_clone_path(),
             _check_longpaths(),
             _check_fleet_agent_cmd(),
+            _check_windows_notify_setup(),
         ]
     results += [
         _check_agent_cli("claude"),
@@ -258,6 +259,26 @@ def _check_fleet_agent_cmd() -> CheckResult:
         f"{shim.as_posix()} missing (agents cannot signal the orchestrator)",
         required=True,
     )
+
+
+def _check_windows_notify_setup() -> CheckResult:
+    """Informational only (#317): whether `fleet notify setup-windows` has run.
+
+    Unconfigured is not a failure — toasts already work, borrowing PowerShell's
+    AUMID (fleet.notify._WINDOWS_TOAST_APP_ID). Setup only adds a fleet-owned
+    sender name and click-to-attach.
+    """
+    from .. import windows_notify_setup as wns
+
+    done = wns.is_setup_done()
+    detail = (
+        "configured (fleet-owned toast sender + fleet:// click-to-attach)"
+        if done
+        else "not configured; run `fleet notify setup-windows` for a fleet-owned "
+        "toast sender and click-to-attach (toasts already work, shown as "
+        "\"Windows PowerShell\")"
+    )
+    return CheckResult("win-notify", True, detail, required=False, warn=not done)
 
 
 def _resolve_cli(name: str) -> tuple[str | None, bool]:

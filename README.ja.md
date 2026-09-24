@@ -536,6 +536,24 @@ fleet-<label>` を実行する。デタッチは zellij の `Ctrl o` のあと `
 
 デスクトップ通知は Windows のトーストを使う（デフォルトで有効。無効にするには
 プロジェクトの `notify.yaml` に `windows: {enabled: false}` を設定する）。
+初期状態ではトーストの送信元は **「Windows PowerShell」** と表示され（PowerShell
+の AppUserModelID を間借りしている）、クリックしても何も起きない。ユーザーごとに
+一度、次を実行すると fleet 専用の送信元名とクリックでの attach を有効にできる:
+
+```powershell
+D:\dev\agent-fleet\fleet.cmd notify setup-windows
+```
+
+これは管理者権限不要の `HKCU` のみのレジストリキーを 2 つ書き込む:
+`AppUserModelId\agent-fleet` キー（トーストが「Windows PowerShell」ではなく
+「agent-fleet」と表示されるようになる）と `fleet://` URL プロトコルハンドラー
+（タスクを伴う `done` / `ask` / 承認トーストをクリックすると、そのタスクの
+ペインにアタッチしたターミナルが開くようになる）。`fleet.cmd notify
+teardown-windows` は setup が作成したものだけを取り除く。`fleet preflight` は
+setup 済みかどうかを報告する（情報表示のみで、未設定でも従来どおり動作する）。
+書き込まれる内容の詳細は
+[`fleet.windows_notify_setup`](src/fleet/windows_notify_setup.py) を参照。
+
 この移植の背景となった調査と残りのフォローアップは
 [docs/windows-support.md](docs/windows-support.md) にある。
 

@@ -188,7 +188,7 @@ class DoneNotifyTests(unittest.TestCase):
 
         sent: list[dict] = []
 
-        def _fake_send(sd, *, title, message, level="info"):  # noqa: ANN001
+        def _fake_send(sd, *, title, message, level="info", project=None, task_id=None):  # noqa: ANN001
             sent.append({"title": title, "message": message, "level": level})
 
         with (
