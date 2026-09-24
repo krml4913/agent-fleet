@@ -361,6 +361,32 @@ class GateHandlerTests(unittest.TestCase):
 
 
 class DialogTests(unittest.TestCase):
+    def test_reason_dialog_is_topmost_winforms_not_inputbox(self) -> None:
+        # A live test showed VB's InputBox opening behind other windows (#318).
+        script = url_handler._INPUT_BOX_SCRIPT
+        self.assertIn("$f.TopMost = $true", script)
+        self.assertIn("$f.Activate()", script)
+        self.assertIn("SetForegroundWindow", script)
+        self.assertNotIn("InputBox", script)
+        # prompt / title come from the environment, never spliced into the script
+        self.assertIn("$env:FLEET_DIALOG_PROMPT", script)
+
+    def test_reason_dialog_launch_is_hidden_console_and_reads_utf8(self) -> None:
+        with patch.object(url_handler.sys, "platform", "win32"),              patch.object(url_handler, "_allow_foreground") as allow,              patch.object(url_handler.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "﻿  理由 ".encode("utf-8")
+            reason = url_handler.ask_reject_reason("p", "1")
+        self.assertEqual(reason, "理由")
+        allow.assert_called_once()
+        self.assertIn("-STA", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["env"]["FLEET_DIALOG_PROMPT"].count("task-1"), 1)
+
+    def test_reason_dialog_cancel_is_none(self) -> None:
+        with patch.object(url_handler.sys, "platform", "win32"),              patch.object(url_handler, "_allow_foreground"),              patch.object(url_handler.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = b""
+            self.assertIsNone(url_handler.ask_reject_reason("p", "1"))
+
     def test_off_windows_dialogs_decline(self) -> None:
         with patch.object(url_handler.sys, "platform", "linux"):
             self.assertFalse(url_handler.confirm_approve("p", "1"))

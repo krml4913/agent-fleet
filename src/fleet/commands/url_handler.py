@@ -281,7 +281,7 @@ def _tell_leader(state_dir: Path, task_id: str, summary: str) -> None:
 
 
 # -- native dialogs (Windows). The handler runs under pythonw with no console, so
-# these are a MessageBox (ctypes) and a PowerShell InputBox — never tkinter.
+# these are a MessageBox (ctypes) and a PowerShell WinForms form — never tkinter.
 # Tests patch confirm_approve / ask_reject_reason; nothing else pops a dialog.
 
 _MB_YESNO = 0x4
@@ -291,11 +291,57 @@ _MB_SETFOREGROUND = 0x10000
 _MB_TOPMOST = 0x40000
 _IDYES = 6
 
-_INPUT_BOX_SCRIPT = """\
-Add-Type -AssemblyName Microsoft.VisualBasic
+# A small WinForms dialog rather than VB's InputBox: InputBox cannot be made
+# topmost, and launched from a background process it opened *behind* other
+# windows. TopMost + Activate + SetForegroundWindow brings this one to the front.
+# Prompt/title come from the environment (never spliced into the script). OK with
+# text prints it; Cancel / closing prints nothing.
+_INPUT_BOX_SCRIPT = """Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -Namespace FleetDlg -Name Native -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::Out.Write([Microsoft.VisualBasic.Interaction]::InputBox($env:FLEET_DIALOG_PROMPT, $env:FLEET_DIALOG_TITLE, ''))
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$f = New-Object System.Windows.Forms.Form
+$f.Text = $env:FLEET_DIALOG_TITLE
+$f.StartPosition = 'CenterScreen'
+$f.FormBorderStyle = 'FixedDialog'
+$f.MaximizeBox = $false
+$f.MinimizeBox = $false
+$f.TopMost = $true
+$f.ClientSize = New-Object System.Drawing.Size(440, 120)
+$l = New-Object System.Windows.Forms.Label
+$l.Text = $env:FLEET_DIALOG_PROMPT
+$l.SetBounds(12, 10, 416, 34)
+$t = New-Object System.Windows.Forms.TextBox
+$t.SetBounds(12, 50, 416, 24)
+$ok = New-Object System.Windows.Forms.Button
+$ok.Text = 'OK'
+$ok.DialogResult = 'OK'
+$ok.SetBounds(272, 84, 75, 26)
+$cancel = New-Object System.Windows.Forms.Button
+$cancel.Text = 'Cancel'
+$cancel.DialogResult = 'Cancel'
+$cancel.SetBounds(353, 84, 75, 26)
+$f.AcceptButton = $ok
+$f.CancelButton = $cancel
+$f.Controls.AddRange(@($l, $t, $ok, $cancel))
+$f.Add_Shown({ $f.Activate(); [FleetDlg.Native]::SetForegroundWindow($f.Handle) | Out-Null; $t.Focus() | Out-Null })
+if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($t.Text) }
 """
+
+
+def _allow_foreground() -> None:
+    """Let the dialog we are about to open take the foreground. Best-effort.
+
+    This process was just started by the user's click on the toast, so it may
+    hand foreground rights on (``ASFW_ANY``) — including to the PowerShell child.
+    """
+    try:
+        import ctypes
+
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)
+    except Exception:  # noqa: BLE001 — cosmetic only
+        pass
 
 
 def confirm_approve(project: str, task_id: str) -> bool:
@@ -305,6 +351,7 @@ def confirm_approve(project: str, task_id: str) -> bool:
     try:
         import ctypes
 
+        _allow_foreground()
         flags = _MB_YESNO | _MB_ICONQUESTION | _MB_DEFBUTTON2 | _MB_SETFOREGROUND | _MB_TOPMOST
         answer = ctypes.windll.user32.MessageBoxW(
             0,
@@ -322,6 +369,7 @@ def ask_reject_reason(project: str, task_id: str) -> str | None:
     """Native input box for the rejection reason; ``None`` when cancelled or unavailable."""
     if sys.platform != "win32":
         return None
+    _allow_foreground()
     encoded = base64.b64encode(_INPUT_BOX_SCRIPT.encode("utf-16-le")).decode("ascii")
     env = dict(os.environ)
     env["FLEET_DIALOG_TITLE"] = "agent-fleet: reject"
