@@ -301,10 +301,113 @@ class LeaderCmdTests(unittest.TestCase):
     def test_attach_flag_hands_off_to_backend_attach(self) -> None:
         from fleet.commands import leader
 
-        with use_fake_mux(attach_rc=0) as fake:
+        with (
+            use_fake_mux(attach_rc=0) as fake,
+            unittest.mock.patch("fleet.commands.leader.time.sleep"),
+        ):
             result = leader.run(self._args(attach=True))
         self.assertEqual(result, 0)
         self.assertEqual(fake.calls_named("attach"), [((self.session, None), {})])
+
+    # --- startup banner -------------------------------------------------------
+
+    def _run_capturing(self, args, *, columns: int = 100, sessions=None) -> tuple[int, str, list[str], object]:
+        """Run ``leader.run`` with a fake mux; return (rc, stdout, ordered events, fake).
+
+        ``events`` records, in order, every ``time.sleep`` (as ``sleep:<secs>``,
+        noting whether the banner was already on stdout) and every mux ``attach``.
+        """
+        import contextlib
+        import io
+
+        from fleet.commands import leader
+
+        out = io.StringIO()
+        events: list[str] = []
+
+        def fake_sleep(secs):
+            seen = "banner" if "\u2588" in out.getvalue() else "no-banner"
+            events.append(f"sleep:{secs}:{seen}")
+
+        with (
+            use_fake_mux(sessions=sessions, attach_rc=0) as fake,
+            unittest.mock.patch("fleet.commands.leader.time.sleep", side_effect=fake_sleep),
+            unittest.mock.patch(
+                "shutil.get_terminal_size", return_value=os.terminal_size((columns, 50))
+            ),
+            contextlib.redirect_stdout(out),
+        ):
+            fake.on["attach"] = lambda *a, **k: events.append("attach")
+            result = leader.run(args)
+        return result, out.getvalue(), events, fake
+
+    def test_new_session_prints_banner_then_info_line_then_started_lines(self) -> None:
+        result, out, _events, _fake = self._run_capturing(self._args())
+        self.assertEqual(result, 0)
+        info = f"  leader: {self.label} \u00b7 agent: claude:opus \u00b7 scope: all"
+        self.assertIn("|>>>", out)
+        self.assertIn("\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557", out)
+        self.assertLess(out.index("\u2588"), out.index(info))
+        self.assertLess(out.index(info), out.index("leader started:"))
+        self.assertLess(out.index("leader started:"), out.index("attach:"))
+        self.assertIn(f"leader started: session={self.session}, agent=claude:opus", out)
+
+    def test_info_line_lists_the_scoped_projects(self) -> None:
+        from tests._fleet_test_helpers import make_project
+
+        for name in ("alpha", "beta"):
+            repo = Path(self._tmp.name) / f"{name}-repo"
+            repo.mkdir()
+            make_project(self.fleet_home, name, repo)
+
+        _rc, out, _events, _fake = self._run_capturing(self._args(scope="alpha,beta"))
+        self.assertIn(
+            f"  leader: {self.label} \u00b7 agent: claude:opus \u00b7 scope: alpha, beta", out
+        )
+
+    def test_narrow_terminal_falls_back_from_ships_to_logo_to_info_line_only(self) -> None:
+        _rc, out, _e, _f = self._run_capturing(self._args(), columns=60)
+        self.assertNotIn("|>>>", out)
+        self.assertIn("\u2588", out)  # logo only
+        _rc, out, _e, _f = self._run_capturing(self._args(), columns=20)
+        self.assertNotIn("\u2588", out)
+        self.assertIn(f"  leader: {self.label}", out)  # info line only
+
+    def test_existing_session_path_prints_no_banner(self) -> None:
+        _rc, out, events, _fake = self._run_capturing(
+            self._args(attach=True), sessions={self.session: ["leader"]}
+        )
+        self.assertIn("leader session already exists", out)
+        self.assertNotIn("|>>>", out)
+        self.assertNotIn("\u2588", out)
+        self.assertNotIn("  leader: ", out)
+        # No banner → no banner pause, even though we attach.
+        self.assertEqual(events, ["attach"])
+
+    def test_attach_waits_two_seconds_after_the_banner_then_attaches(self) -> None:
+        result, out, events, fake = self._run_capturing(self._args(attach=True))
+        self.assertEqual(result, 0)
+        self.assertEqual(events, ["sleep:2.0:banner", "attach"])
+        self.assertEqual(fake.calls_named("attach"), [((self.session, None), {})])
+
+    def test_no_wait_without_attach(self) -> None:
+        result, out, events, fake = self._run_capturing(self._args(attach=False))
+        self.assertEqual(result, 0)
+        self.assertEqual(events, [])
+        self.assertEqual(fake.calls_named("attach"), [])
+
+    def test_attach_still_waits_when_the_banner_itself_is_skipped(self) -> None:
+        # Narrow terminal: info line only. The user still needs a beat to read it.
+        _rc, _out, events, _fake = self._run_capturing(self._args(attach=True), columns=10)
+        self.assertEqual(events, ["sleep:2.0:no-banner", "attach"])
+
+    def test_banner_failure_never_fails_the_launch(self) -> None:
+        with unittest.mock.patch("fleet.banner.render_art", side_effect=RuntimeError("boom")):
+            result, out, _events, fake = self._run_capturing(self._args())
+        self.assertEqual(result, 0)
+        self.assertEqual(len(fake.calls_named("new_session")), 1)
+        self.assertNotIn("\u2588", out)
+        self.assertIn("leader started:", out)
 
     def test_mux_error_on_session_creation_fails(self) -> None:
         import contextlib
