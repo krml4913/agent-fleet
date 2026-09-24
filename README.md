@@ -545,7 +545,10 @@ This writes two `HKCU`-only registry keys (no admin rights): an
 `AppUserModelId\agent-fleet` key (so the toast shows as "agent-fleet"
 instead of "Windows PowerShell") and a `fleet://` URL protocol handler
 (so a `done` / `ask` / approval toast that carries a task can be clicked to
-open a terminal attached to that task's pane). `fleet.cmd notify
+open a terminal attached to that task's pane). Approval-gate toasts also get
+**Approve** / **Reject** / **Open** buttons: Approve asks for confirmation, Reject
+asks for the reason, and each works once (single-use nonce, 24h expiry) and only
+while the task is still at that gate. `fleet.cmd notify
 teardown-windows` removes exactly what setup created. `fleet preflight`
 reports whether setup has been done (informational only — unconfigured
 machines keep working exactly as before). See
