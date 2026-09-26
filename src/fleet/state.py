@@ -293,6 +293,44 @@ def set_session_scope(
     return session_scope(label)
 
 
+def update_session_record(
+    label: str,
+    updates: dict,
+    *,
+    drop: tuple[str, ...] = (),
+) -> dict:
+    """Atomically merge *updates* into session.json and remove *drop* keys.
+
+    flock + atomic RMW like :func:`set_session_scope`, so a concurrent scope
+    edit is never lost. Keys not named are kept (``scope``, ``started_at``…).
+    Creates a minimal ``{label}`` record when absent. Returns the new record.
+    """
+    import json as _json
+
+    result: dict = {}
+
+    def _mutate(old_text: str) -> str:
+        record: dict = {}
+        if old_text.strip():
+            try:
+                loaded = _json.loads(old_text)
+                if isinstance(loaded, dict):
+                    record = loaded
+            except ValueError:
+                pass
+        record.setdefault("label", label)
+        for key in drop:
+            record.pop(key, None)
+        record.update(updates)
+        result.clear()
+        result.update(record)
+        return _json.dumps(record, indent=2)
+
+    session_dir(label).mkdir(parents=True, exist_ok=True)
+    atomic_update(session_record_path(label), _mutate)
+    return dict(result)
+
+
 # ---------------------------------------------------------------------------
 # Registry read/write
 # ---------------------------------------------------------------------------

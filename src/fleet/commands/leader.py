@@ -3,7 +3,9 @@
 Creates a detached multiplexer session named ``fleet-<label>`` (default label
 ``main``), opens a single ``leader`` window in the **agent-fleet clone root**,
 and starts the chosen agent CLI inside. If the session already exists, prints
-the attach command and exits (one session per label).
+the attach command and exits (one session per label). ``--respawn`` instead
+restarts only the leader agent of an existing session
+(:mod:`fleet.leader_respawn`).
 
 Since Issue #166 a leader session is **not bound to a project** (design §4.1,
 §5.6): it drops project resolution, pins cwd to the clone root, and carries its
@@ -99,12 +101,28 @@ def add_parser(sub: argparse._SubParsersAction) -> None:
             "validated against the registry. Example: --scope image-gallery,bmweb,fleet"
         ),
     )
+    p.add_argument(
+        "--respawn",
+        action="store_true",
+        help=(
+            "Restart only the leader agent of the existing session fleet-<label>: "
+            "relaunch it with the command line a fresh 'fleet leader' would use, "
+            "re-paste the leader prompt and leave every driver window untouched. "
+            "The agent defaults to the one the session was started with. Safe to "
+            "run from inside the leader pane itself."
+        ),
+    )
     p.set_defaults(func=run, auto_paste=True)
 
 
 def run(args: argparse.Namespace) -> int:
     label = getattr(args, "name", None) or DEFAULT_SESSION_LABEL
     session = f"fleet-{label}"
+
+    if getattr(args, "respawn", False) is True:
+        from .. import leader_respawn
+
+        return leader_respawn.run_cli(args, label)
 
     # Precedence: --agent (explicit) > 'leader_agent' in global config > the
     # built-in default. config.get() already falls back tolerantly (warns and
@@ -119,6 +137,7 @@ def run(args: argparse.Namespace) -> int:
 
     if m.session_exists(session):
         print(f"leader session already exists: {session}")
+        print(f"  restart its leader: fleet leader --respawn --name {label}")
         print(f"  attach: {m.attach_hint(session)}")
         if args.attach:
             return _attach(m, session)
@@ -149,21 +168,7 @@ def run(args: argparse.Namespace) -> int:
     session_dir = state_mod.session_dir(label)
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    # Session display name so the leader is identifiable in the session picker.
-    session_name = state_mod.leader_agent_name(label)
-
-    cli = agents_mod.cli_command(agent_spec)
-    cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
-    # Relayed delivery (leader_delivery=send_message): claude drivers SendMessage
-    # their done / ask notifications to this leader instead of the notifier typing
-    # them into its composer (Issue #329). Only vendors with agent-to-agent
-    # messaging get it; the rest keep the pane path.
-    delivery = "pane"
-    if config_mod.get("leader_delivery")[0] == "send_message":
-        relay_args = agents_mod.relay_inbound_launch_args(agent_spec)
-        if relay_args:
-            cli = cli + relay_args
-            delivery = "send_message"
+    cli, delivery, session_name = leader_launch(agent_spec, label)
 
     try:
         m.new_session(
@@ -171,10 +176,7 @@ def run(args: argparse.Namespace) -> int:
             window="leader",
             argv=cli,
             cwd=str(_CLONE_ROOT),
-            env={
-                "FLEET_SESSION": label,
-                "FLEET_STATE_DIR": str(session_dir),
-            },
+            env=leader_env(label),
         )
     except mux.MuxError as e:
         print(f"error: {m.name} setup failed: {e}", file=sys.stderr)
@@ -202,24 +204,9 @@ def run(args: argparse.Namespace) -> int:
         state_mod.set_session_scope(label, scope_names, mode="set")
 
     if args.auto_paste:
-        prompt_text = lp.render(session_label=label)
-        prompt_path = session_dir / "leader-prompt.md"
-        prompt_path.write_text(prompt_text, encoding="utf-8")
-        try:
-            time.sleep(max(0.0, args.prompt_delay))
-            # Name the session BEFORE pasting: vendors with no launch-time flag
-            # (codex) rename via post-ready keystrokes; claude is already named
-            # at launch → session_rename_keys is [] → no-op.
-            for step, enter in agents_mod.session_rename_keys(agent_spec, session_name):
-                mux.send_step(session, "leader", step, enter=enter, backend=m)
-                time.sleep(0.6)
-            prompt_pointer.paste_pointer(
-                m, session=session, window="leader", prompt_path=prompt_path
-            )
-            time.sleep(0.8)
-            m.send_key(session, "leader", "Enter")
-        except mux.MuxError as e:
-            print(f"warn: leader prompt paste failed: {e}", file=sys.stderr)
+        paste_leader_prompt(
+            m, session, label, agent_spec, session_name, prompt_delay=args.prompt_delay
+        )
 
     append_event(
         session_dir / "events.jsonl",
@@ -238,6 +225,68 @@ def run(args: argparse.Namespace) -> int:
         time.sleep(BANNER_ATTACH_PAUSE)
         return _attach(m, session)
     return 0
+
+
+def leader_launch(agent_spec: str, label: str) -> tuple[list[str], str, str]:
+    """``(argv, delivery, agent_name)`` for the leader agent of session *label*.
+
+    Shared by a fresh ``fleet leader`` and ``fleet leader --respawn`` so a
+    respawned leader runs exactly the command line a fresh one would.
+    ``agent_spec`` must already be resolved (no alias).
+    """
+    # Session display name so the leader is identifiable in the session picker.
+    session_name = state_mod.leader_agent_name(label)
+
+    cli = agents_mod.cli_command(agent_spec)
+    cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
+    # Relayed delivery (leader_delivery=send_message): claude drivers SendMessage
+    # their done / ask notifications to this leader instead of the notifier typing
+    # them into its composer (Issue #329). Only vendors with agent-to-agent
+    # messaging get it; the rest keep the pane path.
+    delivery = "pane"
+    if config_mod.get("leader_delivery")[0] == "send_message":
+        relay_args = agents_mod.relay_inbound_launch_args(agent_spec)
+        if relay_args:
+            cli = cli + relay_args
+            delivery = "send_message"
+    return cli, delivery, session_name
+
+
+def leader_env(label: str) -> dict[str, str]:
+    """The leader window's per-window environment."""
+    return {
+        "FLEET_SESSION": label,
+        "FLEET_STATE_DIR": str(state_mod.session_dir(label)),
+    }
+
+
+def paste_leader_prompt(
+    m: mux.Mux,
+    session: str,
+    label: str,
+    agent_spec: str,
+    session_name: str,
+    *,
+    prompt_delay: float,
+    window: str = "leader",
+) -> None:
+    """Render ``leader-prompt.md`` and paste its pointer into the leader window."""
+    prompt_text = lp.render(session_label=label)
+    prompt_path = state_mod.session_dir(label) / "leader-prompt.md"
+    prompt_path.write_text(prompt_text, encoding="utf-8")
+    try:
+        time.sleep(max(0.0, prompt_delay))
+        # Name the session BEFORE pasting: vendors with no launch-time flag
+        # (codex) rename via post-ready keystrokes; claude is already named
+        # at launch → session_rename_keys is [] → no-op.
+        for step, enter in agents_mod.session_rename_keys(agent_spec, session_name):
+            mux.send_step(session, window, step, enter=enter, backend=m)
+            time.sleep(0.6)
+        prompt_pointer.paste_pointer(m, session=session, window=window, prompt_path=prompt_path)
+        time.sleep(0.8)
+        m.send_key(session, window, "Enter")
+    except mux.MuxError as e:
+        print(f"warn: leader prompt paste failed: {e}", file=sys.stderr)
 
 
 def _flush_stdout() -> None:
