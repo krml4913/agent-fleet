@@ -49,6 +49,20 @@ CLAUDE_IDLE = (
     f"\n{TITLED_RULE}\n❯\xa0\n{RULE}\n{FOOTER}\n"
 )
 
+# claude's first-run workspace-trust dialog (Issue #327). The header and the
+# "No, exit" default are as observed on a fresh project's task worktree; the
+# rest of the screen is hand-written from the documented dialog, not captured.
+CLAUDE_TRUST_DIALOG = (
+    " Accessing workspace:\n\n"
+    " /Users/example/dev/newproj/worktrees/task-p0-impl\n\n"
+    " Quick safety check: Is this a project you created or one you trust? (Like your\n"
+    " own code, a well-known open source project, or work from your team). If not,\n"
+    " take a moment to review what's in this folder first.\n\n"
+    " ❯ 1. No, exit\n"
+    "   2. Yes, I trust this folder\n\n"
+    " Enter to confirm · Esc to cancel\n"
+)
+
 
 def claude_stuck_composer(text: str, *, width: int = 100) -> str:
     """A busy claude with ``text`` typed into (not submitted from) the composer."""

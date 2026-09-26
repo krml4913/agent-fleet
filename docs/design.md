@@ -201,6 +201,19 @@ untrusted, it aborts without creating the worktree / task state / prompt and
 guides the user to launch `codex` once in that repo to approve it, then retry.
 `fleet preflight` also surfaces the same trust status as an optional check.
 
+Claude Code has the same first-run gate (a workspace-trust dialog, Issue #327), but
+it only *waits* — nothing is pasted into a shell — so the response is to make it
+loud, not to abort. claude records the answer as
+`projects["<repo root>"].hasTrustDialogAccepted` in `~/.claude.json` (under
+`$CLAUDE_CONFIG_DIR` when set), keyed by the git repo root: a task worktree resolves
+to its repo's key, and a trusted *ancestor* directory does not cover it.
+`agents.claude_repo_trusted` reads that key (fleet never writes it; `None` = cannot
+tell). `fleet-agent start` prints a one-time warning for an untrusted repo and goes
+on, `fleet preflight` shows a `claude-trust` warning, and the prompt deliverer names
+the gate: when the pane shows the trust dialog (`adapter.trust_gate`), the
+`awaiting_orders` event carries `gate: trust`, and the question / notification say
+the task is waiting on the workspace trust prompt and how to clear it.
+
 The codex startup update prompt is suppressed at the source by passing the
 Codex CLI per-invocation config override `-c
 check_for_update_on_startup=false`. The fleet does not write to

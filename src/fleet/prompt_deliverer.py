@@ -212,7 +212,9 @@ def deliver(
 
         if not gate_notified and adapter.is_gated(pane):
             gate_notified = True
-            _awaiting_orders(state_dir, task_id, window, vendor)
+            _awaiting_orders(
+                state_dir, task_id, window, vendor, trust=adapter.is_trust_gate(pane)
+            )
 
         time.sleep(max(0.1, poll_interval))
 
@@ -234,12 +236,33 @@ def deliver(
     return 1
 
 
-def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) -> None:
-    question = (
-        f"{vendor} boot gate detected in task-{task_id} ({window}). "
-        "Attach to the pane, clear the prompt/login/update gate, and the prompt "
-        "deliverer will continue automatically."
-    )
+def _awaiting_orders(
+    state_dir: Path, task_id: str, window: str, vendor: str, *, trust: bool = False
+) -> None:
+    try:
+        project = state_mod.load_project(state_dir)
+    except FileNotFoundError:
+        project = {"name": "?"}
+    if trust:
+        # The dialog is the one gate with a known fix: name it, so the reason is
+        # not "boot gate" (fleet never answers it; a human confirms once).
+        question = (
+            f"{vendor} is waiting on its workspace trust prompt in task-{task_id} "
+            f"({window}). Attach to the pane and choose the \"Yes\" option to trust the "
+            "folder (fleet does not answer it); the prompt deliverer will continue "
+            "automatically."
+        )
+        repo = project.get("repo")
+        if repo:
+            question += f" To avoid this next time, run `{vendor}` once in {repo} and accept it."
+        title = f"fleet {project.get('name', '?')}: task-{task_id} waiting on {vendor} trust prompt"
+    else:
+        question = (
+            f"{vendor} boot gate detected in task-{task_id} ({window}). "
+            "Attach to the pane, clear the prompt/login/update gate, and the prompt "
+            "deliverer will continue automatically."
+        )
+        title = f"fleet {project.get('name', '?')}: task-{task_id} boot gate"
     try:
         task = state_mod.load_task(state_dir, task_id)
         task["status"] = "awaiting_orders"
@@ -249,6 +272,7 @@ def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) ->
     qpath = state_mod.task_dir(state_dir, task_id) / "questions.md"
     existing = qpath.read_text(encoding="utf-8") if qpath.exists() else ""
     qpath.write_text(existing + f"### {utcnow_iso()}\n\n{question}\n\n", encoding="utf-8")
+    extra = {"gate": "trust"} if trust else {}
     append_event(
         state_dir / "events.jsonl",
         "awaiting_orders",
@@ -256,17 +280,9 @@ def _awaiting_orders(state_dir: Path, task_id: str, window: str, vendor: str) ->
         question=question,
         source="prompt_deliverer",
         window=window,
+        **extra,
     )
-    try:
-        project = state_mod.load_project(state_dir)
-    except FileNotFoundError:
-        project = {"name": "?"}
-    notify.send(
-        state_dir,
-        title=f"fleet {project.get('name', '?')}: task-{task_id} boot gate",
-        message=question,
-        level="error",
-    )
+    notify.send(state_dir, title=title, message=question, level="error")
 
 
 def _log(message: str) -> None:

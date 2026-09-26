@@ -191,6 +191,28 @@ class DialogDetectionTests(unittest.TestCase):
         self.assertFalse(self.X.is_ready(codex))
         self.assertTrue(self.X.is_gated(codex))
 
+    def test_claude_trust_dialog_is_a_trust_gate(self) -> None:
+        dialog = pane_fx.CLAUDE_TRUST_DIALOG
+        self.assertFalse(self.C.is_ready(dialog))
+        self.assertTrue(self.C.is_gated(dialog))  # the trust gate is a subset of gate
+        self.assertTrue(self.C.is_trust_gate(dialog))
+        # older wording, and option order must not matter
+        self.assertTrue(self.C.is_trust_gate("Do you trust the files in this folder?\n❯ 1. Yes\n"))
+
+    def test_other_gates_are_not_trust_gates(self) -> None:
+        self.assertFalse(self.C.is_trust_gate(CLAUDE_CHROME_DIALOG))
+        self.assertFalse(self.C.is_trust_gate("Please log in\n❯ 1. Sign in\n"))
+        self.assertFalse(self.C.is_trust_gate(pane_fx.CLAUDE_IDLE))
+        self.assertFalse(self.X.is_trust_gate("Update available\n› 1. Update now\n"))
+
+    def test_codex_trust_dialog_is_a_trust_gate(self) -> None:
+        dialog = "Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n"
+        self.assertTrue(self.X.is_gated(dialog))
+        self.assertTrue(self.X.is_trust_gate(dialog))
+
+    def test_vendor_without_trust_gate_never_matches(self) -> None:
+        self.assertFalse(FakeAdapter.is_trust_gate("Do you trust this folder?"))
+
     def test_codex_unnumbered_menu_and_ready(self) -> None:
         menu = "  Choose\n  › Keep current setting\n    Change it\n"
         self.assertFalse(self.X.is_ready(menu))

@@ -14,6 +14,8 @@ enters task / leader state, so everything downstream only ever sees a
 """
 from __future__ import annotations
 
+import json
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -137,3 +139,53 @@ def codex_repo_trusted(repo_root, *, config_path=None) -> bool:
     repo_key = str(Path(repo_root).expanduser().resolve())
     project = data.get("projects", {}).get(repo_key, {})
     return project.get("trust_level") == "trusted"
+
+
+def claude_config_path() -> Path:
+    """claude's global config: ``~/.claude.json``, or under ``$CLAUDE_CONFIG_DIR``."""
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    base = Path(override).expanduser() if override else Path.home()
+    return base / ".claude.json"
+
+
+def claude_repo_trusted(repo_root, *, config_path=None) -> bool | None:
+    """Whether claude has accepted its workspace-trust dialog for ``repo_root``.
+
+    Read-only, like :func:`codex_repo_trusted`: fleet never writes claude's
+    config. claude records the answer as
+    ``projects["<repo root>"].hasTrustDialogAccepted`` in its global config,
+    keyed by the git repo root — a task worktree resolves to its repo's key
+    (worktrees never get an entry of their own), so ``repo_root`` is the
+    project's ``repo``, not the worktree. Only that exact key counts: a trusted
+    ancestor directory did not stop the dialog on a fresh worktree.
+
+    ``None`` means "cannot tell" (config missing / unreadable / not a JSON
+    object), so a caller must stay quiet rather than warn on a guess.
+    """
+    config = Path(config_path).expanduser() if config_path else claude_config_path()
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    projects = data.get("projects")
+    if not isinstance(projects, dict):
+        return False
+    resolved = Path(repo_root).expanduser().resolve()
+    for key in (str(resolved), resolved.as_posix()):
+        entry = projects.get(key)
+        if isinstance(entry, dict) and entry.get("hasTrustDialogAccepted") is True:
+            return True
+    return False
+
+
+def claude_trust_hint(repo_root) -> str:
+    """The one-time instruction for a repo claude has not trusted yet."""
+    return (
+        "claude has not accepted its workspace trust prompt for this repo yet, so the "
+        "first claude driver will stop at \"Is this a project you created or one you "
+        "trust?\" until someone chooses \"Yes, I trust this folder\" (fleet never "
+        "answers it for you). Trust it once: run `claude` in "
+        f"{repo_root} and accept the prompt."
+    )

@@ -34,6 +34,15 @@ AMBIENT_FLEET_HOME = tempfile.mkdtemp(prefix="fleet-test-home-")
 os.environ["FLEET_HOME"] = AMBIENT_FLEET_HOME
 atexit.register(shutil.rmtree, AMBIENT_FLEET_HOME, ignore_errors=True)
 
+# Hermetic claude trust state: fleet reads claude's global config
+# (``<config dir>/.claude.json``) to warn about an untrusted repo. Point it at an
+# empty throwaway dir so the suite never depends on the developer's real
+# ``~/.claude.json`` (empty → "cannot tell" → no warning). Trust tests write a
+# config of their own and pass ``config_path`` / override this env var.
+AMBIENT_CLAUDE_CONFIG_DIR = tempfile.mkdtemp(prefix="fleet-test-claude-")
+os.environ["CLAUDE_CONFIG_DIR"] = AMBIENT_CLAUDE_CONFIG_DIR
+atexit.register(shutil.rmtree, AMBIENT_CLAUDE_CONFIG_DIR, ignore_errors=True)
+
 # Hermetic by default: no test may create a REAL multiplexer session (tmux, or
 # zellij — the default backend on Windows) unless live tests are explicitly
 # opted into. ``FLEET_NO_MUX`` makes every backend report unavailable (and the

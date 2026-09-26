@@ -759,13 +759,17 @@ Each item has a GitHub issue. The handoff note for the fleet leader is
   how claude / codex actually spawn a tool-call shell — so
   `window_close_kills_caller` is now `True` for zellij on every platform, not
   just Windows.
-- ~~claude's workspace-trust dialog~~ **closed as not needed** (#259). With the
-  default layout every project's worktrees live under the fleet clone
-  (`fleet-state/projects/<name>/worktrees/`), and claude treats subdirectories of
-  a trusted directory as trusted: 7 worktree tasks in the 2026-09-19 leader run
-  needed no attach. The `gate` regex still catches the dialog if a layout puts a
-  worktree outside a trusted tree. The opt-in `--trust-claude` idea stays
-  unbuilt.
+- ~~claude's workspace-trust dialog~~ **closed as not needed** (#259), then
+  **reopened as #327 and made loud instead**. The 7 worktree tasks in the
+  2026-09-19 leader run needed no attach because they belonged to the fleet clone
+  itself, which was already trusted. The premise "claude treats subdirectories of a
+  trusted directory as trusted" was wrong: claude keys trust by the *repo root* a
+  worktree belongs to (`~/.claude.json` → `projects["<repo root>"]`), so the first
+  task of a newly registered project (yamato, 2026-09-26) stopped at the dialog even
+  though its worktree sat under the trusted fleet clone. fleet still does not answer
+  the dialog and the opt-in `--trust-claude` idea stays unbuilt; `start` /
+  `preflight` warn and the deliverer reports the gate as the trust prompt (see
+  design.md).
 - **Re-check multi-stage handoff on tmux** (#261). #253 changed the handoff
   path for zellij only; tmux is covered by unit tests but was not re-run live.
 
