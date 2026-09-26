@@ -121,6 +121,28 @@ class LeaderNotifierTests(unittest.TestCase):
         self._seed_task("9")  # no outbox
         self.assertIsNone(leader_notifier.scan_pr_url(self.state_dir, "9"))
 
+    def test_incident_outbox_yields_the_right_pr_url_in_the_rendered_block(self) -> None:
+        """Issue #329: the record was right (``pull/328``); the leader saw ``pull/3``.
+
+        The outbox is the one the fix-trust-gate driver wrote right before ``done``
+        (URL first, then prose mentioning other issues); the scan, the record and
+        the rendered block must all carry the full URL, ending the block.
+        """
+        self._seed_task("trust")
+        outbox = state.task_dir(self.state_dir, "trust") / "outbox.md"
+        outbox.write_text(
+            "\n## 2026-09-26 — #327 fix ready for review\n\n"
+            "PR: https://github.com/krml4913/agent-fleet/pull/328 (CI green: Linux 3.11/3.12/3.13, "
+            "Windows, zellij-linux). Not merged.\n\n"
+            "- corrects the #259 note in docs/windows-support.md.\n",
+            encoding="utf-8",
+        )
+        url = "https://github.com/krml4913/agent-fleet/pull/328"
+        self.assertEqual(leader_notifier.scan_pr_url(self.state_dir, "trust"), url)
+        rec = self._record("trust", status="awaiting_orders")
+        self.assertEqual(rec["pr_url"], url)
+        self.assertTrue(leader_notifier.render_block([rec]).endswith(f"PR={url}"))
+
     # -- queue append + persistence (under the SESSION dir) ----------------
 
     def test_enqueue_persists_under_session_dir_and_survives_reload(self) -> None:
@@ -438,6 +460,61 @@ class LeaderNotifierTests(unittest.TestCase):
         self.assertGreaterEqual(names[:names.index("send_text")].count("capture"), 4)
         rearm.assert_not_called()
         self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    # -- Issue #329: never type on top of a human's unsent draft -------------
+
+    def _notify_with_pane(self, *, capture, timeout: float = 5.0):
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=capture) as fake,
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            leader_notifier.notify(
+                session_dir=self.session_dir,
+                session="fleet-main",
+                window="leader",
+                agent_spec="claude:opus",
+                timeout=timeout,
+                poll_interval=0.001,
+            )
+        return fake, rearm
+
+    def test_leader_with_an_unsent_draft_is_never_injected_into(self) -> None:
+        # The leader's composer held "1. teams." (the user mid-reply); the notifier
+        # typed its block after it and the leader got a merged, corrupted message.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        fake, rearm = self._notify_with_pane(capture=pane_fx.claude_draft("1. teams."), timeout=0.05)
+        self.assertEqual(fake.sent(), [])  # nothing typed, no Enter either
+        rearm.assert_called_once()  # a draft that outlives the poller is handled like busy
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)  # kept, not dropped
+        log = leader_notifier.log_path(self.session_dir).read_text(encoding="utf-8")
+        self.assertIn("unsent draft", log)
+
+    def test_draft_then_sent_injects_once_when_the_composer_is_empty(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        panes = [pane_fx.claude_draft("1. teams."), pane_fx.claude_draft("1. teams. and more"), pane_fx.CLAUDE_IDLE]
+        fake, rearm = self._notify_with_pane(capture=panes)
+        self.assertEqual([kind for kind, _w, _p in fake.sent()].count("text"), 1)
+        names = fake.method_names()
+        self.assertGreaterEqual(names[:names.index("send_text")].count("capture"), 4)  # 2 drafts skipped
+        rearm.assert_not_called()
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    def test_draft_started_after_the_first_capture_stops_the_injection(self) -> None:
+        # Idle on the first capture; the user starts typing before the confirming
+        # capture (taken right before the keystrokes) — nothing is typed that round.
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        panes = [pane_fx.CLAUDE_IDLE, pane_fx.claude_draft("hm"), pane_fx.CLAUDE_IDLE]
+        fake, _rearm = self._notify_with_pane(capture=panes)
+        names = fake.method_names()
+        self.assertEqual(names.count("send_text"), 1)
+        self.assertGreaterEqual(names[:names.index("send_text")].count("capture"), 3)
+        self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
+
+    def test_fresh_session_placeholder_does_not_block_the_flush(self) -> None:
+        leader_notifier.enqueue(self.session_dir, self._record("1"))
+        fake, rearm = self._notify_with_pane(capture=READY_PANE)  # ``❯ Try "help"``: an empty composer
+        self.assertEqual([kind for kind, _w, _p in fake.sent()].count("text"), 1)
+        rearm.assert_not_called()
 
     def test_idle_only_on_the_first_capture_is_not_enough(self) -> None:
         # A gap between two tool calls looks idle for one capture. The confirming

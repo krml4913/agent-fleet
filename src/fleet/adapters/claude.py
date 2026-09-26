@@ -26,6 +26,11 @@ class ClaudeAdapter(VendorAdapter):
         r"|^[^\S\n]*[·✢✳✶✻✽][^\S\n]+[^\n(]*?(?:…|\.\.\.)"
     )
     pasted_marker = re.compile(r"\[Pasted text #\d+")
+    # The composer is closed by a horizontal rule; an empty one dumps as ``❯`` +
+    # NBSP, or with a hint in place of text: ``Try "…"`` on a fresh session,
+    # ``Press up to edit queued messages`` while messages wait (live captures).
+    composer_end = re.compile(r"^\s*─{3,}")
+    composer_placeholder = re.compile(r'Try\s+".*"|Press up to edit queued messages')
     gate = re.compile(
         r"(?im)"
         r"(?:login|log in|sign in|authentication|authenticate|"

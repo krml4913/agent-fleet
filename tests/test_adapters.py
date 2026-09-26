@@ -295,6 +295,77 @@ class BusyDetectionTests(unittest.TestCase):
         self.assertTrue(self.X.is_idle(pane_fx.CODEX_IDLE))
 
 
+class DraftDetectionTests(unittest.TestCase):
+    """``has_draft``: a human's unsent text in the composer makes the pane not idle (Issue #329)."""
+
+    C = adapters.ClaudeAdapter
+    X = adapters.CodexAdapter
+
+    def test_empty_composer_is_not_a_draft(self) -> None:
+        for pane in (pane_fx.CLAUDE_IDLE, pane_fx.CLAUDE_BUSY, CLAUDE_IDLE_SCREEN, "❯ \n"):
+            with self.subTest(pane=pane):
+                self.assertFalse(self.C.has_draft(pane))
+
+    def test_empty_composer_hints_are_not_a_draft(self) -> None:
+        # claude's empty composer shows a hint instead of text: ``Try "…"`` on a
+        # fresh session, ``Press up to edit queued messages`` while messages wait
+        # (the latter is a live capture of a busy pane).
+        hinted = [
+            CLAUDE_READY,
+            pane_fx.CLAUDE_IDLE.replace("❯\xa0\n", '❯\xa0Try "fix lint errors"\n'),
+            pane_fx.CLAUDE_IDLE.replace("❯\xa0\n", "❯\xa0Press up to edit queued messages\n"),
+        ]
+        for pane in hinted:
+            with self.subTest(pane=pane):
+                self.assertFalse(self.C.has_draft(pane))
+                self.assertTrue(self.C.is_idle(pane))
+
+    def test_typed_draft_is_detected_and_not_idle(self) -> None:
+        for sep in ("\xa0", " ", ""):
+            with self.subTest(sep=sep):
+                pane = pane_fx.claude_draft("外に出すときは毎回俺が判断する", sep=sep)
+                self.assertTrue(self.C.has_draft(pane))
+                self.assertTrue(self.C.is_ready(pane))
+                self.assertFalse(self.C.is_busy(pane))
+                self.assertFalse(self.C.is_idle(pane))
+
+    def test_numbered_draft_is_detected(self) -> None:
+        # The Issue #329 draft. ``ready`` skips a ``❯ 1.`` line (a menu option), so
+        # the older history echo is what ``is_ready`` saw; the draft check must
+        # still find the composer.
+        pane = pane_fx.claude_draft("1. teams.")
+        self.assertTrue(self.C.has_draft(pane))
+        self.assertFalse(self.C.is_idle(pane))
+
+    def test_wrapped_multi_line_draft_is_detected(self) -> None:
+        pane = pane_fx.claude_draft("x" * 250)
+        self.assertGreater(pane.count("\n  x"), 1)  # really wrapped onto continuation lines
+        self.assertTrue(self.C.has_draft(pane))
+
+    def test_draft_starting_on_a_later_line_is_detected(self) -> None:
+        pane = pane_fx.CLAUDE_IDLE.replace("❯\xa0\n", "❯\xa0\n  second line of a draft\n")
+        self.assertTrue(self.C.has_draft(pane))
+
+    def test_history_echo_above_an_empty_composer_is_not_a_draft(self) -> None:
+        self.assertIn("❯ Fix the flaky test", pane_fx.CLAUDE_IDLE)
+        self.assertFalse(self.C.has_draft(pane_fx.CLAUDE_IDLE))
+
+    def test_without_a_closing_rule_only_the_glyph_line_counts(self) -> None:
+        self.assertFalse(self.C.has_draft("status\n❯ \n  some footer text\n"))
+        self.assertTrue(self.C.has_draft("status\n❯ half a message\n"))
+
+    def test_no_prompt_is_not_a_draft(self) -> None:
+        self.assertFalse(self.C.has_draft("✻ Thinking… (esc to interrupt)\n"))
+
+    def test_vendor_without_composer_end_never_has_a_draft(self) -> None:
+        # codex's empty composer shows a rotating suggestion a dump cannot tell from
+        # typed text; an unknown pattern must never strand a queue behind a "draft".
+        self.assertIsNone(VendorAdapter.composer_end)
+        self.assertFalse(self.X.has_draft(pane_fx.CODEX_IDLE))
+        self.assertTrue(self.X.is_idle(pane_fx.CODEX_IDLE))
+        self.assertFalse(FakeAdapter.has_draft("FAKE-READY partial text\n"))
+
+
 class ComposerHoldsTests(unittest.TestCase):
     """``composer_holds``: is the injected text still typed-but-unsent in the composer?"""
 
