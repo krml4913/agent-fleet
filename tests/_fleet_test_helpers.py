@@ -20,6 +20,10 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "vendor"))
 
 os.environ.setdefault("FLEET_NO_NOTIFY", "1")
+# Running the suite from a Claude Code shell must not flip done / ask onto the
+# SendMessage relay path (Issue #329): that is decided by CLAUDECODE. Relay
+# tests set it themselves.
+os.environ.pop("CLAUDECODE", None)
 
 # Hermetic global tier (#319): point the *ambient* ``$FLEET_HOME`` at a
 # throwaway dir before any test imports fleet. Without it, every test that

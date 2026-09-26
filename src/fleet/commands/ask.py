@@ -78,7 +78,7 @@ def run(args: argparse.Namespace) -> int:
 
     # Opt-in (notify_leader_on_driver_done): also push the question into the owning
     # leader's pane so an autonomous leader can answer it via `fleet-agent inbox`.
-    leader_notifier.push_to_leader(
+    relay = leader_notifier.push_to_leader(
         state_dir,
         task_id,
         task,
@@ -88,7 +88,10 @@ def run(args: argparse.Namespace) -> int:
         summary=f"task-{task_id} awaiting orders",
         kind=leader_notifier.KIND_ASK,
         question=args.question,
+        caller_agent=leader_notifier.caller_agent_spec(task),
     )
 
     print(f"recorded awaiting_orders for task-{task_id}")
+    if relay:
+        print(leader_notifier.render_relay(relay))
     return 0

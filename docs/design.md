@@ -1271,6 +1271,48 @@ listing while another tab is closed (windows-support.md §4.8), so it is now tra
   unsent draft / transient error / session blip), flush result, deadline and re-arm,
   exit reason.
 
+**claude → claude is relayed with `SendMessage`, not typed (Issue #329).** Waiting
+out a draft still means the notifier types into the composer the human uses. When
+both ends are claude there is a channel that avoids the composer: Claude Code's
+cross-session messaging. A message that reaches an idle session starts a new turn as
+a meta user turn (`<cross-session-message …>`). A busy session reads it between tool
+calls. Either way it never passes through the composer, so a draft sitting there is
+never touched. There is no shell CLI for it (`SendMessage` is a tool inside a
+session), so the driver does the send. fleet still builds the text:
+
+- **Leader launch.** For a claude leader, `fleet leader` appends
+  `--settings '{"crossSessionInbound":"accept"}'`, which is launch-only. fleet never
+  writes claude's settings files. Without this setting, claude holds a message from a
+  session in another permission-mode class behind an approval dialog, and an
+  unattended leader would sit stuck. The session record gets `delivery: send_message`
+  and `agent_name` (the `claude --name` value, `<label>-leader`), which is the
+  address drivers send to. The global config key `leader_delivery` (`send_message`,
+  the default, or `pane`) is read at launch. `pane`, or a vendor without
+  agent-to-agent messaging (`relay_inbound_launch_args() == []`, e.g. codex), gives
+  `delivery: pane`.
+- **Relay decision** (`relay_target`, at `done` / `ask`). A notification is relayed
+  only if all of these hold:
+  - the calling driver's stage agent is claude (`caller_agent_spec`, which covers the
+    peer_review reviewer phase; `done` reads it before advancing);
+  - the process runs inside Claude Code (`CLAUDECODE` is set; `pane_launch` strips an
+    inherited one from every pane, so a codex pane never sees it);
+  - the owner leader's record says `delivery: send_message`.
+  In any other case the pane path is unchanged.
+- **Relayed record.** It is still enqueued, as the record, with
+  `delivery: send_message` and `relay_to`. `done` / `ask` print a `[fleet] leader
+  relay` block: the target name, the rule "send verbatim with the SendMessage tool",
+  and the rendered `render_block` text between `BEGIN` / `END LEADER MESSAGE`
+  markers. `driver-base.md` carries the same rule. The notifier is not spawned for
+  it. `pane_records` filters relayed records out of the poll loop, `_flush_once` and
+  `pending_summary`, so nothing is typed twice and `fleet status` does not report
+  them as pending. `clear_task_records` drops them on retirement like any other
+  record.
+- **Limits.** Delivery depends on the driver following the instruction. If
+  SendMessage fails (for example, the leader has stopped: HTTP 409), the driver
+  reports it in `outbox.md`, and the OS notification (§10.1) still fires. A leader
+  started before this change has no `delivery` field and keeps the pane path until
+  it is restarted with `fleet leader`.
+
 **`fleet sessions`** is the cross-session CLI view: live leader sessions (label →
 pane, agent) and each session's in-flight tasks (task.yaml across projects where
 `owner_session == label` and status is non-terminal). It reads state on demand

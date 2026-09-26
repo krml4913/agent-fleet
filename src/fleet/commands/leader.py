@@ -154,6 +154,16 @@ def run(args: argparse.Namespace) -> int:
 
     cli = agents_mod.cli_command(agent_spec)
     cli = cli + agents_mod.session_name_launch_args(agent_spec, session_name)
+    # Relayed delivery (leader_delivery=send_message): claude drivers SendMessage
+    # their done / ask notifications to this leader instead of the notifier typing
+    # them into its composer (Issue #329). Only vendors with agent-to-agent
+    # messaging get it; the rest keep the pane path.
+    delivery = "pane"
+    if config_mod.get("leader_delivery")[0] == "send_message":
+        relay_args = agents_mod.relay_inbound_launch_args(agent_spec)
+        if relay_args:
+            cli = cli + relay_args
+            delivery = "send_message"
 
     try:
         m.new_session(
@@ -176,6 +186,9 @@ def run(args: argparse.Namespace) -> int:
         **({"agent_alias": agent_alias} if agent_alias else {}),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "pane": f"{session}:leader",
+        # The agent's own session name (claude --name): where drivers relay to.
+        "agent_name": session_name,
+        "delivery": delivery,
     }
     state_mod.session_record_path(label).write_text(
         json.dumps(record, indent=2),

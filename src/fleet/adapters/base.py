@@ -259,6 +259,15 @@ class VendorAdapter:
         return []
 
     @classmethod
+    def relay_inbound_launch_args(cls) -> list[str]:
+        """argv appended at a leader's launch so drivers can message it directly.
+
+        ``[]`` when the vendor has no agent-to-agent messaging: its leader keeps
+        the pane-typing notifier (:mod:`fleet.leader_notifier`).
+        """
+        return []
+
+    @classmethod
     def session_rename_keys(cls, name: str) -> list[KeystrokeStep]:
         """Post-ready keystroke steps to rename the session.
 

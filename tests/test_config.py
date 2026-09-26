@@ -193,7 +193,7 @@ class LeaderAgentConfigTests(_ConfigTestCase):
         self.assertEqual(err, "")
 
     def test_all_keys_includes_both(self) -> None:
-        self.assertEqual(config.ALL_KEYS, ("mux", "leader_agent"))
+        self.assertEqual(config.ALL_KEYS, ("mux", "leader_delivery", "leader_agent"))
 
 
 class ConfigSetTests(_ConfigTestCase):
