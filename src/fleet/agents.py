@@ -98,6 +98,15 @@ def session_name_launch_args(spec: str, name: str) -> list[str]:
     return REGISTRY[vendor].session_name_launch_args(name)
 
 
+def relay_inbound_launch_args(spec: str) -> list[str]:
+    """argv to append at a leader's launch to accept direct driver messages.
+
+    ``[]`` for vendors with no agent-to-agent messaging (pane-typing only).
+    """
+    vendor, _model = parse_spec(spec)
+    return REGISTRY[vendor].relay_inbound_launch_args()
+
+
 def session_rename_keys(spec: str, name: str) -> list[KeystrokeStep]:
     """Post-ready keystroke steps that rename this agent's session.
 

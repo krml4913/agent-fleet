@@ -1702,5 +1702,194 @@ class AskHookTests(unittest.TestCase):
         self.assertEqual(leader_notifier.read_queue(self.session_dir), [])
 
 
+class RelayTests(unittest.TestCase):
+    """Issue #329: claude driver → claude leader notifications are relayed with
+    SendMessage (printed by done / ask) and never typed into the leader pane."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.fleet_home = Path(self._tmp.name) / "fleet-state"
+        self.fleet_home.mkdir()
+        env = patch.dict(os.environ, {"FLEET_HOME": str(self.fleet_home), "CLAUDECODE": "1"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.addCleanup(self._tmp.cleanup)
+        self.state_dir = Path(self._tmp.name) / "state"
+        state.init_state(self.state_dir, name="demo")
+        self.task_id = "1"
+        self.task = {
+            "id": self.task_id,
+            "status": "running",
+            "branch": "fleet/task/1",
+            "worktree": "/wt/1",
+            "current_stage": 0,
+            "stages": [{"role": "driver", "agent": "claude:opus"}],
+        }
+        state.save_task(self.state_dir, self.task_id, self.task)
+        self.session_dir = state.session_dir("main")
+        self.project = {"name": "demo", "notify_leader_on_driver_done": "true"}
+
+    def _leader(self, **fields) -> None:
+        rec = {"label": "main", "agent": "claude:opus", "agent_name": "main-leader",
+               "delivery": "send_message"}
+        rec.update(fields)
+        path = state.session_record_path("main")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({k: v for k, v in rec.items() if v is not None}),
+                        encoding="utf-8")
+
+    def _push(self, caller="claude:opus"):
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+        ):
+            relay = leader_notifier.push_to_leader(
+                self.state_dir, self.task_id, self.task, self.project, "demo",
+                status="completed", summary="task-1 completed", caller_agent=caller,
+            )
+        return relay, spawn
+
+    def test_claude_to_claude_is_relayed_not_pane_typed(self) -> None:
+        self._leader()
+        relay, spawn = self._push()
+        spawn.assert_not_called()
+        self.assertEqual(relay["to"], "main-leader")
+        self.assertTrue(relay["message"].startswith("[fleet] 1 driver notification(s)"))
+        self.assertIn("task-1 [completed]", relay["message"])
+        (rec,) = leader_notifier.read_queue(self.session_dir)  # the queue keeps the record
+        self.assertEqual(rec["delivery"], "send_message")
+        self.assertEqual(rec["relay_to"], "main-leader")
+        self.assertEqual(leader_notifier.pane_records(self.session_dir), [])
+        self.assertIsNone(leader_notifier.pending_summary(self.session_dir))
+
+    def test_leader_name_defaults_to_the_launch_name(self) -> None:
+        self._leader(agent_name=None)
+        relay, _spawn = self._push()
+        self.assertEqual(relay["to"], state.leader_agent_name("main"))
+
+    def _assert_pane_path(self, relay, spawn) -> None:
+        self.assertIsNone(relay)
+        spawn.assert_called_once()
+        (rec,) = leader_notifier.read_queue(self.session_dir)
+        self.assertNotIn("delivery", rec)
+        self.assertEqual(len(leader_notifier.pane_records(self.session_dir)), 1)
+
+    def test_codex_driver_keeps_the_pane_path(self) -> None:
+        self._leader()
+        self._assert_pane_path(*self._push(caller="codex:gpt-5.5"))
+
+    def test_outside_claude_code_keeps_the_pane_path(self) -> None:
+        # A human running fleet-agent done by hand cannot SendMessage.
+        self._leader()
+        with patch.dict(os.environ):
+            os.environ.pop("CLAUDECODE", None)
+            self._assert_pane_path(*self._push())
+
+    def test_leader_launched_before_relay_keeps_the_pane_path(self) -> None:
+        # An existing leader (no delivery field) was not launched with
+        # crossSessionInbound: accept; it picks relay up only after a restart.
+        self._leader(delivery=None)
+        self._assert_pane_path(*self._push())
+
+    def test_pane_delivery_leader_keeps_the_pane_path(self) -> None:
+        self._leader(delivery="pane")
+        self._assert_pane_path(*self._push())
+
+    def test_codex_leader_keeps_the_pane_path(self) -> None:
+        self._leader(agent="codex:gpt-5.5")
+        self._assert_pane_path(*self._push())
+
+    def test_notifier_never_types_a_relayed_record(self) -> None:
+        self._leader()
+        self._push()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.time.sleep", return_value=None),
+            patch("fleet.leader_notifier.start_detached") as rearm,
+        ):
+            rc = leader_notifier.notify(
+                session_dir=self.session_dir, session="fleet-main", window="leader",
+                agent_spec="claude:opus", timeout=5, poll_interval=0.01,
+            )
+        self.assertEqual(rc, 0)
+        self.assertEqual(fake.calls_named("send_text"), [])
+        rearm.assert_not_called()
+        self.assertEqual(len(leader_notifier.read_queue(self.session_dir)), 1)
+
+    def test_notifier_types_only_the_pane_records(self) -> None:
+        self._leader()
+        self._push()                           # relayed
+        self._push(caller="codex:gpt-5.5")     # pane
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}, capture=READY_PANE) as fake,
+            patch("fleet.leader_notifier.time.sleep", return_value=None),
+        ):
+            self.assertTrue(leader_notifier._flush_once(
+                self.session_dir, "fleet-main", "leader",
+                leader_notifier.REGISTRY["claude"],
+            ))
+        (call,) = fake.calls_named("send_text")
+        self.assertIn("[fleet] 1 driver notification(s)", call[0][2])
+        (left,) = leader_notifier.read_queue(self.session_dir)
+        self.assertEqual(left["delivery"], "send_message")
+
+    def test_retirement_drops_relayed_records(self) -> None:
+        self._leader()
+        self._push()
+        self.assertEqual(leader_notifier.clear_task_records(self.session_dir, "1"), 1)
+
+    def test_caller_agent_spec_follows_the_peer_review_phase(self) -> None:
+        stage = {"role": "implementer", "agent": "codex:gpt-5.5",
+                 "peer_review": {"role": "code-reviewer", "agent": "claude:sonnet",
+                                 "phase": "implementing"}}
+        task = {"current_stage": 0, "stages": [stage]}
+        self.assertEqual(leader_notifier.caller_agent_spec(task), "codex:gpt-5.5")
+        stage["peer_review"]["phase"] = "reviewing"
+        self.assertEqual(leader_notifier.caller_agent_spec(task), "claude:sonnet")
+        self.assertIsNone(leader_notifier.caller_agent_spec({"stages": []}))
+
+    def test_render_relay_names_the_target_and_fences_the_message(self) -> None:
+        text = leader_notifier.render_relay({"to": "main-leader", "message": "MSG"})
+        self.assertIn('to: "main-leader"', text)
+        self.assertIn("SendMessage", text)
+        self.assertTrue(text.endswith(
+            "----- BEGIN LEADER MESSAGE -----\nMSG\n----- END LEADER MESSAGE -----"
+        ))
+
+    def test_done_prints_the_relay(self) -> None:
+        self._leader()
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached"),
+            patch("sys.stdout", new_callable=__import__("io").StringIO) as out,
+        ):
+            done_cmd._maybe_notify_leader(
+                self.state_dir, self.task_id, self.task, self.project, "demo",
+                status="completed", result="approved", summary="task-1 completed",
+                caller_agent="claude:opus",
+            )
+        self.assertIn('[fleet] leader relay', out.getvalue())
+        self.assertIn('to: "main-leader"', out.getvalue())
+
+    def test_ask_prints_the_relay_with_the_question(self) -> None:
+        self._leader()
+        project = state.load_project(self.state_dir)
+        project["notify_leader_on_driver_done"] = "true"
+        state.save_project(self.state_dir, project)
+        with (
+            use_fake_mux(sessions={"fleet-main": ["leader"]}),
+            patch("fleet.leader_notifier.start_detached") as spawn,
+            patch("fleet.commands.ask.task_context.resolve",
+                  return_value=(self.state_dir, self.task_id)),
+            patch("fleet.commands.ask.notify.send"),
+            patch("sys.stdout", new_callable=__import__("io").StringIO) as out,
+        ):
+            rc = ask_cmd.run(argparse.Namespace(question="A or B?", task_id=None))
+        self.assertEqual(rc, 0)
+        spawn.assert_not_called()
+        self.assertIn("[fleet] leader relay", out.getvalue())
+        self.assertIn("task-1 [ask] question: A or B?", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

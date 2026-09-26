@@ -205,7 +205,44 @@ class LeaderCmdTests(unittest.TestCase):
         self.assertEqual(session, self.session)
         self.assertEqual(kwargs["window"], "leader")
         # argv goes to the backend unquoted; the tmux backend types it.
-        self.assertEqual(kwargs["argv"][-2:], ["--name", f"{self.label}-leader"])
+        argv = kwargs["argv"]
+        i = argv.index("--name")
+        self.assertEqual(argv[i + 1], f"{self.label}-leader")
+
+    def _launch(self, agent: str):
+        from fleet.commands import leader
+
+        args = unittest.mock.MagicMock()
+        args.name = self.label
+        args.agent = agent
+        args.attach = False
+        args.auto_paste = False
+        args.prompt_delay = 0.0
+        args.scope = None
+        with use_fake_mux() as fake:
+            self.assertEqual(leader.run(args), 0)
+        (_session,), kwargs = fake.calls_named("new_session")[0]
+        record = json.loads(state.session_record_path(self.label).read_text(encoding="utf-8"))
+        return kwargs["argv"], record
+
+    def test_claude_leader_accepts_driver_messages_by_default(self) -> None:
+        """Issue #329: a claude leader is launched for relayed (SendMessage) delivery."""
+        argv, record = self._launch("claude:opus")
+        i = argv.index("--settings")
+        self.assertEqual(json.loads(argv[i + 1]), {"crossSessionInbound": "accept"})
+        self.assertEqual(record["delivery"], "send_message")
+        self.assertEqual(record["agent_name"], f"{self.label}-leader")
+
+    def test_leader_delivery_pane_keeps_the_pane_path(self) -> None:
+        config.set_value("leader_delivery", "pane")
+        argv, record = self._launch("claude:opus")
+        self.assertNotIn("--settings", argv)
+        self.assertEqual(record["delivery"], "pane")
+
+    def test_codex_leader_keeps_the_pane_path(self) -> None:
+        argv, record = self._launch("codex:gpt-5.5")
+        self.assertNotIn("--settings", argv)
+        self.assertEqual(record["delivery"], "pane")
 
     def test_invalid_scope_fails_before_session_creation(self) -> None:
         """An unknown --scope project errors before any tmux/session.json side effect."""

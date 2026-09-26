@@ -65,7 +65,14 @@ ALIASES_KEY = "agent_aliases"
 ALIAS_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 #: Enumerable keys → the values each accepts.
-KEYS: dict[str, tuple[str, ...]] = {"mux": BACKENDS}
+#: ``leader_delivery``: how driver notifications reach a claude leader launched
+#: by ``fleet leader`` — ``send_message`` (claude drivers relay them with
+#: SendMessage, nothing is typed into the leader pane) or ``pane`` (always the
+#: pane-typing notifier). Read at ``fleet leader`` launch.
+LEADER_DELIVERY_VALUES: tuple[str, ...] = ("send_message", "pane")
+DEFAULT_LEADER_DELIVERY = "send_message"
+
+KEYS: dict[str, tuple[str, ...]] = {"mux": BACKENDS, "leader_delivery": LEADER_DELIVERY_VALUES}
 
 #: Free-form keys: validated by calling the function here (it raises
 #: ``ValueError`` on a bad spec, like :func:`fleet.agents.parse_spec` does)
@@ -84,7 +91,11 @@ FREEFORM: dict[str, tuple[Callable[[str], None], str]] = {
 ALL_KEYS: tuple[str, ...] = (*KEYS, *FREEFORM)
 
 #: Built-in defaults (used when the key is absent from the file).
-DEFAULTS: dict[str, str] = {"mux": DEFAULT_BACKEND, "leader_agent": DEFAULT_LEADER_AGENT}
+DEFAULTS: dict[str, str] = {
+    "mux": DEFAULT_BACKEND,
+    "leader_delivery": DEFAULT_LEADER_DELIVERY,
+    "leader_agent": DEFAULT_LEADER_AGENT,
+}
 
 _cache: tuple[Path, dict[str, str], dict[str, str]] | None = None
 

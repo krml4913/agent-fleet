@@ -236,7 +236,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | コマンド | 用途 |
 |---|---|
 | `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex / Claude の trust と Codex のアップデート警告を含む。Windows では追加チェックあり）。 |
-| `fleet config [get <key> \| set <key> <value> \| unset <key>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定 / 削除。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec またはエージェントエイリアスで `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）、`agent_aliases.<name>` = エージェントエイリアス（[エージェントエイリアス](#エージェントエイリアス) を参照）。 |
+| `fleet config [get <key> \| set <key> <value> \| unset <key>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定 / 削除。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec またはエージェントエイリアスで `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）、`leader_delivery` = `send_message`（デフォルト）\| `pane` で claude leader への driver 通知の届け方（`fleet leader` 起動時に読む）、`agent_aliases.<name>` = エージェントエイリアス（[エージェントエイリアス](#エージェントエイリアス) を参照）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`）。エージェントの優先順位: `--agent` > グローバル config の `leader_agent` > 組み込みデフォルト `claude:opus`。 |
 | `fleet attach [target] [--project P] [--session LABEL]` | タスクの driver ペイン（そのタスクを所有するセッション `fleet-<owner_session>` 内。`--project` でタスクを特定）、またはデフォルトで `fleet-<LABEL>` の `leader` ペインにアタッチする（`--session`、デフォルトは `$FLEET_SESSION`、なければ `main`）。対象セッションが動いていなければ、稼働中のセッションを一覧表示する。 |
@@ -249,7 +249,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 | `fleet formation seed <name> [--global] [--project P] [--force]` | 同梱の formation seed を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet role seed <name> [--global] [--project P] [--force]` | 同梱の role プロンプト（`docs/prompts/roles/`）を project（デフォルト）または global tier にコピーする。既存ファイルは `--force` なしでは上書きしない。 |
 | `fleet workspace list \| set <mode>` | workspace モード（`worktree` / `none`）を表示または設定する。 |
-| `fleet notify [--project P] [on\|off\|status]` | オプトインの leader ペインへのプッシュ（`project.yaml` の `notify_leader_on_driver_done`、デフォルト off）を表示（引数なし / `status`）または設定する。on の間は driver の `done` / 承認ゲートに加え `fleet-agent ask` の質問も担当 leader のペインに注入される（ask の行は `fleet-agent inbox <id> "<answer>" --project P` で答えるよう leader に指示する）。次回の `done` / `ask` から有効。 |
+| `fleet notify [--project P] [on\|off\|status]` | オプトインの leader ペインへのプッシュ（`project.yaml` の `notify_leader_on_driver_done`、デフォルト off）を表示（引数なし / `status`）または設定する。on の間は driver の `done` / 承認ゲートに加え `fleet-agent ask` の質問も担当 leader のペインに注入される（ask の行は `fleet-agent inbox <id> "<answer>" --project P` で答えるよう leader に指示する）。次回の `done` / `ask` から有効。claude driver から `fleet leader` で起動した claude leader への通知は、leader のペインに打ち込まれない。`done` / `ask` がメッセージを出力し、driver が Claude Code の `SendMessage` で leader に送るので、leader の入力欄に書きかけの文があってもそのまま残る。`fleet config set leader_delivery pane` で無効にできる。この変更より前から動いている leader は、`fleet leader` で起動し直すまでペイン入力のまま。 |
 | `fleet rm <name> [--yes]` | プロジェクトの登録を解除し、その state を削除する。 |
 
 ### `fleet-agent` — エージェント用 CLI

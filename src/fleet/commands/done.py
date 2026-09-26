@@ -85,6 +85,8 @@ def run(args: argparse.Namespace) -> int:
     prev_stage_idx = task.get("current_stage", 0)
     if not isinstance(prev_stage_idx, int):
         prev_stage_idx = 0
+    # Who is calling done — read before advancing moves the task to the next stage.
+    caller_agent = leader_notifier.caller_agent_spec(task)
     orch.advance(state_dir, task_id, task, result=result)
     task = state_mod.load_task(state_dir, task_id)
 
@@ -133,6 +135,7 @@ def run(args: argparse.Namespace) -> int:
         status=status,
         result=result,
         summary=message,
+        caller_agent=caller_agent,
     )
 
     print(f"task-{task_id} marked done")
@@ -149,8 +152,13 @@ def _maybe_notify_leader(
     status: str,
     result: str,
     summary: str,
+    caller_agent: str | None = None,
 ) -> None:
-    """Opt-in leader-pane push of a ``done`` (:func:`leader_notifier.push_to_leader`)."""
+    """Opt-in leader push of a ``done`` (:func:`leader_notifier.push_to_leader`).
+
+    A relayed notification (claude driver → claude leader) is printed for the
+    driver to send with ``SendMessage`` (:func:`leader_notifier.render_relay`).
+    """
     # Only notify the leader for events that require action: task completed or
     # awaiting_orders (user_approval gate). Intermediate peer_review / multi_stage
     # handoffs are internal driver-to-driver transfers — the leader has nothing to
@@ -158,7 +166,7 @@ def _maybe_notify_leader(
     if status not in ("completed", "awaiting_orders"):
         return
 
-    leader_notifier.push_to_leader(
+    relay = leader_notifier.push_to_leader(
         state_dir,
         task_id,
         task,
@@ -167,4 +175,7 @@ def _maybe_notify_leader(
         status=status,
         summary=summary,
         result=result,
+        caller_agent=caller_agent,
     )
+    if relay:
+        print(leader_notifier.render_relay(relay))

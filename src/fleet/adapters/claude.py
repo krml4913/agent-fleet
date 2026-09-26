@@ -1,6 +1,7 @@
 """Adapter for Anthropic's ``claude`` CLI."""
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -54,6 +55,14 @@ class ClaudeAdapter(VendorAdapter):
     def session_name_launch_args(cls, name: str) -> list[str]:
         # claude has a launch flag for the resumable session display name.
         return ["--name", name]
+
+    @classmethod
+    def relay_inbound_launch_args(cls) -> list[str]:
+        # Accept cross-session (SendMessage) messages from drivers without the
+        # hold-for-approval dialog claude shows when sender and receiver are in
+        # different permission-mode classes. Passed as launch-only --settings:
+        # fleet never writes claude's own settings files.
+        return ["--settings", json.dumps({"crossSessionInbound": "accept"})]
 
     @classmethod
     def usage_from_session(

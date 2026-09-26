@@ -68,6 +68,19 @@ for a day. When ``capture`` fails and the ``leader`` window is missing,
 session name (``<label>-leader``, which survives a rename), renames its window
 back to ``leader`` and carries on. :func:`pending_summary` exposes what is still
 queued so ``fleet status`` / ``fleet sessions`` can show a stranded queue.
+
+Typing into the leader pane collides with a human typing in the same composer
+(Issue #329). So when both ends are claude — the calling driver runs in claude
+and the owner leader was launched by ``fleet leader`` with
+``crossSessionInbound: accept`` (session.json ``delivery: send_message``) — the
+record is marked ``delivery: send_message`` and *relayed* instead: ``done`` /
+``ask`` print the rendered block (:func:`render_relay`) and the driver sends it
+verbatim with Claude Code's ``SendMessage`` tool. A cross-session message starts
+a leader turn without going through the composer, so a draft there is never
+touched. Relay records stay in the queue as the record of what was sent but are
+never typed by this notifier (:func:`pane_records`), and are dropped with the
+task at ``merge`` / ``cleanup``. Every other combination (codex driver, non-claude
+or pre-relay leader, ``leader_delivery: pane``) keeps the pane-typing path.
 """
 from __future__ import annotations
 
@@ -385,6 +398,20 @@ def read_queue(session_dir: Path) -> list[dict]:
     return out
 
 
+DELIVERY_SEND_MESSAGE = "send_message"
+DELIVERY_PANE = "pane"
+
+
+def is_relayed(record: dict) -> bool:
+    """True for a record the driver relays with ``SendMessage`` (never pane-typed)."""
+    return record.get("delivery") == DELIVERY_SEND_MESSAGE
+
+
+def pane_records(session_dir: Path) -> list[dict]:
+    """The queued records this notifier still has to type into the leader pane."""
+    return [r for r in read_queue(session_dir) if not is_relayed(r)]
+
+
 def clear_records(session_dir: Path, nonces: set[str]) -> None:
     """Remove exactly the flushed records, preserving any appended meanwhile.
 
@@ -463,6 +490,54 @@ def truthy(value: object) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def caller_agent_spec(task: dict) -> str | None:
+    """The agent spec of the driver working ``task``'s current stage, or ``None``.
+
+    The stage's ``agent``, or its ``peer_review`` reviewer's while the stage is in
+    the ``reviewing`` phase. ``done`` reads it *before* advancing the task.
+    """
+    stages = task.get("stages") or []
+    idx = task.get("current_stage", 0)
+    if not isinstance(idx, int) or not (0 <= idx < len(stages)):
+        return None
+    stage = stages[idx]
+    if not isinstance(stage, dict):
+        return None
+    pr = stage.get("peer_review")
+    if isinstance(pr, dict) and pr.get("phase") == "reviewing":
+        return pr.get("agent") or stage.get("agent") or None
+    return stage.get("agent") or None
+
+
+def _is_claude(spec: object) -> bool:
+    try:
+        return agents.parse_spec(str(spec))[0] == "claude"
+    except ValueError:
+        return False
+
+
+def relay_target(label: str, caller_agent: str | None) -> str | None:
+    """The leader's claude session name when this notification should be relayed.
+
+    Relay (``SendMessage`` from the driver) only when all hold: the caller is a
+    claude driver (its stage agent is claude AND this process runs inside Claude
+    Code — ``CLAUDECODE`` is set in its tool shells, so a human running
+    ``fleet-agent done`` by hand still gets the pane path), and the owner leader
+    is a claude leader that ``fleet leader`` launched for relayed delivery
+    (``delivery: send_message`` in session.json, i.e. with
+    ``crossSessionInbound: accept``). The name is the one ``fleet leader`` passed
+    as ``claude --name`` (``agent_name`` in the record). ``None`` → pane path.
+    """
+    if not caller_agent or not os.environ.get("CLAUDECODE") or not _is_claude(caller_agent):
+        return None
+    leader = formation.read_leader_session(label)
+    if not leader or leader.get("delivery") != DELIVERY_SEND_MESSAGE:
+        return None
+    if not _is_claude(leader.get("agent")):
+        return None
+    return str(leader.get("agent_name") or state_mod.leader_agent_name(label))
+
+
 def push_to_leader(
     state_dir: Path,
     task_id: str,
@@ -475,26 +550,38 @@ def push_to_leader(
     result: str | None = None,
     kind: str = KIND_DONE,
     question: str | None = None,
-) -> None:
-    """Opt-in leader-pane push, routed by the task's ``owner_session``.
+    caller_agent: str | None = None,
+) -> dict | None:
+    """Opt-in leader push, routed by the task's ``owner_session``.
 
     Shared by ``fleet-agent done`` (``kind="done"``), ``fleet-agent ask``
     (``kind="ask"``) and the prompt deliverer's failure report
     (``kind="delivery_failed"``). Default OFF (``notify_leader_on_driver_done``) → zero
     behaviour change. Always enqueues a persisted record (never dropped) into the
-    owner session's queue when the feature is on, then best-effort spawns the
-    detached notifier against the ``fleet-<label>`` pane. multiplexer/leader
-    absence only leaves the record queued — it never errors the caller.
+    owner session's queue when the feature is on.
+
+    When :func:`relay_target` names a leader (``caller_agent`` is the calling
+    driver's spec), the record is marked ``delivery: send_message`` and the relay
+    is returned as ``{"to": <leader session name>, "message": <block>}`` for the
+    caller to print (:func:`render_relay`); the pane notifier never types it.
+    Otherwise returns ``None`` and best-effort spawns the detached notifier against
+    the ``fleet-<label>`` pane. multiplexer/leader absence only leaves the record
+    queued — it never errors the caller.
 
     Routing is keyed by ``owner_session`` (Issue #166 §10.3): the queue lives under
     that session's dir and the agent ``ready`` regex is read from its record. A
     missing ``owner_session`` is treated as ``main`` (:func:`state.task_owner_session`).
     """
     if not truthy(project.get("notify_leader_on_driver_done")):
-        return
+        return None
 
     label = state_mod.task_owner_session(task)
     session_dir = state_mod.session_dir(label)
+
+    try:
+        relay_to = relay_target(label, caller_agent)
+    except Exception:  # noqa: BLE001 - a routing hiccup falls back to the pane path
+        relay_to = None
 
     try:
         record = build_record(
@@ -509,23 +596,29 @@ def push_to_leader(
             question=question,
             project=project_name,
         )
+        if relay_to:
+            record["delivery"] = DELIVERY_SEND_MESSAGE
+            record["relay_to"] = relay_to
         enqueue(session_dir, record)
     except Exception:
         # The queue is the durable path; if even that fails, do not break the caller.
-        return
+        return None
+
+    if relay_to:
+        return {"to": relay_to, "message": render_block([record])}
 
     # Spawn the detached notifier only when the leader pane is resolvable.
     # Otherwise the record stays queued for the next done / ask / re-attach.
     try:
         m = mux.get()
         if not m.available():
-            return
+            return None
         session = f"fleet-{label}"
         if not m.session_exists(session):
-            return
+            return None
         leader_session = formation.read_leader_session(label)
         if not leader_session or not leader_session.get("agent"):
-            return
+            return None
         start_detached(
             session_dir=session_dir,
             session=session,
@@ -534,7 +627,28 @@ def push_to_leader(
             reason="enqueue",
         )
     except Exception:
-        return
+        return None
+    return None
+
+
+def render_relay(relay: dict) -> str:
+    """What ``done`` / ``ask`` print for a relayed notification: the exact send.
+
+    fleet builds the message; the driver only relays it, verbatim, with Claude
+    Code's ``SendMessage`` tool. The block is fenced by marker lines so the
+    driver can copy exactly what lies between them.
+    """
+    to = relay["to"]
+    return (
+        "[fleet] leader relay: send the message below to the leader NOW with the "
+        f'SendMessage tool — to: "{to}", message: the text between the markers, '
+        "verbatim (do not rephrase, summarise or add to it). If SendMessage is "
+        "deferred, load it with ToolSearch first. The leader's pane is NOT typed "
+        "into for this notification, so this send is how the leader learns of it.\n"
+        "----- BEGIN LEADER MESSAGE -----\n"
+        f"{relay['message']}\n"
+        "----- END LEADER MESSAGE -----"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +922,7 @@ def _poll_until_idle(
     reasons = _ReasonLog(session_dir)
 
     while time.monotonic() <= deadline:
-        if not read_queue(session_dir):
+        if not pane_records(session_dir):
             _log(session_dir, "exit: queue empty")
             return False  # nothing pending → done
         backend = mux.get()
@@ -845,7 +959,7 @@ def _poll_until_idle(
     # Deadline hit while still busy. Re-arm only if there is pending work AND the
     # leader session is not confirmed gone: a dead session needs no successor (the
     # next done / re-attach re-spawns) and an empty queue is already delivered.
-    pending = len(read_queue(session_dir))
+    pending = len(pane_records(session_dir))
     rearm = bool(pending) and not session_confirmed_gone(mux.get(), session)
     _log(
         session_dir,
@@ -952,9 +1066,11 @@ def pending_summary(session_dir: Path) -> dict | None:
     ``{"count": n, "oldest_ts": <iso or None>, "oldest_age_seconds": <float or None>}``.
     The age is of the oldest record with a parseable ``ts`` — how long the leader
     has been unaware of it; surfaced by ``fleet status`` / ``fleet sessions`` so a
-    stranded queue is visible without reading the notifier log.
+    stranded queue is visible without reading the notifier log. Relayed records
+    (``delivery: send_message``) are not pending — the driver sent them — so they
+    are not counted.
     """
-    records = read_queue(session_dir)
+    records = pane_records(session_dir)
     if not records:
         return None
     now = datetime.now(timezone.utc)
@@ -1032,7 +1148,7 @@ def _flush_once(
     idle on the confirming capture, or that capture failed on the mux (transient,
     Issue #292). Records stay queued for the next idle boundary.
     """
-    records = read_queue(session_dir)
+    records = pane_records(session_dir)
     if not records:
         return True
     reasons = reasons or _ReasonLog(session_dir)
