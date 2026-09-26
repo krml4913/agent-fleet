@@ -81,6 +81,21 @@ class VendorAdapter:
     #: when the vendor does not collapse.
     pasted_marker: re.Pattern[str] | None = None
 
+    #: Matches the line that closes the input composer (claude's horizontal
+    #: rule under it), for :meth:`has_draft`: anything typed between the
+    #: :attr:`menu_cursor` prompt glyph and that line is composer text. ``None``
+    #: disables :meth:`has_draft` (always ``False``) — the conservative default
+    #: for a poller, like :attr:`busy`: a vendor whose empty composer a dump
+    #: cannot tell from typed text (codex shows a rotating suggestion there) must
+    #: never strand a queue behind a permanent "draft".
+    composer_end: re.Pattern[str] | None = None
+
+    #: Matches (in full) the hint an *empty* composer shows in place of typed
+    #: text (claude's ``Try "how do I…"`` on a fresh session), so
+    #: :meth:`has_draft` does not mistake it for a human's draft. ``None`` when
+    #: the vendor shows none.
+    composer_placeholder: re.Pattern[str] | None = None
+
     #: Whether the CLI shows an update-check prompt on startup that the
     #: launch command suppresses (folded into :meth:`cli_command`).
     suppress_update_check: bool = False
@@ -144,14 +159,51 @@ class VendorAdapter:
         return cls.busy.search(tail) is not None
 
     @classmethod
+    def has_draft(cls, pane: str) -> bool:
+        """Whether a human's unsent text sits in the input composer of ``pane``.
+
+        The composer is the last line starting with the :attr:`menu_cursor` glyph,
+        plus the wrapped lines below it up to the :attr:`composer_end` line; with
+        no such closing line only the glyph line is read. Blank (the empty
+        composer dumps as ``❯`` + NBSP) and :attr:`composer_placeholder` text are
+        not a draft. Always ``False`` for a vendor without :attr:`composer_end`.
+
+        A dump can show stale cells (docs/windows-support.md §4.9: ``❯t`` after
+        ``Ctrl u`` emptied the composer), so a ``True`` may be a false alarm. It
+        only makes an injection wait, so that is the safe direction.
+        """
+        if cls.composer_end is None or not cls.menu_cursor:
+            return False
+        prompt = re.compile(rf"(?m)^\s*{re.escape(cls.menu_cursor)}")
+        last = None
+        for last in prompt.finditer(pane):
+            pass
+        if last is None:
+            return False
+        first, _, below = pane[last.end():].partition("\n")
+        lines = [first]
+        for line in below.split("\n"):
+            if cls.composer_end.search(line):
+                break
+            lines.append(line)
+        else:
+            lines = [first]  # no closing line seen: only the glyph line is known composer
+        text = " ".join(line.strip() for line in lines).strip()
+        if not text:
+            return False
+        return not (cls.composer_placeholder and cls.composer_placeholder.fullmatch(text))
+
+    @classmethod
     def is_idle(cls, pane: str) -> bool:
-        """Whether ``pane`` is at a real turn boundary: ready for input AND not busy.
+        """Whether ``pane`` is at a real turn boundary: ready for input, not busy, no draft.
 
         The bar for *unsolicited* injection into a pane a human or leader agent
         is working in (the leader notifier). :meth:`is_ready` alone is the right
-        bar for a freshly booted driver pane (the prompt deliverer).
+        bar for a freshly booted driver pane (the prompt deliverer). A human's
+        unsent draft (:meth:`has_draft`) is not idle either: typing on top of it
+        merges the two texts and can corrupt the injected one (Issue #329).
         """
-        return cls.is_ready(pane) and not cls.is_busy(pane)
+        return cls.is_ready(pane) and not cls.is_busy(pane) and not cls.has_draft(pane)
 
     @classmethod
     def composer_holds(cls, pane: str, text: str) -> bool:

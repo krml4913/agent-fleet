@@ -8,6 +8,8 @@ differs between the states, so they keep the exact real chrome (the NBSP after
 
 * ``CLAUDE_IDLE`` — the same screen at a turn boundary (spinner line replaced by
   claude's finished-turn line, the busy-only tip line dropped).
+* ``claude_draft`` — a human's unsent draft in the composer of an idle claude
+  (a live macOS capture shows ``❯`` + NBSP + the text; Issue #329).
 * ``claude_stuck_composer`` — text typed into the composer of a busy claude whose
   submit Enter was swallowed. Per docs/windows-support.md §4.9 a dump of typed
   composer text has no space after ``❯`` and wraps at the pane width.
@@ -62,6 +64,24 @@ CLAUDE_TRUST_DIALOG = (
     "   2. Yes, I trust this folder\n\n"
     " Enter to confirm · Esc to cancel\n"
 )
+
+
+def claude_draft(text: str, *, sep: str = "\xa0", width: int = 100) -> str:
+    """An idle claude with the human's unsent ``text`` in the composer.
+
+    ``sep`` is what the dump puts after ``❯`` (NBSP on a live macOS capture, nothing
+    on the Windows one, docs/windows-support.md §4.9). Long text wraps at ``width``
+    onto indented continuation lines, inside the composer's rules.
+    """
+    typed = "❯" + sep + text
+    rows = [typed[:width]] + [
+        "  " + typed[i:i + width - 2] for i in range(width, len(typed), width - 2)
+    ]
+    return (
+        _HISTORY
+        + "\n✻ Cooked for 48s\n"
+        + f"\n{TITLED_RULE}\n" + "\n".join(rows) + f"\n{RULE}\n{FOOTER}\n"
+    )
 
 
 def claude_stuck_composer(text: str, *, width: int = 100) -> str:

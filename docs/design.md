@@ -1248,10 +1248,28 @@ listing while another tab is closed (windows-support.md §4.8), so it is now tra
   busy case. It gives up only when the session is confirmed gone. #290's
   idle/confirm/submit logic is unchanged; a failed *send* still leaves the record
   queued without a blind retry (the text may be half typed).
+- **Unsent human draft (Issue #329).** The user types in the leader pane too. The
+  notifier used to type its block after whatever sat in the composer, so a
+  half-written reply ("1. teams.") was merged into the notification and the leader
+  received `…PR=…/pull/3` for PR #328 — the record itself was right
+  (`build_record` → `pull/328`), the text was corrupted in the pane. A composer with
+  unsent text (`VendorAdapter.has_draft`) is now **not idle**: the notifier waits,
+  nothing is typed, and the records stay queued. A draft that outlives the poller is
+  handled exactly like a busy leader — the deadline re-arms a successor — so nothing
+  is dropped and delivery follows the moment the composer is empty. The check is
+  claude-only: it reads the text between the `❯` glyph and the rule that closes the
+  composer, and ignores the hints an empty composer shows (`Try "…"` on a fresh session,
+  `Press up to edit queued messages`). A vendor without a
+  `composer_end` pattern (codex, whose empty composer shows a rotating suggestion a
+  dump cannot tell from typed text) never reports a draft, so an unknown layout can
+  never strand the queue. A dump can show stale cells (windows-support.md §4.9), so a
+  false "draft" only delays an injection. Not covered: the user starting to type in
+  the instant between the confirming capture and the keystrokes.
 - **`leader-notifier.log`.** Decisions are appended to
   `global/sessions/<label>/leader-notifier.log`, deliberately low volume: spawn (pid,
   timeout, reason), lock contention, start, each *change* of wait reason (busy /
-  transient error / session blip), flush result, deadline and re-arm, exit reason.
+  unsent draft / transient error / session blip), flush result, deadline and re-arm,
+  exit reason.
 
 **`fleet sessions`** is the cross-session CLI view: live leader sessions (label →
 pane, agent) and each session's in-flight tasks (task.yaml across projects where

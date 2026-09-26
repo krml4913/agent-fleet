@@ -7,13 +7,21 @@ injects a coalesced, idempotent summary of finished/gated tasks and of driver
 questions (``fleet-agent ask``) so the leader can review / answer without polling.
 
 "Idle" means a real turn boundary — :meth:`VendorAdapter.is_idle` (input prompt
-visible, no dialog, AND no running-turn indicator), seen on two captures
+visible, no dialog, no running-turn indicator, AND no unsent human draft in the
+composer), seen on two captures
 :data:`INJECT_SETTLE_SECONDS` apart with the second taken right before the
 keystrokes. The prompt visible alone is not enough: claude keeps its ``❯``
 composer on screen while working, so typing then either surfaces mid-turn or
 sits unsubmitted in the composer (Issue #288). After the submit Enter the pane is
 re-captured and, if the text is still in the composer, Enter is pressed again
 (bounded by :data:`SUBMIT_ENTER_RETRIES`).
+
+A draft counts as not idle (Issue #329): the user types in the leader pane too,
+and injecting on top of their half-written message merges the two texts (the
+leader once received ``1. teams.[fleet] … PR=…/pull/3`` for PR #328: the draft
+prefixed, the URL's last digits gone). The records simply stay queued: a draft
+that outlives the poller is handled like a busy leader — the deadline re-arms a
+successor, nothing is dropped.
 
 The prompt deliverer and the inbox wake-up deliberately keep their own bars. The
 deliverer pastes into a freshly booted driver pane that is never mid-turn, so
@@ -831,7 +839,7 @@ def _poll_until_idle(
                 _log(session_dir, "exit: send failed on the mux; records stay queued")
                 return False  # send failed (mux) → leave queued
         else:
-            reasons.note("leader not idle (busy or dialog); waiting")
+            reasons.note(_not_idle_reason(adapter, pane))
         time.sleep(max(0.1, poll_interval))
 
     # Deadline hit while still busy. Re-arm only if there is pending work AND the
@@ -845,6 +853,13 @@ def _poll_until_idle(
         + ("re-arming a successor" if rearm else "not re-arming"),
     )
     return rearm
+
+
+def _not_idle_reason(adapter: type[VendorAdapter], pane: str) -> str:
+    """Why ``pane`` is not idle, for the log: a human's unsent draft or busy / dialog."""
+    if adapter.is_ready(pane) and not adapter.is_busy(pane) and adapter.has_draft(pane):
+        return "leader has an unsent draft in its composer; waiting (Issue #329)"
+    return "leader not idle (busy or dialog); waiting"
 
 
 def session_confirmed_gone(backend, session: str) -> bool:
