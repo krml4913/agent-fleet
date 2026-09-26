@@ -47,6 +47,7 @@ class PreflightLibraryTests(unittest.TestCase):
         self.assertFalse(results["codex"].required)
         self.assertFalse(results["codex-update"].required)
         self.assertFalse(results["codex-trust"].required)
+        self.assertFalse(results["claude-trust"].required)
 
     def test_git_required_for_worktree_workspace(self) -> None:
         with (
@@ -102,6 +103,70 @@ class PreflightLibraryTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertIn("skipped", result.detail)
+
+    def _claude_trust(self, trusted, *, which="/bin/claude", toplevel=Path("/tmp/repo")):
+        with (
+            unittest.mock.patch("fleet.commands.preflight.shutil.which", return_value=which),
+            unittest.mock.patch("fleet.commands.preflight._git_main_root", return_value=toplevel),
+            unittest.mock.patch(
+                "fleet.commands.preflight.agents_mod.claude_repo_trusted",
+                return_value=trusted,
+            ),
+        ):
+            return preflight._check_claude_trust()
+
+    def test_claude_trust_warns_when_untrusted(self) -> None:
+        result = self._claude_trust(False)
+
+        self.assertEqual(result.name, "claude-trust")
+        self.assertFalse(result.ok)
+        self.assertFalse(result.required)  # a warning, never a blocker
+        self.assertIn("not trusted", result.detail)
+        self.assertIn("`claude`", result.detail)
+
+    def test_claude_trust_ok_when_trusted(self) -> None:
+        result = self._claude_trust(True)
+
+        self.assertTrue(result.ok)
+        self.assertFalse(result.required)
+        self.assertIn("trusted", result.detail)
+
+    def test_claude_trust_skips_when_state_is_unknown(self) -> None:
+        result = self._claude_trust(None)
+
+        self.assertTrue(result.ok)
+        self.assertIn("skipped", result.detail)
+
+    def test_claude_trust_skips_without_claude_or_repo(self) -> None:
+        self.assertIn("skipped", self._claude_trust(False, which=None).detail)
+        self.assertTrue(self._claude_trust(False, which=None).ok)
+        self.assertIn("skipped", self._claude_trust(False, toplevel=None).detail)
+
+    def test_git_main_root_resolves_a_linked_worktree_to_the_repo(self) -> None:
+        # claude keys trust by the repo root, so a check run from a task worktree
+        # must look at the main checkout, not at the worktree it is standing in.
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+        def git(cwd: Path, *argv: str) -> None:
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *argv],
+                cwd=cwd, check=True, capture_output=True, env=env,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp).resolve() / "repo"
+            repo.mkdir()
+            git(repo, "init", "-q")
+            git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+            worktree = Path(tmp).resolve() / "wt"
+            git(repo, "worktree", "add", "-q", "-b", "wt", str(worktree))
+
+            self.assertEqual(preflight._git_main_root(repo), repo)
+            self.assertEqual(preflight._git_main_root(worktree), repo)
+            self.assertEqual(preflight._git_toplevel(worktree), worktree)  # what it must not use
+            plain = Path(tmp).resolve() / "plain"
+            plain.mkdir()
+            self.assertIsNone(preflight._git_main_root(plain))  # not a git repo
 
     def test_codex_update_warns_when_latest_is_newer(self) -> None:
         with (
@@ -600,6 +665,7 @@ class WindowsChecksTests(unittest.TestCase):
             unittest.mock.patch("fleet.commands.preflight._check_agent_cli", side_effect=lambda n: ok._replace(name=n)),
             unittest.mock.patch("fleet.commands.preflight._check_codex_update", return_value=ok._replace(name="codex-update")),
             unittest.mock.patch("fleet.commands.preflight._check_codex_trust", return_value=ok._replace(name="codex-trust")),
+            unittest.mock.patch("fleet.commands.preflight._check_claude_trust", return_value=ok._replace(name="claude-trust")),
             unittest.mock.patch("fleet.commands.preflight._git_required_for_cwd", return_value=False),
         ):
             return [r.name for r in preflight.check_all()]

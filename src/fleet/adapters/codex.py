@@ -30,6 +30,7 @@ class CodexAdapter(VendorAdapter):
         r"do you trust the contents of this directory|yes,\s*continue|"
         r"sign in|login|log in|authentication|authenticate|api key)"
     )
+    trust_gate = re.compile(r"(?i)do you trust the contents of this directory")
 
     # codex prints an update prompt on startup; the launch command
     # suppresses it via ``check_for_update_on_startup=false``.

@@ -61,7 +61,8 @@ cd agent-fleet
 `preflight` checks Python, the terminal multiplexer (and prints which backend
 is selected and where that choice came from: `env` / `config` / `default`), git,
 and the agent CLIs (`claude`, `codex`) on your `PATH`. It also warns if your Codex CLI is out of date or if its
-directory trust is not set up. Resolve anything it flags before continuing.
+directory trust is not set up, and if Claude Code has not yet been trusted for the repo
+(otherwise the first claude task stops at its trust prompt). Resolve anything it flags before continuing.
 
 ### 2. Initialize a project
 
@@ -231,7 +232,7 @@ not killed for you — fleet warns if it spots one still running.
 
 | Command | Purpose |
 |---|---|
-| `fleet preflight` | Check Python / multiplexer (zellij or tmux; shows which is selected and why) / git / agent CLIs (incl. Codex trust + update warnings; extra checks on Windows). |
+| `fleet preflight` | Check Python / multiplexer (zellij or tmux; shows which is selected and why) / git / agent CLIs (incl. Codex / Claude trust and Codex update warnings; extra checks on Windows). |
 | `fleet config [get <key> \| set <key> <value> \| unset <key>]` | Show / read / write the global config (`fleet-state/global/config.yaml`). Keys: `mux` = `zellij` \| `tmux` (see [Choosing the multiplexer](#choosing-the-multiplexer)); `leader_agent` = a `vendor:model` spec or an agent alias, the default agent for `fleet leader` (see [Choosing the leader's agent](#choosing-the-leaders-agent)); `agent_aliases.<name>` = an agent alias (see [Agent aliases](#agent-aliases)). |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | Register a project and create its state directory. |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | Launch / attach the leader session `fleet-<LABEL>` (default label `main`). Agent precedence: `--agent` > `leader_agent` in the global config > built-in default `claude:opus`. |
@@ -520,10 +521,14 @@ steer a client to a tab only while that client is the only one attached:
   discarded ([zellij#5594](https://github.com/zellij-org/zellij/issues/5594)).
   fleet works around it by briefly attaching a hidden client while it opens a
   driver tab (`FLEET_ZELLIJ_TEMP_CLIENT=0|1` forces the workaround off / on).
-- **claude's workspace-trust dialog.** claude's first run in a fresh worktree
-  asks whether to trust the folder. fleet does not answer it: the task is
-  surfaced as a boot gate (`awaiting_orders` + a notification), and a human
-  must attach and confirm. The prompt is then delivered automatically.
+- **claude's workspace-trust dialog.** The first claude task in a newly
+  registered project stops at claude's "Is this a project you created or one you
+  trust?" dialog (claude remembers the answer per repo root). fleet never answers
+  it, but it is loud: `fleet-agent start` and `fleet preflight` warn beforehand
+  (read-only look at `~/.claude.json`), and if the pane still stops there the task
+  goes `awaiting_orders` with a notification saying it is waiting on the workspace
+  trust prompt. Run `claude` once in the repo and accept it — or attach and choose
+  "Yes, I trust this folder" — and the prompt is then delivered automatically.
 - **Verify commands run under `cmd.exe`** on Windows by default, so a
   `verify` command must be valid cmd syntax — unless the formation sets
   `verify.shell` (`bash` = Git Bash, `pwsh`, `powershell`, `sh`, `cmd`; see

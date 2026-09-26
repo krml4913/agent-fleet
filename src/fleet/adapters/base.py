@@ -39,6 +39,12 @@ class VendorAdapter:
     #: (login / update prompt / directory-trust menu) a human must clear.
     gate: re.Pattern[str]
 
+    #: The directory-/workspace-trust dialog specifically (a subset of
+    #: :attr:`gate`), so the deliverer can tell the user *which* gate the pane
+    #: is stuck on instead of a generic "boot gate". ``None`` when the vendor
+    #: has none.
+    trust_gate: re.Pattern[str] | None = None
+
     #: The cursor glyph the CLI draws in front of the highlighted option of a
     #: selection menu (claude ``❯``, codex ``›``). Used by :meth:`is_dialog` to
     #: spot un-numbered menus. ``""`` disables the cursor/sibling heuristic.
@@ -176,6 +182,11 @@ class VendorAdapter:
         structural selection dialog at the bottom (:meth:`is_dialog`).
         """
         return bool(cls.gate.search(pane)) or cls.is_dialog(pane)
+
+    @classmethod
+    def is_trust_gate(cls, pane: str) -> bool:
+        """Whether ``pane`` shows the CLI's workspace-trust dialog."""
+        return cls.trust_gate is not None and cls.trust_gate.search(pane) is not None
 
     @classmethod
     def cli_command(cls, model: str) -> list[str]:

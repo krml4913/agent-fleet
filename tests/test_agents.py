@@ -1,10 +1,13 @@
 """Tests for ``fleet.agents`` — parse_spec / cli_command."""
 from __future__ import annotations
 
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -100,6 +103,85 @@ class CodexRepoTrustedTests(unittest.TestCase):
             config.write_text("[projects.\n", encoding="utf-8")
 
             self.assertFalse(agents.codex_repo_trusted(root, config_path=config))
+
+
+class ClaudeRepoTrustedTests(unittest.TestCase):
+    def _config(self, tmp: str, projects) -> Path:
+        config = Path(tmp) / ".claude.json"
+        config.write_text(json.dumps({"projects": projects}), encoding="utf-8")
+        return config
+
+    def _repo(self, tmp: str) -> Path:
+        root = Path(tmp) / "repo"
+        root.mkdir()
+        return root.resolve()
+
+    def test_trusted(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            config = self._config(tmp, {str(root): {"hasTrustDialogAccepted": True}})
+
+            self.assertIs(agents.claude_repo_trusted(root, config_path=config), True)
+
+    def test_dialog_declined_or_absent_is_false(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            declined = self._config(tmp, {str(root): {"hasTrustDialogAccepted": False}})
+            self.assertIs(agents.claude_repo_trusted(root, config_path=declined), False)
+
+            unrelated = self._config(tmp, {"/elsewhere": {"hasTrustDialogAccepted": True}})
+            self.assertIs(agents.claude_repo_trusted(root, config_path=unrelated), False)
+
+            no_flag = self._config(tmp, {str(root): {"allowedTools": []}})
+            self.assertIs(agents.claude_repo_trusted(root, config_path=no_flag), False)
+
+    def test_no_projects_key_is_false(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            config = Path(tmp) / ".claude.json"
+            config.write_text("{}", encoding="utf-8")
+
+            self.assertIs(agents.claude_repo_trusted(root, config_path=config), False)
+
+    def test_trusted_ancestor_does_not_cover_a_subdirectory(self) -> None:
+        # A trusted parent did not stop the dialog on a fresh worktree (#327),
+        # so only the repo root's own key counts.
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            config = self._config(tmp, {str(root.parent): {"hasTrustDialogAccepted": True}})
+
+            self.assertIs(agents.claude_repo_trusted(root, config_path=config), False)
+
+    def test_unreadable_config_is_unknown(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = self._repo(tmp)
+            self.assertIsNone(
+                agents.claude_repo_trusted(root, config_path=Path(tmp) / "missing.json")
+            )
+
+            broken = Path(tmp) / "broken.json"
+            broken.write_text("{not json", encoding="utf-8")
+            self.assertIsNone(agents.claude_repo_trusted(root, config_path=broken))
+
+            not_object = Path(tmp) / "list.json"
+            not_object.write_text("[]", encoding="utf-8")
+            self.assertIsNone(agents.claude_repo_trusted(root, config_path=not_object))
+
+    def test_config_path_honours_claude_config_dir(self) -> None:
+        with TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tmp}):
+                self.assertEqual(agents.claude_config_path(), Path(tmp) / ".claude.json")
+
+    def test_default_config_path_is_home_dotfile(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(agents.claude_config_path(), Path.home() / ".claude.json")
+
+    def test_hint_names_the_repo_and_the_fix(self) -> None:
+        hint = agents.claude_trust_hint("/repos/newproj")
+        self.assertIn("/repos/newproj", hint)
+        self.assertIn("Yes, I trust this folder", hint)
+        self.assertIn("run `claude`", hint)
 
 
 if __name__ == "__main__":

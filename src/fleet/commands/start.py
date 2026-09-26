@@ -121,6 +121,22 @@ def _guard_codex_trust(vendor: str, state_dir: Path, project_root: Path | None =
     return 1
 
 
+def _warn_claude_trust(vendor: str, state_dir: Path, project_root: Path | None = None) -> None:
+    """Warn (never abort) when a claude driver is about to hit the trust prompt.
+
+    Unlike codex — whose untrusted prompt swallows the pasted driver prompt, so
+    :func:`_guard_codex_trust` must stop — claude just waits at the dialog and the
+    prompt deliverer resumes once a human answers it. The warning turns that wait
+    from a surprise into a known one-time step. Silent when trust is unknown.
+    """
+    if vendor != "claude":
+        return
+    repo_root = _git_toplevel(project_root or state_dir.parent)
+    if repo_root is None or agents_mod.claude_repo_trusted(repo_root) is not False:
+        return
+    print(f"warning: {agents_mod.claude_trust_hint(repo_root)}", file=sys.stderr)
+
+
 def launch_stage_driver(
     *,
     state_dir: Path,
@@ -556,6 +572,7 @@ def run(args: argparse.Namespace) -> int:
     guard_rc = _guard_codex_trust(vendor, state_dir, _project_root_for_trust)
     if guard_rc is not None:
         return guard_rc
+    _warn_claude_trust(vendor, state_dir, _project_root_for_trust)
 
     # Mark current stage as running
     expanded_stages[current_stage_idx]["status"] = "running"

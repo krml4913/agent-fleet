@@ -251,6 +251,56 @@ class StartTests(unittest.TestCase):
         )
         on_pre_start.assert_not_called()
 
+    def _start_claude_task(self, task_id: str, *, trusted, agent: str = "claude:sonnet") -> str:
+        """Dry-run a start with claude's trust answer patched; return its stderr."""
+        from fleet.commands import start
+
+        args = argparse.Namespace(
+            project="demo",
+            task_id=task_id,
+            description="Do the thing",
+            formation="solo",
+            agent=agent,
+            title=None,
+            dry_run=True,
+            auto_paste=True,
+            prompt_delay=0.0,
+        )
+        stderr = io.StringIO()
+        with (
+            unittest.mock.patch("fleet.commands.start._git_toplevel", return_value=self.project),
+            unittest.mock.patch(
+                "fleet.commands.start.agents_mod.claude_repo_trusted", return_value=trusted
+            ),
+            unittest.mock.patch(
+                "fleet.commands.start.agents_mod.codex_repo_trusted", return_value=True
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = start.run(args)
+        self.assertEqual(result, 0, stderr.getvalue())
+        return stderr.getvalue()
+
+    def test_claude_untrusted_repo_warns_but_still_starts(self) -> None:
+        # Issue #327: the first claude task in a new project stalls on claude's
+        # trust prompt. Unlike codex, start goes ahead (the deliverer resumes once
+        # a human answers), so it warns instead of aborting.
+        err = self._start_claude_task("claude-untrusted", trusted=False)
+
+        self.assertIn("warning:", err)
+        self.assertIn("workspace trust prompt", err)
+        self.assertIn(str(self.project), err)
+        self.assertTrue((self.state_dir / "tasks" / "task-claude-untrusted").exists())
+
+    def test_claude_trusted_or_unknown_repo_is_silent(self) -> None:
+        self.assertNotIn("trust", self._start_claude_task("claude-trusted", trusted=True))
+        self.assertNotIn("trust", self._start_claude_task("claude-unknown", trusted=None))
+
+    def test_codex_start_does_not_warn_about_claude_trust(self) -> None:
+        err = self._start_claude_task("codex-only", trusted=False, agent="codex:o4-mini")
+
+        self.assertNotIn("claude", err)
+
     def test_formation_pair_review_starts_first_stage(self) -> None:
         from fleet.commands import start
 

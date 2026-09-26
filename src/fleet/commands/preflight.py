@@ -112,6 +112,7 @@ def check_all() -> list[CheckResult]:
         _check_agent_cli("codex"),
         _check_codex_update(),
         _check_codex_trust(),
+        _check_claude_trust(),
     ]
     return results
 
@@ -468,6 +469,31 @@ def _git_toplevel(cwd: Path) -> Path | None:
     return Path(root).resolve() if root else None
 
 
+def _git_main_root(cwd: Path) -> Path | None:
+    """The main checkout's root for ``cwd`` — the repo root even from a linked worktree.
+
+    ``git rev-parse --show-toplevel`` names the *worktree* in a linked worktree,
+    but claude keys its trust by the repo root (see ``agents.claude_repo_trusted``).
+    """
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    common = r.stdout.strip()
+    if r.returncode != 0 or not common:
+        return None
+    git_dir = (cwd / common).resolve()  # absolute when git prints an absolute path
+    return git_dir.parent if git_dir.name == ".git" else _git_toplevel(cwd)
+
+
 def _check_codex_trust() -> CheckResult:
     if not shutil.which("codex"):
         return CheckResult(
@@ -492,6 +518,43 @@ def _check_codex_trust() -> CheckResult:
         "codex-trust",
         False,
         f"not trusted: {repo_root} (run `codex` here and approve)",
+        required=False,
+    )
+
+
+def _check_claude_trust() -> CheckResult:
+    if not shutil.which("claude"):
+        return CheckResult(
+            "claude-trust",
+            True,
+            "skipped (claude not on PATH)",
+            required=False,
+        )
+
+    repo_root = _git_main_root(Path.cwd())
+    if repo_root is None:
+        return CheckResult(
+            "claude-trust",
+            True,
+            "skipped (not in a git repo)",
+            required=False,
+        )
+
+    trusted = agents_mod.claude_repo_trusted(repo_root)
+    if trusted is None:
+        return CheckResult(
+            "claude-trust",
+            True,
+            "skipped (cannot read claude's config)",
+            required=False,
+        )
+    if trusted:
+        return CheckResult("claude-trust", True, f"trusted: {repo_root}", required=False)
+    return CheckResult(
+        "claude-trust",
+        False,
+        f"not trusted: {repo_root} (run `claude` here and accept the trust prompt; "
+        "otherwise the first claude task stops at it)",
         required=False,
     )
 

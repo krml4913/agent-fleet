@@ -63,7 +63,8 @@ cd agent-fleet
 `preflight` は、`PATH` 上の Python、ターミナルマルチプレクサ（どのバックエンドが
 選ばれ、その選択がどこから来たか — `env` / `config` / `default` — も表示する）、git、
 そしてエージェント CLI（`claude`、`codex`）をチェックする。Codex CLI が古い場合や、directory trust が
-設定されていない場合にも警告する。指摘された点は次に進む前に解消すること。
+設定されていない場合や、Claude Code がその repo をまだ信頼していない場合（そのままだと最初の
+claude タスクが trust プロンプトで止まる）にも警告する。指摘された点は次に進む前に解消すること。
 
 ### 2. プロジェクトを初期化する
 
@@ -234,7 +235,7 @@ driver が `fleet-agent ask` を呼んだとき、または `user_approval` ゲ�
 
 | コマンド | 用途 |
 |---|---|
-| `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex の trust + アップデート警告を含む。Windows では追加チェックあり）。 |
+| `fleet preflight` | Python / マルチプレクサ（zellij または tmux。どちらが選ばれ、なぜかも表示）/ git / エージェント CLI をチェック（Codex / Claude の trust と Codex のアップデート警告を含む。Windows では追加チェックあり）。 |
 | `fleet config [get <key> \| set <key> <value> \| unset <key>]` | グローバル config（`fleet-state/global/config.yaml`）の表示 / 取得 / 設定 / 削除。キーは `mux` = `zellij` \| `tmux`（[マルチプレクサの選択](#マルチプレクサの選択) を参照）、`leader_agent` = `vendor:model` 形式の spec またはエージェントエイリアスで `fleet leader` のデフォルトエージェント（[leader のエージェントを選ぶ](#leader-のエージェントを選ぶ) を参照）、`agent_aliases.<name>` = エージェントエイリアス（[エージェントエイリアス](#エージェントエイリアス) を参照）。 |
 | `fleet init [path] [--name N] [--formation N] [--no-formation]` | プロジェクトを登録し、その state ディレクトリを作成する。 |
 | `fleet leader [--name LABEL] [--agent SPEC] [--attach]` | leader セッション `fleet-<LABEL>` を起動 / アタッチする（デフォルトのラベルは `main`）。エージェントの優先順位: `--agent` > グローバル config の `leader_agent` > 組み込みデフォルト `claude:opus`。 |
@@ -524,10 +525,14 @@ fleet-<label>` を実行する。デタッチは zellij の `Ctrl o` のあと `
   タブは破棄される（[zellij#5594](https://github.com/zellij-org/zellij/issues/5594)）。
   fleet は driver タブを開く間だけ非表示のクライアントを一時的にアタッチして
   回避する（`FLEET_ZELLIJ_TEMP_CLIENT=0|1` で回避策を強制的にオフ / オンにできる）。
-- **claude の workspace-trust ダイアログ。** 新しい worktree で claude を初めて
-  起動すると、そのフォルダを信頼するかを尋ねられる。fleet はこれに答えない:
-  タスクは boot gate として通知され（`awaiting_orders` + 通知）、人間がアタッチ
-  して確認する必要がある。その後プロンプトは自動で配送される。
+- **claude の workspace-trust ダイアログ。** 新しく登録したプロジェクトの最初の
+  claude タスクは、claude の「Is this a project you created or one you trust?」
+  ダイアログで止まる（claude は答えを repo root 単位で覚える）。fleet はこれに
+  答えないが、黙って止まらないようにしてある: `fleet-agent start` と
+  `fleet preflight` が事前に警告し（`~/.claude.json` を読むだけ）、それでも
+  ペインがそこで止まればタスクは `awaiting_orders` になり、workspace trust
+  プロンプト待ちだと通知する。repo で一度 `claude` を起動して承認するか、
+  アタッチして "Yes, I trust this folder" を選べば、プロンプトは自動で配送される。
 - **verify コマンドは Windows ではデフォルトで `cmd.exe` で実行される** ので、
   `verify` コマンドは cmd の構文として正しくなければならない。ただし formation で
   `verify.shell`（`bash` = Git Bash、`pwsh`、`powershell`、`sh`、`cmd`）を指定した

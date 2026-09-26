@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "vendor"))
 from fleet import leader_notifier, mux, prompt_deliverer, prompt_pointer, state  # noqa: E402
 from fleet.adapters import CodexAdapter  # noqa: E402
 from fleet.events import append_event  # noqa: E402
+from tests import _pane_fixtures as pane_fx  # noqa: E402
 from tests._fake_mux import use_fake_mux  # noqa: E402
 
 
@@ -360,6 +361,54 @@ class PromptDelivererTests(unittest.TestCase):
             ["awaiting_orders", "inbox_seen", "prompt_delivered"],
         )
 
+    def test_claude_trust_dialog_is_reported_as_the_trust_prompt(self) -> None:
+        # Issue #327: a fresh project's first claude task stops at the workspace
+        # trust dialog. The gate must say so (and how to clear it), not just
+        # "boot gate".
+        repo = Path(self._tmp.name) / "newproj"
+        project = state.load_project(self.state_dir)
+        project["repo"] = str(repo)
+        state.save_project(self.state_dir, project)
+        panes = iter([pane_fx.CLAUDE_TRUST_DIALOG, 'status\n❯ Try "help"\n'])
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
+            result = self._deliver(agent="claude:opus")
+
+        self.assertEqual(result, 0)
+        gate = self._events()[0]
+        self.assertEqual(gate["type"], "awaiting_orders")
+        self.assertEqual(gate["gate"], "trust")
+        self.assertIn("workspace trust prompt", gate["question"])
+        self.assertIn(f"run `claude` once in {repo}", gate["question"])
+        questions = (self.task_dir / "questions.md").read_text(encoding="utf-8")
+        self.assertIn("workspace trust prompt", questions)
+
+    def test_trust_prompt_notification_names_the_cause(self) -> None:
+        panes = iter([pane_fx.CLAUDE_TRUST_DIALOG, 'status\n❯ Try "help"\n'])
+        with (
+            use_fake_mux(capture=list(panes)) as fake,
+            patch("fleet.prompt_deliverer.notify.send") as send,
+        ):
+            fake.on["send_key"] = self._ack_on_enter
+            self._deliver(agent="claude:opus")
+
+        send.assert_called_once()
+        self.assertIn("trust prompt", send.call_args.kwargs["title"])
+        self.assertEqual(send.call_args.kwargs["level"], "error")
+
+    def test_other_gates_keep_the_generic_boot_gate_message(self) -> None:
+        panes = iter(
+            ["Update available\n› 1. Update now\n  2. Skip this version\n", "›\n"]
+        )
+        with use_fake_mux(capture=list(panes)) as fake:
+            fake.on["send_key"] = self._ack_on_enter
+            self._deliver()
+
+        gate = self._events()[0]
+        self.assertEqual(gate["type"], "awaiting_orders")
+        self.assertNotIn("gate", gate)
+        self.assertIn("boot gate detected", gate["question"])
+
     def test_claude_unnumbered_dialog_is_gate_not_ready(self) -> None:
         # Real "Claude in Chrome extension detected" startup dialog: its
         # un-numbered cursor line matched the bare ready regex, so the pointer
@@ -398,7 +447,8 @@ class PromptDelivererTests(unittest.TestCase):
         events = self._events()
         self.assertEqual([e["type"] for e in events], ["awaiting_orders", "inbox_seen", "prompt_delivered"])
         self.assertEqual(state.load_task(self.state_dir, self.task_id)["status"], "running")
-        self.assertIn("boot gate detected", (self.task_dir / "questions.md").read_text(encoding="utf-8"))
+        # the pane is codex's trust dialog, which the gate now names outright
+        self.assertIn("workspace trust prompt", (self.task_dir / "questions.md").read_text(encoding="utf-8"))
 
     def test_timeout_marks_failed_and_emits_error(self) -> None:
         with use_fake_mux(capture="booting..."):

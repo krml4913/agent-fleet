@@ -33,6 +33,13 @@ class ClaudeAdapter(VendorAdapter):
         r"^\s*[›❯]\s*\d+\.\s*(?:yes|continue|proceed|allow|trust|sign in|log in)\b|"
         r"trust (?:this )?(?:folder|directory|workspace)|do you trust|continue\?)"
     )
+    # "Quick safety check: Is this a project you created or one you trust?" with
+    # "Yes, I trust this folder" / "No, exit" (older builds: "Do you trust the
+    # files in this folder?"). Matched on wording, not option order.
+    trust_gate = re.compile(
+        r"(?i)quick safety check|project you created or one you trust|"
+        r"i trust this (?:folder|directory|workspace)|do you trust the (?:files|contents)"
+    )
 
     @classmethod
     def cli_command(cls, model: str) -> list[str]:
